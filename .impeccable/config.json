@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          "src/a_head.html"
+        ],
+        "createdAt": "2026-11-22T18:56:55.801Z",
+        "reason": "user confirmed: оставить свечение как часть стиля игры"
+      }
+    ]
+  }
+}
