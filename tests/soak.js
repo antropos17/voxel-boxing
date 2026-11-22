@@ -1,0 +1,20 @@
+const { chromium, LAUNCH, THREE, PAGE } = require('./lib');
+const SEED = +process.argv[2] || 1, FR = +process.argv[3] || 6000, CHEAT = process.argv[4] || '{}', OPT = JSON.parse(process.argv[5] || '{}');
+(async () => {
+  const browser = await chromium.launch(LAUNCH);
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', e => errs.push('pageerror: ' + e.message + ' | ' + (e.stack || '').split('\n').slice(1, 4).join(' <- ')));
+  await page.route('**/three.min.js', r => r.fulfill({ path: THREE, contentType: 'application/javascript' }));
+  await page.route('**/fonts.googleapis.com/**', r => r.abort());
+  await page.goto(PAGE);
+  await page.evaluate((c) => localStorage.setItem('vb_cheat', c), CHEAT);
+  await page.reload();
+  await page.waitForFunction(() => !document.getElementById('goStart').disabled, null, { timeout: 60000 });
+  await page.click('#goStart'); await page.waitForTimeout(300);
+  const r = await page.evaluate(([fr, seed, opt]) => __g.soak(fr, seed, opt), [FR, SEED, OPT]);
+  console.log(JSON.stringify(r, null, 0).replace(/\],\[/g, '],\n ['));
+  console.log('pageerrors:', errs.length ? errs.join('\n') : 'none');
+  await browser.close();
+})().catch(e => { console.error('FAIL', e.message.slice(0, 400)); process.exit(1); });

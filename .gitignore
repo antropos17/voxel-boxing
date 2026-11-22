@@ -1,0 +1,4 @@
+node_modules/
+shots/
+dist/test.html
+.DS_Store

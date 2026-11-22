@@ -1,0 +1,35 @@
+const { chromium, LAUNCH, THREE, PAGE } = require('./lib');
+(async () => {
+  const browser = await chromium.launch(LAUNCH);
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', e => errs.push('pageerror: ' + e.message)); page.on('console', m => { if (m.type() === 'error' || /THREE/.test(m.text())) errs.push('console: ' + m.text().slice(0, 400)) });
+  await page.route('**/three.min.js', r => r.fulfill({ path: THREE, contentType: 'application/javascript' }));
+  await page.route('**/fonts.googleapis.com/**', r => r.abort());
+  const t0 = Date.now();
+  await page.goto(PAGE);
+  await page.evaluate(() => localStorage.setItem('vb_cheat', JSON.stringify({ immortal: true, noKD: true, passive: true, god: true, stam: true, thru: true })));
+  await page.reload();
+  const t1 = Date.now();
+  await page.waitForFunction(() => !document.getElementById('goStart').disabled, null, { timeout: 60000 });
+  console.log('load ms', Date.now() - t1);
+  await page.click('#goStart'); await page.waitForTimeout(500);
+  await page.evaluate(() => { __g.G.tipT = 0; });
+  const rep = async (tag) => { const r = await page.evaluate(() => __prof.report()); const info = r._info, fr = r._frames; delete r._info; delete r._frames;
+    const rows = Object.entries(r).sort((a, b) => b[1][0] - a[1][0]).filter(e => e[1][0] > 0.02 || e[1][2] > 3).map(e => e[0] + ' ' + e[1][0] + 'ms/f (n' + e[1][1] + ' max' + e[1][2] + ')').join(' | ');
+    console.log('== ' + tag + ' frames ' + fr + ' ' + JSON.stringify(info) + '\n' + rows); };
+  await page.evaluate(() => __prof.reset()); await page.waitForTimeout(3000); await rep('idle');
+  await page.evaluate(() => __prof.reset());
+  for (let n = 0; n < 14; n++) { const hs = await page.evaluate(() => __g.headScreen()); const d = n % 3 === 2 ? [0, -80] : [n % 2 ? 90 : -90, 0]; const ty = n % 2 ? -30 : 10;
+    await page.mouse.move(hs[0] - d[0] / 2, hs[1] + ty - d[1] / 2); await page.mouse.down(); await page.mouse.move(hs[0] + d[0] / 2, hs[1] + ty + d[1] / 2, { steps: 2 }); await page.mouse.up(); await page.waitForTimeout(350); }
+  await rep('fight 14 swipes');
+  const act = async (a, w) => { await page.click('#admBtn'); await page.click(`#adm [data-a="${a}"]`); await page.waitForTimeout(w || 400); };
+  await act('flay', 600); await act('burst', 600); await act('gut', 600); await act('jawoff', 600); await act('eye', 600); await act('teeth', 400); await act('ribs', 400);
+  await page.waitForTimeout(1500);
+  await page.evaluate(() => __prof.reset()); await page.waitForTimeout(3000); await rep('heavy gore idle');
+  await page.evaluate(() => { localStorage.setItem('vb_cheat', '{}'); });
+  await act('kd', 300); await page.evaluate(() => __prof.reset()); await page.waitForTimeout(3000); await rep('ragdoll');
+  console.log('errors:', errs.length ? errs.join('\n') : 'none');
+  await browser.close();
+})().catch(e => { console.error('FAIL', e.message.slice(0, 300)); process.exit(1); });
