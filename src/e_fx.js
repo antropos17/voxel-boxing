@@ -58,7 +58,7 @@ var shadow=(function(){
 })();
 
 /* ---------- cubes: blood, crumbs, sweat, teeth and small chunks in one instanced draw ---------- */
-var CN=4300,PN=3300,BN=40,BV=28;
+var CN=4300,PN=3300,BN=40,BV=28,NEAR0=.2,NEAR1=.6,STRMAX=.026;
 var cgeo=new T.InstancedBufferGeometry();
 (function(){var b=new T.BoxGeometry(1,1,1);cgeo.setIndex(b.index);cgeo.setAttribute('position',b.attributes.position);cgeo.setAttribute('normal',b.attributes.normal)})();
 function iattr(n,sz,u8){var a=new T.InstancedBufferAttribute(u8?new Uint8Array(n*sz):new Float32Array(n*sz),sz,!!u8);a.setUsage(T.DynamicDrawUsage);return a}
@@ -137,7 +137,7 @@ function drawRopes(P,Q,S,C,j){
 }
 function clearRopes(){ROPES.length=0}
 function updCubes(dt){
-  var P=aIP.array,Q=aIQ.array,S=aIS.array,C=aIC.array,j=0,i,a,q,s,sp,k,b,wl,sc,ux,uy,uz,qw,l;
+  var P=aIP.array,Q=aIQ.array,S=aIS.array,C=aIC.array,j=0,i,a,q,s,sp,k,b,wl,sc,ux,uy,uz,qw,l,cd,cpx=camera.position.x,cpy=camera.position.y,cpz=camera.position.z;
   for(i=0;i<PN;i++){
     if(pL[i]<=0)continue;
     pL[i]-=dt;if(pL[i]<=0)continue;a=i*3;q=i*4;
@@ -154,12 +154,16 @@ function updCubes(dt){
       }
     }
     s=pS[i]*(pL[i]<.3?pL[i]/.3:1);
+    /* near the lens a drop would cover the fight: shrink it away between NEAR1 and NEAR0 (the foe's face is never closer than ~0.7 m) */
+    cd=Math.sqrt((pP[a]-cpx)*(pP[a]-cpx)+(pP[a+1]-cpy)*(pP[a+1]-cpy)+(pP[a+2]-cpz)*(pP[a+2]-cpz));
+    if(cd<NEAR1){if(cd<=NEAR0)continue;s*=(cd-NEAR0)/(NEAR1-NEAR0)}
     P[j*3]=pP[a];P[j*3+1]=pP[a+1];P[j*3+2]=pP[a+2];
     if(pK[i]===0&&!pR[i]){
       sp=Math.sqrt(pV[a]*pV[a]+pV[a+1]*pV[a+1]+pV[a+2]*pV[a+2]);
       if(sp>.3){ux=pV[a]/sp;uy=pV[a+1]/sp;uz=pV[a+2]/sp;qw=1+uz;
         if(qw<1e-4){Q[j*4]=1;Q[j*4+1]=0;Q[j*4+2]=0;Q[j*4+3]=0}else{l=Math.sqrt(uy*uy+ux*ux+qw*qw);Q[j*4]=-uy/l;Q[j*4+1]=ux/l;Q[j*4+2]=0;Q[j*4+3]=qw/l}
-        S[j*3]=s;S[j*3+1]=s;S[j*3+2]=s*(1+Math.min(4.5,sp*0.011/s))}
+        /* a streak: length capped on screen, and the longer it is the thinner it gets */
+        l=Math.max(s,Math.min(s*(1+Math.min(4.5,sp*0.011/s)),cd*STRMAX));S[j*3+2]=l;S[j*3]=S[j*3+1]=s*Math.sqrt(s/l)}
       else{Q[j*4]=0;Q[j*4+1]=0;Q[j*4+2]=0;Q[j*4+3]=1;S[j*3]=S[j*3+1]=S[j*3+2]=s}
     }else{Q[j*4]=pQ[q];Q[j*4+1]=pQ[q+1];Q[j*4+2]=pQ[q+2];Q[j*4+3]=pQ[q+3];S[j*3]=S[j*3+1]=S[j*3+2]=s}
     C[j*4]=pC[q];C[j*4+1]=pC[q+1];C[j*4+2]=pC[q+2];C[j*4+3]=pC[q+3];j++;
@@ -172,7 +176,7 @@ function updCubes(dt){
       if(b.p.y<b.r){b.p.y=b.r;stain(b.p.x,b.p.z,b.r*.7);
         if(Math.abs(b.v.y)<.8){b.rest=true;b.v.set(0,0,0);b.w.set(0,0,0)}else{b.v.y*=-.32;b.v.x*=.6;b.v.z*=.6;b.w.multiplyScalar(.5)}}
     }
-    sc=b.life<.4?b.life/.4:1;
+    sc=b.life<.4?b.life/.4:1;cd=b.p.distanceTo(camera.position);if(cd<NEAR1){if(cd<=NEAR0)continue;sc*=(cd-NEAR0)/(NEAR1-NEAR0)}
     for(k=0;k<b.n&&j<CN;k++){
       _bp.set(b.off[k*3],b.off[k*3+1],b.off[k*3+2]).multiplyScalar(sc).applyQuaternion(b.q).add(b.p);
       P[j*3]=_bp.x;P[j*3+1]=_bp.y;P[j*3+2]=_bp.z;Q[j*4]=b.q.x;Q[j*4+1]=b.q.y;Q[j*4+2]=b.q.z;Q[j*4+3]=b.q.w;S[j*3]=S[j*3+1]=S[j*3+2]=b.s*sc;

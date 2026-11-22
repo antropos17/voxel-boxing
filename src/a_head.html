@@ -59,10 +59,10 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
 #chips span{font:600 11px/1 var(--body);background:var(--bone);color:#201820;padding:3px 5px}
 #chips span.bad{background:var(--blood);color:#fff}
 
-.pop{position:absolute;transform:translate(-50%,-50%);font:700 18px/1 var(--display);color:var(--ink);text-shadow:2px 2px 0 #000;white-space:nowrap;text-transform:uppercase;animation:pop .85s ease-out forwards}
+.pop{position:absolute;transform:translate(-50%,-50%);font:700 18px/1 var(--display);color:var(--ink);text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 -2px 0 #000,0 2px 0 #000,-2px 0 0 #000,2px 0 0 #000,2px 3px 0 #000;background:rgba(14,8,12,.72);padding:.18em .32em .12em;border-radius:3px;white-space:nowrap;text-transform:uppercase;animation:pop .85s ease-out forwards}
 .pop.gold{color:var(--gold);font-size:22px}
-.pop.warn{color:var(--gold);font-size:44px}
-@keyframes pop{0%{opacity:0;margin-top:8px}15%{opacity:1}100%{opacity:0;margin-top:-46px}}
+.pop.warn{color:var(--gold);font-size:44px;bottom:auto;width:auto}
+@keyframes pop{0%{opacity:0;margin-top:8px}12%{opacity:1}65%{opacity:1}100%{opacity:0;margin-top:-46px}}
 #banner{position:absolute;left:16px;right:16px;top:19%;text-align:center;font:700 30px/1.05 var(--display);text-transform:uppercase;color:var(--bone);text-shadow:3px 3px 0 var(--blood),-1px -1px 0 #000;pointer-events:none;opacity:0;text-wrap:balance}
 #banner.show{animation:ban 1.45s ease-out forwards}
 @keyframes ban{0%{opacity:0;transform:scale(1.7)}12%{opacity:1;transform:scale(1)}75%{opacity:1}100%{opacity:0;transform:scale(.96)}}
@@ -91,7 +91,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
 @keyframes rl{0%{opacity:0;transform:translate(-50%,-70%) scale(1.35)}15%{opacity:1;transform:translate(-50%,-100%) scale(1)}100%{opacity:0;transform:translate(-50%,-150%)}}
 .pop.pj{font-size:15px;color:var(--bone)}
 .pop.mega{color:#ff9a3a;font-size:32px}
-.pop.miss{color:var(--dim);font-size:16px}
+.pop.miss{color:#cfc8d8;font-size:16px}
 .warn{position:absolute;top:0;bottom:0;width:30%;opacity:0}
 #warnL{left:0;background:linear-gradient(90deg,rgba(225,32,22,.8),transparent)}
 #warnR{right:0;background:linear-gradient(270deg,rgba(225,32,22,.8),transparent)}
