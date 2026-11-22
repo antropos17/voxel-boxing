@@ -72,48 +72,65 @@ VBody.prototype.colorOf=function(i,o){
 };
 /* deformation at a grid corner from the 8 cells that share it: fracture offsets (averaged) and swelling (max, along the surface normal) */
 VBody.prototype.corner=function(X,Y,Z){
-  var W=this.W,H=this.H,D=this.D,type=this.type,sw=this.sw,dx=this.dx,dy=this.dy,dz=this.dz,nx=this.nx,ny=this.ny,nz=this.nz;
-  var cnt=0,ox=0,oy=0,oz=0,mx=0,ax=0,ay=0,az=0,xx,yy,zz,j,w;
-  for(zz=Z-1;zz<=Z;zz++){if(zz<0||zz>=D)continue;
-    for(yy=Y-1;yy<=Y;yy++){if(yy<0||yy>=H)continue;
-      for(xx=X-1;xx<=X;xx++){if(xx<0||xx>=W)continue;
-        j=xx+W*(yy+H*zz);if(!type[j])continue;
-        cnt++;ox+=dx[j];oy+=dy[j];oz+=dz[j];
-        w=sw[j];if(w){if(w>mx)mx=w;ax+=nx[j]*w;ay+=ny[j]*w;az+=nz[j]*w}
-  }}}
+  var W=this.W,H=this.H,sw=this.sw,dx=this.dx,dy=this.dy,dz=this.dz,nx=this.nx,ny=this.ny,nz=this.nz;
+  var cnt=0,ox=0,oy=0,oz=0,mx=0,ax=0,ay=0,az=0,xx,yy,zz,j,w,k=0,base=(X-1-this.cx0)+VPW*(Y-1-this.cy0)+VPWH*(Z-1-this.cz0);
+  /* the 8 cells sharing the corner, in the same order as before; VPE is 0 outside the grid */
+  for(zz=Z-1;zz<=Z;zz++)for(yy=Y-1;yy<=Y;yy++)for(xx=X-1;xx<=X;xx++,k++){
+    if(!VPE[base+CRO[k]])continue;
+    j=xx+W*(yy+H*zz);
+    cnt++;ox+=dx[j];oy+=dy[j];oz+=dz[j];
+    w=sw[j];if(w){if(w>mx)mx=w;ax+=nx[j]*w;ay+=ny[j]*w;az+=nz[j]*w}
+  }
   var f=cnt?this.s/(16*cnt):0;CD[0]=ox*f;CD[1]=oy*f;CD[2]=oz*f;CD[3]=mx*0.01;
   var l=Math.sqrt(ax*ax+ay*ay+az*az)||1;CD[4]=ax/l;CD[5]=ay/l;CD[6]=az/l;
 };
-/* smooth outward normal at a grid corner from the occupancy of the surrounding 4x4x4 cells; blended into the face normal to soften terracing */
+/* smooth outward normal at a grid corner from the occupancy of the surrounding 4x4x4 cells; blended into the face normal to soften terracing.
+   Reads VPE, the padded copy of the chunk's cell types; the 64 weights (offset / distance^2) are a fixed table, summed in the same order as before */
+var VPE=new Uint8Array(68*68*68),VPW=0,VPWH=0,SNX=new Float64Array(64),SNY=new Float64Array(64),SNZ=new Float64Array(64),SNO=new Int32Array(64),CRO=new Int32Array(8);
+(function(){var a,b,cc,i=0,ox,oy,oz,w;for(cc=-2;cc<2;cc++){oz=cc+0.5;for(b=-2;b<2;b++){oy=b+0.5;for(a=-2;a<2;a++){ox=a+0.5;w=1/(ox*ox+oy*oy+oz*oz);SNX[i]=ox*w;SNY[i]=oy*w;SNZ[i]=oz*w;i++}}}})();
 VBody.prototype.snorm=function(X,Y,Z,c){
   var cs=this.cs+1,key=(X-c.x0)+cs*((Y-c.y0)+cs*(Z-c.z0)),o=key*3;
   if(NCS[key]===NCT){SN[0]=NCN[o];SN[1]=NCN[o+1];SN[2]=NCN[o+2];return}
-  var W=this.W,H=this.H,D=this.D,type=this.type,gx=0,gy=0,gz=0,a,b,cc,xx,yy,zz,ox,oy,oz,w;
-  for(cc=-2;cc<2;cc++){zz=Z+cc;oz=cc+0.5;for(b=-2;b<2;b++){yy=Y+b;oy=b+0.5;for(a=-2;a<2;a++){xx=X+a;ox=a+0.5;
-    if(xx<0||yy<0||zz<0||xx>=W||yy>=H||zz>=D||!type[xx+W*(yy+H*zz)]){w=1/(ox*ox+oy*oy+oz*oz);gx+=ox*w;gy+=oy*w;gz+=oz*w}}}}
+  var base=(X-c.x0)+VPW*(Y-c.y0)+VPWH*(Z-c.z0),gx=0,gy=0,gz=0,i;
+  for(i=0;i<64;i++)if(!VPE[base+SNO[i]]){gx+=SNX[i];gy+=SNY[i];gz+=SNZ[i]}
   var l=Math.sqrt(gx*gx+gy*gy+gz*gz);if(l>1e-6){gx/=l;gy/=l;gz/=l}else{gx=gy=gz=0}
   NCN[o]=SN[0]=gx;NCN[o+1]=SN[1]=gy;NCN[o+2]=SN[2]=gz;NCS[key]=NCT;
+};
+/* VPE: the cell types of the chunk plus a 2-cell margin (everything the mesher looks at), 0 outside the grid */
+VBody.prototype.padChunk=function(c){
+  var W=this.W,H=this.H,D=this.D,type=this.type,x0=c.x0-2,y0=c.y0-2,z0=c.z0-2,PW=c.x1-c.x0+4,PH=c.y1-c.y0+4,PD=c.z1-c.z0+4,p=0,x,y,z,i,xa,xb,xe=x0+PW;
+  xa=Math.max(0,x0);xb=Math.min(W,xe);
+  for(z=z0;z<z0+PD;z++)for(y=y0;y<y0+PH;y++){
+    if(z<0||y<0||z>=D||y>=H){VPE.fill(0,p,p+PW);p+=PW;continue}
+    i=W*(y+H*z);for(x=x0;x<xa;x++)VPE[p++]=0;for(;x<xb;x++)VPE[p++]=type[i+x];for(;x<xe;x++)VPE[p++]=0}
+  VPW=PW;VPWH=PW*PH;
+  var a,b,cc,k=0;for(cc=0;cc<4;cc++)for(b=0;b<4;b++)for(a=0;a<4;a++)SNO[k++]=a+PW*b+VPWH*cc;
+  k=0;for(cc=0;cc<2;cc++)for(b=0;b<2;b++)for(a=0;a<2;a++)CRO[k++]=a+PW*b+VPWH*cc;
 };
 VBody.prototype.meshCh=function(c){
   var W=this.W,H=this.H,D=this.D,type=this.type,fl=this.fl,s=this.s,OX=this.ox,OY=this.oy,OZ=this.oz,dyn=this.dyn,def=this.anyDef&&dyn,jf=this.jawFn;
   var aol=this.aol,q=0,x,y,z,i,t,d,dd,nX,nY,nZ,uX,uY,uZ,vX,vY,vZ,fx,fy,fz,fi,k,a,b,du,dv,gx,gy,gz,bX,bY,bZ,X,Y,Z,o,o4,fli,hc,s1,s2,s3,ao,a0=0,a1=0,a2=0,a3=0,px,py,pz,mx,my,mz,ml,jw,g=GN,eyef=0,skf=0,jhard=0,sm=this.sm,k2;
-  NCT++;
+  NCT++;this.padChunk(c);this.cx0=c.x0-2;this.cy0=c.y0-2;this.cz0=c.z0-2;
+  var PW=VPW,PWH=VPWH,p,fp,ou,ov,hinge;
   for(z=c.z0;z<c.z1;z++)for(y=c.y0;y<c.y1;y++){
-    i=c.x0+W*(y+H*z);
-    for(x=c.x0;x<c.x1;x++,i++){
+    i=c.x0+W*(y+H*z);p=2+PW*(y-c.y0+2)+PWH*(z-c.z0+2);
+    for(x=c.x0;x<c.x1;x++,i++,p++){
       t=type[i];if(!t)continue;
-      fli=fl[i];hc=false;
+      fli=fl[i];hinge=dyn&&(fli&F_JAWH);
+      /* buried cell: all six neighbours solid, no faces (a jaw hinge cell can still show a face between upper and lower jaw) */
+      if(!hinge&&VPE[p-1]&&VPE[p+1]&&VPE[p-PW]&&VPE[p+PW]&&VPE[p-PWH]&&VPE[p+PWH])continue;
+      hc=false;
       for(d=0;d<6;d++){
-        dd=DIRS[d];nX=dd[0];nY=dd[1];nZ=dd[2];fx=x+nX;fy=y+nY;fz=z+nZ;
-        if(fx>=0&&fy>=0&&fz>=0&&fx<W&&fy<H&&fz<D){fi=fx+W*(fy+H*fz);if(type[fi]&&!(dyn&&(fli&F_JAWH)&&(fl[fi]&F_JAWH)&&((fli^fl[fi])&F_JAWL)))continue}
+        dd=DIRS[d];nX=dd[0];nY=dd[1];nZ=dd[2];fx=x+nX;fy=y+nY;fz=z+nZ;fp=p+nX+PW*nY+PWH*nZ;
+        if(VPE[fp]){if(!hinge)continue;fi=fx+W*(fy+H*fz);if(!((fl[fi]&F_JAWH)&&((fli^fl[fi])&F_JAWL)))continue}
         if(q>=SQN)scratch(q+1);
         if(!hc){this.colorOf(i,CC);hc=true;
           if(dyn){eyef=(fli&F_EYE)?255:t===GUM?128:0;skf=(fli&F_SKIN)?255:0;jhard=(fli&F_JAWH)?((fli&F_JAWL)?255:0):-1}}
         uX=dd[3];uY=dd[4];uZ=dd[5];vX=dd[6];vY=dd[7];vZ=dd[8];
+        ou=uX+PW*uY+PWH*uZ;ov=vX+PW*vY+PWH*vZ;
         for(dv=-1;dv<=1;dv++)for(du=-1;du<=1;du++){
           if(!du&&!dv)continue;
-          gx=fx+du*uX+dv*vX;gy=fy+du*uY+dv*vY;gz=fz+du*uZ+dv*vZ;
-          g[(du+1)+(dv+1)*3]=(gx>=0&&gy>=0&&gz>=0&&gx<W&&gy<H&&gz<D&&type[gx+W*(gy+H*gz)])?1:0;
+          g[(du+1)+(dv+1)*3]=VPE[fp+du*ou+dv*ov]?1:0;
         }
         bX=x+(nX>0?1:0);bY=y+(nY>0?1:0);bZ=z+(nZ>0?1:0);
         o=q*12;o4=q*16;
