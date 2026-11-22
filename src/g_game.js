@@ -192,7 +192,7 @@ function fracture(zone,dir,C){
   if(out.rem.length)spill(h,out.rem,false,FD,true);
   F.hp-=6;F.slowMul*=(zone==='ribL'||zone==='ribR')?1.15:1.06;
   hitStop(.09,.5);if(!REDUCED){G.shake=Math.max(G.shake,.06);G.fovK=Math.max(G.fovK,1.3)}
-  sfx.crack();vib([40,30,110]);banner(Zn.b[lvl-1]);
+  sfx.crack(zone);vib([40,30,110]);banner(Zn.b[lvl-1]);
   if(lvl===1)G.stats.fract.push(Zn.n.replace(/[◀▶ ]+/g,' ').trim());
   chip(zone,Zn.n+(lvl>1?' ×2':''),lvl>1);
 }
@@ -212,7 +212,7 @@ function detachJaw(FDv,mode,keep){mode=mode||'free';
   F.jawOff=true;F.jo=0;F.jov=0;
   RIG.headG.getWorldPosition(_hp);_hp.y-=0.05;_hp.z+=0.06;bloodBurst(_hp,200,FDv.x,0.4,1,1.4);
   for(k=0;k<3;k++)screenSplat(2);
-  sfx.tear();vib([80,40,160]);
+  sfx.jawOff();vib([80,40,160]);
 }
 
 /* ---------- hits ---------- */
@@ -284,9 +284,9 @@ function hitFoe(res,g){
   if(mg)megaHitFx(g,p,dmg);
   else popWorld((reach<0.82?'Далеко · ':'')+(mult>1.5?'Контра ':mult>1?'Встречный ':'')+PNAME[g.type]+' −'+Math.round(dmg),_pw2,power||mult>1?'gold':'pj');
   impactFx(p,mg?2.6:power?Math.min(1.6,g.pw*mult):.3);
-  if(power){hitStop(g.fl?.03:.08,g.fl?0:.2+.12*(g.pw*mult-1));if(!REDUCED){G.shake=Math.max(G.shake,.045*g.pw*mult);G.fovK=Math.max(G.fovK,.9*g.pw*mult)}sfx.heavy(nb>0);vib(45)}
-  else{hitStop(.03,0);if(!REDUCED)G.shake=Math.max(G.shake,.012);sfx.jab();vib(12)}
-  G.combo=G.comboT>0?G.combo+1:1;G.comboT=1.6;G.stats.maxCombo=Math.max(G.stats.maxCombo||0,G.combo);
+  if(power){hitStop(g.fl?.03:.08,g.fl?0:.2+.12*(g.pw*mult-1));if(!REDUCED){G.shake=Math.max(G.shake,.045*g.pw*mult);G.fovK=Math.max(G.fovK,.9*g.pw*mult)}sfx.heavy(nb>0,g.pw*mult,head,g.fl?'flurry':g.type);vib(45)}
+  else{hitStop(.03,0);if(!REDUCED)G.shake=Math.max(G.shake,.012);sfx.jab(head,g.fl);vib(12)}
+  G.combo=G.comboT>0?G.combo+1:1;G.comboT=1.6;G.stats.maxCombo=Math.max(G.stats.maxCombo||0,G.combo);if(G.combo>=3&&G.combo%2)sfx.combo(G.combo);
   if(!mg&&!g.fl)megaAdd((power?11:5)*(mult>1?1.5:1)+Math.min(6,G.combo-1));
   F.stun+=E*(STUN[zone]||(head?1:0.5));
   if(g.fl&&F.st!=='down'&&F.st!=='rise')setF('stagger',.35);
@@ -321,7 +321,7 @@ function crush(zone,dir,C,lvl){
   RIG.headG.getWorldPosition(_gv);if(!head){t.group.updateMatrixWorld();_gv.set(C.x*.01,C.y*.01,C.z*.01).applyMatrix4(t.group.matrixWorld)}
   bloodBurst(_gv,40+lvl*10,FD.x,.8,1,1.2);
   F.hp-=4+lvl;hitStop(.08,.4);if(!REDUCED)G.shake=Math.max(G.shake,.06);
-  sfx.crack();sfx.squelch();vib([40,30,90]);banner(Zn.b[2]+(lvl>3?' ×'+(lvl-2):''));chip(zone,Zn.n+' ×'+lvl,true);
+  sfx.crack(zone);sfx.squelch();vib([40,30,90]);banner(Zn.b[2]+(lvl>3?' ×'+(lvl-2):''));chip(zone,Zn.n+' ×'+lvl,true);
 }
 /* hit-stop and slow motion: blows that follow each other closely get less of both, so a flurry on a wrecked face never turns the fight into a slideshow */
 var CINET=-9,STOPT=-9,STOPF=-1,STOPQ=1;
@@ -332,12 +332,12 @@ function hitStop(f,s,full){
 }
 function fall(){setF('down');rdStart();F.fa=.08;F.fw=1.5+Math.min(2.5,F.lastJ*.3);F.fz=Math.abs(F.lastFx)>.6?(F.lastFx>0?-1:1):0;F.downHit=false;F.count=0;F.countT=0;F.riseAt=4+((Math.random()*3)|0)}
 function knockdown(text){if(CHEAT.noKD){F.stun=0;F.liver=0;if(F.st!=='down'&&F.st!=='rise')setF('stagger',.7);banner(text==='Нокдаун'?'Устоял':text);return}
-  F.kd++;G.stats.kd++;F.stun=0;fall();banner(text);hitStop(0,.9,true);vib([50,40,90])}
+  F.kd++;G.stats.kd++;F.stun=0;fall();banner(text);sfx.crowd('kd');hitStop(0,.9,true);vib([50,40,90])}
 function knockout(tko,text){if(CHEAT.immortal){F.hp=Math.max(1,F.hp);if(!CHEAT.noKD&&F.st!=='down'&&F.st!=='rise'){F.stun=0;F.kd++;G.stats.kd++;fall();banner(text||'Нокдаун');hitStop(0,.9,true)}else if(text)banner(text);return}
-  F.hp=0;G.mode='ko';G.endT=0;if(F.st!=='down')fall();hitStop(0,1.2,true);vib([60,40,120]);F.koText=text||(tko?'Технический нокаут':'Нокаут');banner(F.koText)}
+  F.hp=0;G.mode='ko';G.endT=0;if(F.st!=='down')fall();hitStop(0,1.2,true);vib([60,40,120]);F.koText=text||(tko?'Технический нокаут':'Нокаут');banner(F.koText);sfx.crowd('ko')}
 function foeSmile(a,d){if(!F||F.st==='down'||F.st==='rise')return;if(F.smTime>0&&F.smA>a)return;F.smA=a;F.smTime=d}
-function playerHurt(d,hook,hand){foeSmile(1,1.3);
-  if(CHEAT.god)d=0;P.hp-=d;P.kick=1;sfx.hurt();if(!P.megaReady)P.mega=Math.max(0,P.mega-18);P.flurry=null;vib(70);P.cv.x+=5.5;P.cv.y+=hook?(hand||1)*7:rnd(-2,2);P.cv.z+=rnd(-3,3);
+function playerHurt(d,hook,hand){foeSmile(1,1.3);var dk=d/(F.dmg||1);
+  if(CHEAT.god)d=0;P.hp-=d;P.kick=1;sfx.hurt(hook,dk);if(!P.megaReady)P.mega=Math.max(0,P.mega-18);P.flurry=null;vib(70);P.cv.x+=5.5;P.cv.y+=hook?(hand||1)*7:rnd(-2,2);P.cv.z+=rnd(-3,3);
   if(!REDUCED){G.shake=Math.max(G.shake,.06);retrig($('flash'),'hit')}
   screenSplat(hook?4:2+(P.hp<50?2:0));G.combo=0;
   if(P.hp<=0){P.hp=0;G.mode='lost';G.endT=0;P.block=false;sfx.thud()}
@@ -395,7 +395,7 @@ function foeAI(dt){
         if(P.dodge>.04&&P.dodgeDir===-F.side){setF('open',.95);G.shake=0;_hp.copy(F.gw[0]).add(F.gw[1]).multiplyScalar(.5);_hp.y+=.2;popWorld('Мимо! Бей',_hp,'gold')}
         else if(P.dodge>.04){var hk=F.kind==='hook';playerHurt(F.dmg*(hk?1.25:.5),hk,F.hand);_hp.copy(F.gw[F.hand<0?0:1]);_hp.y+=.1;popWorld(hk?'Под хук':'Вскользь',_hp,'warn');setF('recover',rc)}
         else if(P.block){P.st-=F.sty.bs;
-          if(CHEAT.stam)P.st=Math.max(P.st,0);if(P.st<0){P.st=0;playerHurt(F.dmg*.8,false,F.hand);popAt('Блок пробит',canvas.clientWidth/2,canvas.clientHeight*.6)}
+          if(CHEAT.stam)P.st=Math.max(P.st,0);if(P.st<0){P.st=0;sfx.guardBreak();playerHurt(F.dmg*.8,false,F.hand);popAt('Блок пробит',canvas.clientWidth/2,canvas.clientHeight*.6)}
           else{if(!CHEAT.god)P.hp-=F.dmg*F.sty.bc;sfx.block();P.kick=.4;P.bkv+=2.6;P.gl[0].sqv+=7;P.gl[1].sqv+=7;F.glv[F.hand<0?0:1].z-=3;P.cv.x+=1.6;if(!REDUCED)G.shake=Math.max(G.shake,.02);if(P.hp<=0){P.hp=0;G.mode='lost';G.endT=0;P.block=false;sfx.thud()}}
           setF('recover',rc*.83)}
         else{playerHurt(F.dmg*(F.kind==='hook'?1.25:1),F.kind==='hook',F.hand);if(F.early){_hp.copy(F.gw[F.hand<0?0:1]);_hp.y+=.1;popWorld('Рано',_hp,'warn')}setF('recover',rc)}
@@ -404,8 +404,8 @@ function foeAI(dt){
     case'open':if(F.t>F.dur){setF('idle');F.next=rnd(.3,.7)*F.pace}break;
     case'stagger':if(F.t>F.dur){setF('idle');F.next=rnd(.35,.9)*F.pace*gr}break;
     case'down':
-      if(rdSettled()){F.countT+=dt;if(F.countT>=.8){F.countT=0;F.count++;popAt(String(F.count),canvas.clientWidth/2,canvas.clientHeight*.3,'warn');sfx.tick();if(F.count>=F.riseAt){setF('rise',1.9);rdRiseStart()}}}break;
-    case'rise':if(F.t>F.dur){if(RD.on)rdEnd();F.fa=0;F.fw=0;setF('idle');F.next=1.1;F.groggy=3.5;foeSmile(1,1.9)}break;
+      if(rdSettled()){F.countT+=dt;if(F.countT>=.8){F.countT=0;F.count++;popAt(String(F.count),canvas.clientWidth/2,canvas.clientHeight*.3,'warn');sfx.count();if(F.count===2)sfx.cough();if(F.count>=F.riseAt){setF('rise',1.9);rdRiseStart()}}}break;
+    case'rise':if(F.t>F.dur){if(RD.on)rdEnd();F.fa=0;F.fw=0;setF('idle');F.next=1.1;F.groggy=3.5;foeSmile(1,1.9);sfx.breath()}break;
   }
 }
 /* his gloves are solid: kept out of his head (and the cuff out of his chin), off his chest and apart from each other.
@@ -598,7 +598,7 @@ function resolvePunch(g){
   if(res.kind==='none'&&(g.type!=='jab'||g.mega||g.fl))res=swipeAim(g.sx,g.sy,g.dx,g.dy,g.mega).r;
   var k=g.mega?2:1,s=g.side;
   if(g.type==='hook'){P.cv.y+=s*1.6*k;P.cv.z+=s*1.0*k}else if(g.type==='upper')P.cv.x+=2.2*k;else if(g.type==='over')P.cv.x-=2.6*k;else P.cv.x+=.7;
-  if(res.kind==='none'){sfx.whoosh();G.combo=0;if(Math.random()<.6)foeSmile(.85,.9);popAt('Мимо',g.sx,g.sy-30,'miss');if(!g.fl&&!g.mega)foeCounter();return}
+  if(res.kind==='none'){sfx.miss();G.combo=0;if(Math.random()<.6)foeSmile(.85,.9);popAt('Мимо',g.sx,g.sy-30,'miss');if(!g.fl&&!g.mega)foeCounter();return}
   g.target.copy(res.point).addScaledVector(RAY.ray.direction,-.07);
   /* contact: the glove stays on what it hit for a moment and rides along with it, then springs back */
   var hb=res.kind==='glove'?FARM[res.k].gl.group:res.v?res.v.group:null,pw=g.type!=='jab'||g.mega;
@@ -670,7 +670,7 @@ var _bcol=new T.Color(150,16,14);
 function tintGlove(v,c,amt){for(var i=0;i<v.n;i++){if(!v.type[i]||v.fl[i]===1)continue;var n=0.92+0.12*hash1(i),bl=hash1(i*3+1)<amt*1.2;
   v.rgb[i*3]=clamp((bl?140:c.r)*n,0,255);v.rgb[i*3+1]=clamp((bl?14:c.g)*n,0,255);v.rgb[i*3+2]=clamp((bl?14:c.b)*n,0,255);v.wet[i]=bl?220:56}
   v.allCol()}
-function dodge(dir){if(G.mode!=='fight'||P.dodge>0||P.dodgeCd>0)return;if(F&&F.st==='windup'){if(F.feint)F.baited=true;else if(dir===-F.side)F.early=true}P.dodge=DODGE;P.dodgeDir=dir;P.dodgeCd=DODGE+.28;P.st=Math.max(0,P.st-8);sfx.whoosh()}
+function dodge(dir){if(G.mode!=='fight'||P.dodge>0||P.dodgeCd>0)return;if(F&&F.st==='windup'){if(F.feint)F.baited=true;else if(dir===-F.side)F.early=true}P.dodge=DODGE;P.dodgeDir=dir;P.dodgeCd=DODGE+.28;P.st=Math.max(0,P.st-8);sfx.dodge()}
 
 /* ---------- camera ---------- */
 var CAM0=new T.Vector3(0,1.6,0),LOOK0=new T.Vector3(0,1.5,-0.8),_lk=new T.Vector3(),BASEFOV=50,fovNow=0;
@@ -730,8 +730,8 @@ function beginFight(next){
   $('start').hidden=true;$('end').hidden=true;$('game').classList.remove('sheeted');$('bB').classList.remove('on');
   sfx.bell(1);
 }
-$('goStart').addEventListener('click',function(){audioInit();startFight(false)});
-$('goNext').addEventListener('click',function(){audioInit();startFight(G.mode==='won')});
+$('goStart').addEventListener('click',function(){audioInit();sfx.ui();startFight(false)});
+$('goNext').addEventListener('click',function(){audioInit();sfx.ui();startFight(G.mode==='won')});
 
 /* ---------- input ---------- */
 var touches={},SWIPE=26;
@@ -829,8 +829,8 @@ function step(now){
     P.st=Math.min(100,P.st+(P.block?9:19)*sdt);if(P.dodge>0)P.dodge=Math.max(0,P.dodge-sdt);if(P.dodgeCd>0)P.dodgeCd-=sdt;if(G.comboT>0)G.comboT-=sdt;
     P.megaIdle+=sdt;if(!P.megaReady&&P.megaIdle>2.5)P.mega=Math.max(0,P.mega-4*sdt);
     foeAI(sdt);
-  }else if(G.mode==='ko'){F.t+=sdt;G.endT+=dt;if(G.endT>3.2)showEnd(true)}
-  else if(G.mode==='lost'){G.endT+=dt;G.fall=Math.min(1,G.fall+dt*1.6);if(G.endT>1.5)showEnd(false)}
+  }else if(G.mode==='ko'){F.t+=sdt;G.endT+=dt;if(G.endT>3.2){sfx.win();showEnd(true)}}
+  else if(G.mode==='lost'){G.endT+=dt;G.fall=Math.min(1,G.fall+dt*1.6);if(G.endT>1.5){sfx.lose();sfx.crowd('boo');showEnd(false)}}
   else if(G.mode==='won'||G.mode==='dead'){F.t+=sdt}
   MESHT=0;if(ISLQ.v&&--ISLQ.t<=0){var iv=ISLQ.v;ISLQ.v=null;checkIslands(iv,ISLQ.d)}
   updBleed(sdt);matTick(sdt);

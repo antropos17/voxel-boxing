@@ -15,6 +15,7 @@ window.__g.parmUp=function(on){PARM.forEach(function(a){a.up.group.visible=on})}
 window.__g.dbg=function(){var a=new T.Vector3();return{pieces:pieces.map(function(p){return [p.g.position.toArray().map(function(v){return +v.toFixed(3)}),p.teth?p.teth.a(a).toArray().map(function(v){return +v.toFixed(3)}):null,p.rest]}),
   ropes:ROPES.map(function(r){return [r.n,r.rigid,[r.p[0],r.p[1],r.p[2]].map(function(v){return +v.toFixed(3)}),[r.p[r.n*3-3],r.p[r.n*3-2],r.p[r.n*3-1]].map(function(v){return +v.toFixed(3)})]})}};
 window.__g.T=T;
+window.__g.snd={SND:SND,sfx:sfx,play:snd,hall:sndHall,MAX:SNDMAX,ac:function(){return AC}};
 window.__g.neckDbg=function(){var v=NECK,c=0,red=0;for(var i=0;i<v.n;i++){if(!v.type[i])continue;c++;if(v.rgb[i*3+1]<40)red++}return [c,red,v.chunks.length,v.chunks.map(function(k){return [!!k.geo,k.cd,k.gd]})]};
 window.__g.RD=RD;window.__g.rdP=function(){var o=[];for(var i=0;i<RN;i++)o.push([+RD.p[i*3].toFixed(2),+RD.p[i*3+1].toFixed(2),+RD.p[i*3+2].toFixed(2)]);return o};
 window.__g.farm=function(on){FARM.forEach(function(a){a.up.group.visible=a.fo.group.visible=a.gl.group.visible=on})};

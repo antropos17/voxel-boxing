@@ -1,0 +1,1980 @@
+{
+ "version": 1,
+ "events": {
+  "jab_head": {
+   "files": [
+    "jab_head_1",
+    "jab_head_2",
+    "jab_head_3",
+    "jab_head_4"
+   ],
+   "gain": 0,
+   "pv": 1.2,
+   "vv": 0.15,
+   "pri": 3,
+   "voices": 3,
+   "loop": false,
+   "group": "удары",
+   "desc": "джеб в голову: лёгкий хлёсткий шлепок перчатки",
+   "words": "a sharp slap of a hand on skin; a punch landing on a body",
+   "layers": [
+    {
+     "id": "hit/slap"
+    },
+    {
+     "id": "punch/body",
+     "gain": -6,
+     "lp": 2500
+    },
+    {
+     "id": "thump/book",
+     "gain": -9
+    }
+   ],
+   "lufs": -15
+  },
+  "jab_body": {
+   "files": [
+    "jab_body_1",
+    "jab_body_2",
+    "jab_body_3",
+    "jab_body_4"
+   ],
+   "gain": 0,
+   "pv": 1.2,
+   "vv": 0.15,
+   "pri": 3,
+   "voices": 3,
+   "loop": false,
+   "group": "удары",
+   "desc": "джеб в корпус: глухой шлепок",
+   "words": "a punch landing on a body",
+   "layers": [
+    {
+     "id": "punch/body"
+    },
+    {
+     "id": "hit/slap",
+     "gain": -7,
+     "lp": 1800
+    },
+    {
+     "id": "thump/book",
+     "gain": -6
+    }
+   ],
+   "lufs": -16
+  },
+  "hook_head": {
+   "files": [
+    "hook_head_1",
+    "hook_head_2",
+    "hook_head_3",
+    "hook_head_4"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.12,
+   "pri": 4,
+   "voices": 3,
+   "loop": false,
+   "group": "удары",
+   "desc": "хук в голову: тяжёлый удар с хлопком кожи",
+   "words": "a punch landing on a body, a fast heavy thwack",
+   "layers": [
+    {
+     "id": "punch/body"
+    },
+    {
+     "id": "hit/slap",
+     "gain": -3
+    },
+    {
+     "id": "hit/punch",
+     "gain": -4
+    },
+    {
+     "id": "car_trunk/slam",
+     "gain": -5,
+     "lp": 3000,
+     "crop": {
+      "peak": 6,
+      "len": 420
+     }
+    },
+    {
+     "id": "apple/bite",
+     "gain": -16,
+     "hp": 2500,
+     "crop": {
+      "peak": 5,
+      "len": 120
+     }
+    }
+   ],
+   "lufs": -13
+  },
+  "hook_body": {
+   "files": [
+    "hook_body_1",
+    "hook_body_2",
+    "hook_body_3",
+    "hook_body_4"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.12,
+   "pri": 4,
+   "voices": 3,
+   "loop": false,
+   "group": "удары",
+   "desc": "хук в корпус: глухой тяжёлый удар по рёбрам",
+   "words": "a punch landing on a body",
+   "layers": [
+    {
+     "id": "punch/body"
+    },
+    {
+     "id": "hit/punch",
+     "gain": -2
+    },
+    {
+     "id": "bag/drop",
+     "gain": -2,
+     "lp": 3000,
+     "crop": {
+      "peak": 8,
+      "len": 400
+     }
+    },
+    {
+     "id": "hit/slap",
+     "gain": -11,
+     "lp": 1500
+    }
+   ],
+   "lufs": -13.5
+  },
+  "upper_head": {
+   "files": [
+    "upper_head_1",
+    "upper_head_2",
+    "upper_head_3",
+    "upper_head_4"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.12,
+   "pri": 4,
+   "voices": 3,
+   "loop": false,
+   "group": "удары",
+   "desc": "апперкот в челюсть: удар снизу с щелчком зубов",
+   "words": "a heavy powerful punch",
+   "layers": [
+    {
+     "id": "hit/punch"
+    },
+    {
+     "id": "punch/body",
+     "gain": -2
+    },
+    {
+     "id": "hit/slap",
+     "gain": -5
+    },
+    {
+     "id": "kick/punch",
+     "gain": -7
+    },
+    {
+     "id": "car_trunk/slam",
+     "gain": -4,
+     "lp": 3000,
+     "crop": {
+      "peak": 6,
+      "len": 420
+     }
+    },
+    {
+     "id": "slapstick/crack",
+     "gain": -15,
+     "at": 12
+    }
+   ],
+   "lufs": -12.5
+  },
+  "upper_body": {
+   "files": [
+    "upper_body_1",
+    "upper_body_2",
+    "upper_body_3"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.12,
+   "pri": 4,
+   "voices": 3,
+   "loop": false,
+   "group": "удары",
+   "desc": "апперкот в корпус",
+   "words": "a punch landing on a body; a short heavy thud",
+   "layers": [
+    {
+     "id": "punch/body"
+    },
+    {
+     "id": "kick/punch",
+     "gain": -3
+    },
+    {
+     "id": "hit/drop",
+     "gain": -4
+    },
+    {
+     "id": "bag/drop",
+     "gain": -3,
+     "lp": 3000,
+     "crop": {
+      "peak": 8,
+      "len": 400
+     }
+    }
+   ],
+   "lufs": -13
+  },
+  "over_head": {
+   "files": [
+    "over_head_1",
+    "over_head_2",
+    "over_head_3",
+    "over_head_4"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.1,
+   "pri": 4,
+   "voices": 3,
+   "loop": false,
+   "group": "удары",
+   "desc": "оверхенд в голову: самый тяжёлый обычный удар",
+   "words": "a heavy powerful punch with a sharp crack and a deep boom",
+   "layers": [
+    {
+     "id": "hit/crit",
+     "gain": -2
+    },
+    {
+     "id": "punch/body",
+     "gain": -2
+    },
+    {
+     "id": "car_trunk/slam",
+     "gain": 0,
+     "lp": 2500,
+     "crop": {
+      "peak": 6,
+      "len": 420
+     }
+    },
+    {
+     "id": "hit/slap",
+     "gain": -3,
+     "pitch": -2
+    }
+   ],
+   "lufs": -11.5
+  },
+  "over_body": {
+   "files": [
+    "over_body_1",
+    "over_body_2",
+    "over_body_3"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.1,
+   "pri": 4,
+   "voices": 3,
+   "loop": false,
+   "group": "удары",
+   "desc": "оверхенд в корпус",
+   "words": "a heavy powerful punch",
+   "layers": [
+    {
+     "id": "hit/crit",
+     "lp": 3000
+    },
+    {
+     "id": "punch/body"
+    },
+    {
+     "id": "bag/drop",
+     "gain": 0,
+     "lp": 3000,
+     "crop": {
+      "peak": 8,
+      "len": 400
+     }
+    }
+   ],
+   "lufs": -12
+  },
+  "mega": {
+   "files": [
+    "mega_1",
+    "mega_2",
+    "mega_3"
+   ],
+   "gain": 0,
+   "pv": 0.6,
+   "vv": 0.06,
+   "pri": 6,
+   "voices": 2,
+   "loop": false,
+   "group": "удары",
+   "desc": "мега-удар: удар с низким кинематографичным гулом и хрустом",
+   "words": "a heavy powerful punch; a deep cinematic boom impact",
+   "layers": [
+    {
+     "id": "hit/crit"
+    },
+    {
+     "id": "impact/punch",
+     "gain": -3,
+     "crop": {
+      "start": 0,
+      "len": 1400
+     }
+    },
+    {
+     "id": "punch/body",
+     "gain": -2
+    },
+    {
+     "id": "hit/slap",
+     "gain": -3
+    },
+    {
+     "id": "car_trunk/slam",
+     "gain": 0,
+     "lp": 3000,
+     "crop": {
+      "peak": 6,
+      "len": 420
+     }
+    },
+    {
+     "id": "bag/drop",
+     "gain": -3,
+     "lp": 3000,
+     "crop": {
+      "peak": 8,
+      "len": 400
+     }
+    },
+    {
+     "id": "break/rock",
+     "gain": -9
+    }
+   ],
+   "lufs": -10
+  },
+  "flurry": {
+   "files": [
+    "flurry_1",
+    "flurry_2",
+    "flurry_3",
+    "flurry_4"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.12,
+   "pri": 5,
+   "voices": 3,
+   "loop": false,
+   "group": "удары",
+   "desc": "удар мега-серии: быстрый тяжёлый",
+   "words": "a punch landing on a body, a fast heavy thwack",
+   "layers": [
+    {
+     "id": "hit/punch"
+    },
+    {
+     "id": "punch/body",
+     "gain": -2
+    },
+    {
+     "id": "hit/slap",
+     "gain": -4
+    },
+    {
+     "id": "car_trunk/slam",
+     "gain": -3,
+     "lp": 3000,
+     "crop": {
+      "peak": 6,
+      "len": 420
+     }
+    },
+    {
+     "id": "cut_hit/punch",
+     "gain": -8
+    }
+   ],
+   "lufs": -12.5
+  },
+  "wet": {
+   "files": [
+    "wet_1",
+    "wet_2",
+    "wet_3",
+    "wet_4"
+   ],
+   "gain": 0,
+   "pv": 2,
+   "vv": 0.2,
+   "pri": 2,
+   "voices": 3,
+   "loop": false,
+   "group": "ткани",
+   "desc": "мокрый слой поверх удара по окровавленному лицу",
+   "words": "a footstep in thick wet mud; a small splash",
+   "layers": [
+    {
+     "id": "step/mud",
+     "crop": {
+      "peak": 6,
+      "len": 300
+     }
+    },
+    {
+     "id": "splash/small",
+     "gain": -7,
+     "lp": 3000
+    }
+   ],
+   "lufs": -19
+  },
+  "swing": {
+   "files": [
+    "swing_1",
+    "swing_2",
+    "swing_3",
+    "swing_4"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.15,
+   "pri": 2,
+   "voices": 2,
+   "loop": false,
+   "group": "воздух",
+   "desc": "свист замаха сильного удара",
+   "words": "a stick swung fast through the air",
+   "layers": [
+    {
+     "id": "whoosh/stick"
+    },
+    {
+     "id": "swipe/hand",
+     "gain": -6
+    }
+   ],
+   "lufs": -20
+  },
+  "miss": {
+   "files": [
+    "miss_1",
+    "miss_2",
+    "miss_3"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.15,
+   "pri": 2,
+   "voices": 2,
+   "loop": false,
+   "group": "воздух",
+   "desc": "промах: кулак рассёк воздух",
+   "words": "a hand swept quickly through the air",
+   "layers": [
+    {
+     "id": "sword/swing",
+     "lp": 2200
+    },
+    {
+     "id": "swipe/hand",
+     "gain": -3
+    }
+   ],
+   "lufs": -19
+  },
+  "dodge": {
+   "files": [
+    "dodge_1",
+    "dodge_2",
+    "dodge_3"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.15,
+   "pri": 2,
+   "voices": 1,
+   "loop": false,
+   "group": "воздух",
+   "desc": "уклон: рывок корпусом, шорох",
+   "words": "a wide breathy whoosh of air",
+   "layers": [
+    {
+     "id": "whoosh/airy",
+     "seed": 1,
+     "crop": {
+      "peak": 60,
+      "len": 420
+     }
+    },
+    {
+     "id": "swipe/hand",
+     "gain": -8,
+     "pitch": -3
+    }
+   ],
+   "lufs": -21
+  },
+  "whoosh": {
+   "files": [
+    "whoosh_1",
+    "whoosh_2",
+    "whoosh_3"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.12,
+   "pri": 3,
+   "voices": 2,
+   "loop": false,
+   "group": "воздух",
+   "desc": "удар соперника летит в лицо: тяжёлый свист",
+   "words": "a flat wooden plank swung through the air",
+   "layers": [
+    {
+     "id": "whoosh/stick",
+     "pitch": -4
+    },
+    {
+     "id": "whoosh/plank",
+     "gain": -3
+    }
+   ],
+   "lufs": -18
+  },
+  "block": {
+   "files": [
+    "block_1",
+    "block_2",
+    "block_3",
+    "block_4"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.15,
+   "pri": 3,
+   "voices": 3,
+   "loop": false,
+   "group": "удары",
+   "desc": "блок: перчатка о перчатку, кожаный хлопок",
+   "words": "a small leather pouch grabbed; a heavy book closed, short and low",
+   "layers": [
+    {
+     "id": "hit/slap",
+     "lp": 2500
+    },
+    {
+     "id": "thump/book",
+     "gain": -3
+    },
+    {
+     "id": "leather/grab",
+     "gain": -8
+    }
+   ],
+   "lufs": -16
+  },
+  "hurt": {
+   "files": [
+    "hurt_1",
+    "hurt_2",
+    "hurt_3"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.1,
+   "pri": 5,
+   "voices": 2,
+   "loop": false,
+   "group": "по игроку",
+   "desc": "пропущенный прямой: удар в лицо изнутри, глухо",
+   "words": "a heavy powerful punch; a deep cinematic boom impact",
+   "layers": [
+    {
+     "id": "hit/crit",
+     "lp": 1400
+    },
+    {
+     "id": "punch/body"
+    },
+    {
+     "id": "car_trunk/slam",
+     "gain": -1,
+     "lp": 1600,
+     "crop": {
+      "peak": 6,
+      "len": 420
+     }
+    },
+    {
+     "id": "impact/punch",
+     "gain": -6,
+     "crop": {
+      "start": 0,
+      "len": 600
+     },
+     "lp": 900
+    }
+   ],
+   "lufs": -12
+  },
+  "hurt_hook": {
+   "files": [
+    "hurt_hook_1",
+    "hurt_hook_2",
+    "hurt_hook_3"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.1,
+   "pri": 5,
+   "voices": 2,
+   "loop": false,
+   "group": "по игроку",
+   "desc": "пропущенный хук: сбоку, со звоном в голове",
+   "words": "a heavy powerful punch with a sharp crack",
+   "layers": [
+    {
+     "id": "hit/crit",
+     "pitch": -2
+    },
+    {
+     "id": "punch/body"
+    },
+    {
+     "id": "car_trunk/slam",
+     "gain": -1,
+     "lp": 2000,
+     "crop": {
+      "peak": 6,
+      "len": 420
+     }
+    },
+    {
+     "id": "hit/slap",
+     "gain": -6,
+     "lp": 2200
+    },
+    {
+     "id": "tick/glass",
+     "gain": -20,
+     "pitch": 7,
+     "at": 20
+    }
+   ],
+   "lufs": -12
+  },
+  "graze": {
+   "files": [
+    "graze_1",
+    "graze_2",
+    "graze_3"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.15,
+   "pri": 4,
+   "voices": 2,
+   "loop": false,
+   "group": "по игроку",
+   "desc": "вскользь: кожа чиркнула по лицу",
+   "words": "a sharp slap of a hand on skin",
+   "layers": [
+    {
+     "id": "hit/slap",
+     "lp": 3000
+    },
+    {
+     "id": "swipe/hand",
+     "gain": -5
+    }
+   ],
+   "lufs": -17
+  },
+  "guard_break": {
+   "files": [
+    "guard_break_1",
+    "guard_break_2"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.1,
+   "pri": 5,
+   "voices": 1,
+   "loop": false,
+   "group": "по игроку",
+   "desc": "пробитый блок: удар сквозь перчатки",
+   "words": "a book slammed shut; a punch landing on a body",
+   "layers": [
+    {
+     "id": "hit/punch"
+    },
+    {
+     "id": "hit/slap",
+     "gain": -2
+    },
+    {
+     "id": "leather/grab",
+     "gain": -6
+    },
+    {
+     "id": "book/shut",
+     "seed": 1,
+     "gain": -5
+    }
+   ],
+   "lufs": -13
+  },
+  "crack_nose": {
+   "files": [
+    "crack_nose_1",
+    "crack_nose_2",
+    "crack_nose_3"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.1,
+   "pri": 5,
+   "voices": 2,
+   "loop": false,
+   "group": "кость",
+   "desc": "хруст носа: хрящ сминается",
+   "words": "an egg cracked on the rim of a bowl; a crunchy bite into an apple",
+   "layers": [
+    {
+     "id": "egg/crack",
+     "crop": {
+      "peak": 20,
+      "len": 300
+     }
+    },
+    {
+     "id": "apple/bite",
+     "gain": -3,
+     "crop": {
+      "peak": 8,
+      "len": 220
+     }
+    },
+    {
+     "id": "hit/slap",
+     "gain": -9
+    }
+   ],
+   "lufs": -14
+  },
+  "crack_cheek": {
+   "files": [
+    "crack_cheek_1",
+    "crack_cheek_2",
+    "crack_cheek_3"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.1,
+   "pri": 5,
+   "voices": 2,
+   "loop": false,
+   "group": "кость",
+   "desc": "хруст скулы: сухой щелчок кости",
+   "words": "a slapstick snapped shut; knuckles cracking",
+   "layers": [
+    {
+     "id": "slapstick/crack",
+     "crop": {
+      "peak": 4,
+      "len": 250
+     }
+    },
+    {
+     "id": "knuckles/crack",
+     "seed": 1,
+     "gain": -4,
+     "crop": {
+      "peak": 10,
+      "len": 250
+     }
+    },
+    {
+     "id": "punch/body",
+     "gain": -9
+    }
+   ],
+   "lufs": -14
+  },
+  "crack_jaw": {
+   "files": [
+    "crack_jaw_1",
+    "crack_jaw_2",
+    "crack_jaw_3"
+   ],
+   "gain": 0,
+   "pv": 1.2,
+   "vv": 0.1,
+   "pri": 5,
+   "voices": 2,
+   "loop": false,
+   "group": "кость",
+   "desc": "перелом челюсти: тяжёлый хруст",
+   "words": "a rock cracking and crumbling",
+   "layers": [
+    {
+     "id": "break/rock",
+     "crop": {
+      "peak": 3,
+      "len": 450
+     }
+    },
+    {
+     "id": "knuckles/crack",
+     "seed": 1,
+     "gain": -5,
+     "crop": {
+      "peak": 10,
+      "len": 250
+     }
+    },
+    {
+     "id": "slapstick/crack",
+     "gain": -6,
+     "crop": {
+      "peak": 4,
+      "len": 200
+     }
+    }
+   ],
+   "lufs": -13
+  },
+  "crack_skull": {
+   "files": [
+    "crack_skull_1",
+    "crack_skull_2",
+    "crack_skull_3"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.08,
+   "pri": 6,
+   "voices": 2,
+   "loop": false,
+   "group": "кость",
+   "desc": "череп: низкий раскалывающийся хруст",
+   "words": "a rock cracking and crumbling; a block of ice cracking",
+   "layers": [
+    {
+     "id": "break/rock",
+     "pitch": -4
+    },
+    {
+     "id": "ice/crack",
+     "gain": -4,
+     "crop": {
+      "peak": 15,
+      "len": 450
+     }
+    },
+    {
+     "id": "hit/crit",
+     "gain": -6
+    }
+   ],
+   "lufs": -12
+  },
+  "crack_rib": {
+   "files": [
+    "crack_rib_1",
+    "crack_rib_2",
+    "crack_rib_3"
+   ],
+   "gain": 0,
+   "pv": 1.2,
+   "vv": 0.1,
+   "pri": 5,
+   "voices": 2,
+   "loop": false,
+   "group": "кость",
+   "desc": "рёбра: глухой хруст под мясом",
+   "words": "dry twigs snapped by hand; a punch landing on a body",
+   "layers": [
+    {
+     "id": "twigs/snap",
+     "lp": 4000,
+     "crop": {
+      "peak": 10,
+      "len": 300
+     }
+    },
+    {
+     "id": "punch/body",
+     "gain": -2
+    },
+    {
+     "id": "break/rock",
+     "gain": -6,
+     "lp": 1500,
+     "crop": {
+      "peak": 3,
+      "len": 400
+     }
+    }
+   ],
+   "lufs": -14
+  },
+  "crack_arm": {
+   "files": [
+    "crack_arm_1",
+    "crack_arm_2",
+    "crack_arm_3"
+   ],
+   "gain": 0,
+   "pv": 1.2,
+   "vv": 0.1,
+   "pri": 5,
+   "voices": 2,
+   "loop": false,
+   "group": "кость",
+   "desc": "перелом руки: щелчок кости",
+   "words": "dry twigs snapped; knuckles cracking",
+   "layers": [
+    {
+     "id": "twigs/snap",
+     "crop": {
+      "peak": 10,
+      "len": 420
+     }
+    },
+    {
+     "id": "knuckles/crack",
+     "seed": 1,
+     "gain": -3,
+     "crop": {
+      "peak": 10,
+      "len": 250
+     }
+    },
+    {
+     "id": "egg/crack",
+     "gain": -8,
+     "crop": {
+      "peak": 20,
+      "len": 250
+     }
+    }
+   ],
+   "lufs": -14
+  },
+  "squelch": {
+   "files": [
+    "squelch_1",
+    "squelch_2",
+    "squelch_3",
+    "squelch_4"
+   ],
+   "gain": 0,
+   "pv": 2,
+   "vv": 0.2,
+   "pri": 2,
+   "voices": 3,
+   "loop": false,
+   "group": "ткани",
+   "desc": "мокрый шлепок ткани, плоть",
+   "words": "a footstep in thick wet mud",
+   "layers": [
+    {
+     "id": "step/mud",
+     "crop": {
+      "peak": 6,
+      "len": 350
+     }
+    },
+    {
+     "id": "splash/small",
+     "gain": -6,
+     "lp": 2500
+    },
+    {
+     "id": "pop/mouth",
+     "gain": -8,
+     "lp": 1500
+    }
+   ],
+   "lufs": -17
+  },
+  "gut": {
+   "files": [
+    "gut_1",
+    "gut_2",
+    "gut_3"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.15,
+   "pri": 4,
+   "voices": 2,
+   "loop": false,
+   "group": "ткани",
+   "desc": "кишки и мозг вываливаются: тяжёлый мокрый звук",
+   "words": "a footstep splashing in shallow water; something dipped into water",
+   "layers": [
+    {
+     "id": "step/puddle",
+     "crop": {
+      "peak": 10,
+      "len": 600
+     }
+    },
+    {
+     "id": "water/plop",
+     "gain": -4,
+     "lp": 1500,
+     "crop": {
+      "peak": 15,
+      "len": 600
+     }
+    },
+    {
+     "id": "step/mud",
+     "gain": -3,
+     "crop": {
+      "peak": 6,
+      "len": 350
+     }
+    }
+   ],
+   "lufs": -15
+  },
+  "tear": {
+   "files": [
+    "tear_1",
+    "tear_2",
+    "tear_3"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.12,
+   "pri": 4,
+   "voices": 2,
+   "loop": false,
+   "group": "ткани",
+   "desc": "рассечение и разрыв ткани",
+   "words": "a piece of cloth torn apart",
+   "layers": [
+    {
+     "id": "cloth/tear",
+     "lp": 6000,
+     "crop": {
+      "peak": 250,
+      "len": 650
+     }
+    },
+    {
+     "id": "velcro/rip",
+     "gain": -10,
+     "lp": 5000,
+     "crop": {
+      "peak": 200,
+      "len": 500
+     }
+    },
+    {
+     "id": "step/mud",
+     "gain": -6,
+     "crop": {
+      "peak": 6,
+      "len": 300
+     }
+    }
+   ],
+   "lufs": -15
+  },
+  "flay": {
+   "files": [
+    "flay_1",
+    "flay_2",
+    "flay_3"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.12,
+   "pri": 4,
+   "voices": 2,
+   "loop": false,
+   "group": "ткани",
+   "desc": "сдирание кожи до кости",
+   "words": "a sheet of paper torn off; a piece of cloth torn apart",
+   "layers": [
+    {
+     "id": "paper/rip",
+     "lp": 5000,
+     "crop": {
+      "peak": 150,
+      "len": 550
+     }
+    },
+    {
+     "id": "cloth/tear",
+     "gain": -4,
+     "lp": 4000,
+     "crop": {
+      "peak": 200,
+      "len": 550
+     }
+    },
+    {
+     "id": "step/mud",
+     "gain": -6,
+     "crop": {
+      "peak": 6,
+      "len": 300
+     }
+    }
+   ],
+   "lufs": -16
+  },
+  "jaw_off": {
+   "files": [
+    "jaw_off_1",
+    "jaw_off_2"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.08,
+   "pri": 6,
+   "voices": 1,
+   "loop": false,
+   "group": "ткани",
+   "desc": "отрыв челюсти: хруст и разрыв",
+   "words": "a rock cracking; a piece of cloth torn apart; a splash",
+   "layers": [
+    {
+     "id": "break/rock",
+     "pitch": -2
+    },
+    {
+     "id": "cloth/tear",
+     "gain": -2,
+     "lp": 5000,
+     "crop": {
+      "peak": 250,
+      "len": 700
+     },
+     "at": 40
+    },
+    {
+     "id": "step/puddle",
+     "gain": -4,
+     "crop": {
+      "peak": 10,
+      "len": 500
+     },
+     "at": 20
+    }
+   ],
+   "lufs": -12
+  },
+  "eye": {
+   "files": [
+    "eye_1",
+    "eye_2",
+    "eye_3"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.12,
+   "pri": 4,
+   "voices": 1,
+   "loop": false,
+   "group": "ткани",
+   "desc": "выпадение глаза: влажный хлопок",
+   "words": "a soft pop made with the lips; a bubble popping",
+   "layers": [
+    {
+     "id": "pop/mouth"
+    },
+    {
+     "id": "step/mud",
+     "gain": -4,
+     "crop": {
+      "peak": 6,
+      "len": 300
+     }
+    },
+    {
+     "id": "pop/bubble",
+     "gain": -11,
+     "pitch": -5
+    }
+   ],
+   "lufs": -16
+  },
+  "burst": {
+   "files": [
+    "burst_1",
+    "burst_2"
+   ],
+   "gain": 0,
+   "pv": 0.8,
+   "vv": 0.06,
+   "pri": 7,
+   "voices": 1,
+   "loop": false,
+   "group": "ткани",
+   "desc": "разрыв головы",
+   "words": "a rock cracking and crumbling; a big splash; an egg cracked",
+   "layers": [
+    {
+     "id": "break/rock",
+     "pitch": -5
+    },
+    {
+     "id": "hit/crit"
+    },
+    {
+     "id": "splash/big",
+     "gain": -3
+    },
+    {
+     "id": "egg/crack",
+     "gain": -5,
+     "crop": {
+      "peak": 20,
+      "len": 350
+     }
+    },
+    {
+     "id": "step/puddle",
+     "gain": -5,
+     "crop": {
+      "peak": 10,
+      "len": 500
+     },
+     "at": 60
+    }
+   ],
+   "lufs": -10
+  },
+  "tooth": {
+   "files": [
+    "tooth_1",
+    "tooth_2",
+    "tooth_3",
+    "tooth_4"
+   ],
+   "gain": 0,
+   "pv": 2,
+   "vv": 0.15,
+   "pri": 3,
+   "voices": 2,
+   "loop": false,
+   "group": "зубы",
+   "desc": "зуб выбит: костяной щелчок",
+   "words": "a light tap on a glass; knuckles cracking",
+   "layers": [
+    {
+     "id": "knuckles/crack",
+     "seed": 1,
+     "crop": {
+      "peak": 6,
+      "len": 200
+     }
+    },
+    {
+     "id": "tick/glass",
+     "gain": -5,
+     "pitch": 5
+    }
+   ],
+   "lufs": -18
+  },
+  "tooth_chip": {
+   "files": [
+    "tooth_chip_1",
+    "tooth_chip_2",
+    "tooth_chip_3"
+   ],
+   "gain": 0,
+   "pv": 2,
+   "vv": 0.15,
+   "pri": 2,
+   "voices": 2,
+   "loop": false,
+   "group": "зубы",
+   "desc": "скол зуба",
+   "words": "a light tap on a glass",
+   "layers": [
+    {
+     "id": "tick/glass",
+     "pitch": 9
+    },
+    {
+     "id": "slapstick/crack",
+     "gain": -6,
+     "crop": {
+      "peak": 3,
+      "len": 120
+     }
+    }
+   ],
+   "lufs": -21
+  },
+  "tooth_floor": {
+   "files": [
+    "tooth_floor_1",
+    "tooth_floor_2",
+    "tooth_floor_3",
+    "tooth_floor_4"
+   ],
+   "gain": 0,
+   "pv": 3,
+   "vv": 0.25,
+   "pri": 1,
+   "voices": 3,
+   "loop": false,
+   "group": "зубы",
+   "desc": "зуб стучит об пол",
+   "words": "a light tap on a glass; dice thrown",
+   "layers": [
+    {
+     "id": "dice/throw",
+     "seed": 1,
+     "crop": {
+      "peak": 3,
+      "len": 140
+     }
+    },
+    {
+     "id": "slapstick/crack",
+     "gain": -10,
+     "pitch": 7,
+     "crop": {
+      "peak": 2,
+      "len": 80
+     }
+    }
+   ],
+   "lufs": -25
+  },
+  "clack": {
+   "files": [
+    "clack_1",
+    "clack_2",
+    "clack_3"
+   ],
+   "gain": 0,
+   "pv": 2,
+   "vv": 0.15,
+   "pri": 3,
+   "voices": 2,
+   "loop": false,
+   "group": "зубы",
+   "desc": "щелчок зубов, вылет капы",
+   "words": "a slapstick snapped shut",
+   "layers": [
+    {
+     "id": "slapstick/crack",
+     "crop": {
+      "peak": 3,
+      "len": 180
+     }
+    },
+    {
+     "id": "pen/cap",
+     "gain": -6,
+     "crop": {
+      "peak": 4,
+      "len": 150
+     }
+    }
+   ],
+   "lufs": -18
+  },
+  "drip": {
+   "files": [
+    "drip_1",
+    "drip_2",
+    "drip_3",
+    "drip_4"
+   ],
+   "gain": 0,
+   "pv": 3,
+   "vv": 0.3,
+   "pri": 0,
+   "voices": 3,
+   "loop": false,
+   "group": "ткани",
+   "desc": "капля крови падает на ринг",
+   "words": "a water drop falling into water, a drip",
+   "layers": [
+    {
+     "id": "drip/drop",
+     "lp": 2500
+    },
+    {
+     "id": "drip/plink",
+     "gain": -5,
+     "lp": 3000
+    }
+   ],
+   "lufs": -28
+  },
+  "drop": {
+   "files": [
+    "drop_1",
+    "drop_2",
+    "drop_3"
+   ],
+   "gain": 0,
+   "pv": 2,
+   "vv": 0.2,
+   "pri": 2,
+   "voices": 2,
+   "loop": false,
+   "group": "тело",
+   "desc": "оторванный кусок шлёпается на пол",
+   "words": "a short heavy thud landing hard; a footstep in thick wet mud",
+   "layers": [
+    {
+     "id": "hit/drop"
+    },
+    {
+     "id": "step/mud",
+     "gain": -6,
+     "crop": {
+      "peak": 6,
+      "len": 300
+     }
+    }
+   ],
+   "lufs": -18
+  },
+  "thud": {
+   "files": [
+    "thud_1",
+    "thud_2",
+    "thud_3"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.08,
+   "pri": 6,
+   "voices": 1,
+   "loop": false,
+   "group": "тело",
+   "desc": "падение тела на ринг",
+   "words": "a person falling down onto a tiled floor",
+   "layers": [
+    {
+     "id": "person/fall",
+     "crop": {
+      "peak": 30,
+      "len": 1100
+     }
+    },
+    {
+     "id": "punch/body",
+     "gain": -4
+    },
+    {
+     "id": "kick/deep",
+     "gain": -8
+    }
+   ],
+   "lufs": -12
+  },
+  "bell": {
+   "files": [
+    "bell_1",
+    "bell_2"
+   ],
+   "gain": 0,
+   "pv": 0.2,
+   "vv": 0.04,
+   "pri": 7,
+   "voices": 3,
+   "loop": false,
+   "group": "бой",
+   "desc": "гонг: удар колокола ринга",
+   "words": "a reception desk bell rung once, a bright ding",
+   "layers": [
+    {
+     "id": "bell/desk",
+     "pitch": -5
+    },
+    {
+     "id": "elevator/ding",
+     "gain": -12,
+     "pitch": -3
+    }
+   ],
+   "lufs": -14
+  },
+  "count": {
+   "files": [
+    "count_1",
+    "count_2",
+    "count_3"
+   ],
+   "gain": 0,
+   "pv": 1,
+   "vv": 0.1,
+   "pri": 5,
+   "voices": 1,
+   "loop": false,
+   "group": "бой",
+   "desc": "отсчёт нокдауна: рефери хлопает по настилу",
+   "words": "a sharp slap of a hand on skin; a heavy book closed",
+   "layers": [
+    {
+     "id": "hit/slap",
+     "lp": 2000
+    },
+    {
+     "id": "thump/book",
+     "gain": -4
+    }
+   ],
+   "lufs": -16
+  },
+  "step": {
+   "files": [
+    "step_1",
+    "step_2",
+    "step_3",
+    "step_4"
+   ],
+   "gain": 0,
+   "pv": 1.5,
+   "vv": 0.2,
+   "pri": 1,
+   "voices": 2,
+   "loop": false,
+   "group": "тело",
+   "desc": "шаг соперника по рингу",
+   "words": "a footstep on an old wooden floor",
+   "layers": [
+    {
+     "id": "step/floorboard",
+     "lp": 1500,
+     "crop": {
+      "peak": 20,
+      "len": 280
+     }
+    },
+    {
+     "id": "land/wood",
+     "gain": -10,
+     "lp": 1500
+    }
+   ],
+   "lufs": -26
+  },
+  "breath": {
+   "files": [
+    "breath_1",
+    "breath_2",
+    "breath_3"
+   ],
+   "gain": 0,
+   "pv": 0.8,
+   "vv": 0.15,
+   "pri": 1,
+   "voices": 1,
+   "loop": false,
+   "group": "тело",
+   "desc": "тяжёлое дыхание соперника",
+   "words": "someone panting out of breath after running",
+   "layers": [
+    {
+     "id": "breath/pant",
+     "lp": 6000,
+     "crop": {
+      "start": [
+       200,
+       1700,
+       3300,
+       500,
+       2500
+      ],
+      "len": 1500
+     }
+    }
+   ],
+   "lufs": -22
+  },
+  "cough": {
+   "files": [
+    "cough_1",
+    "cough_2"
+   ],
+   "gain": 0,
+   "pv": 0.8,
+   "vv": 0.1,
+   "pri": 1,
+   "voices": 1,
+   "loop": false,
+   "group": "тело",
+   "desc": "хрип и кашель после нокдауна",
+   "words": "a sharp gasp; a person coughing",
+   "layers": [
+    {
+     "id": "cough/person",
+     "lp": 4000
+    },
+    {
+     "id": "gasp/breath",
+     "gain": -6
+    }
+   ],
+   "lufs": -20
+  },
+  "crowd_kd": {
+   "files": [
+    "crowd_kd_1",
+    "crowd_kd_2"
+   ],
+   "gain": 0,
+   "pv": 0.3,
+   "vv": 0.1,
+   "pri": 4,
+   "voices": 1,
+   "loop": false,
+   "group": "толпа",
+   "desc": "толпа на нокдауне: вскрик и гул",
+   "words": "a crowd cheering and whooping",
+   "layers": [
+    {
+     "id": "crowd/cheer",
+     "crop": {
+      "start": [
+       0,
+       900,
+       400
+      ],
+      "len": 2500
+     }
+    },
+    {
+     "id": "gasp/breath",
+     "gain": -10,
+     "lp": 3000
+    }
+   ],
+   "lufs": -19
+  },
+  "crowd_ko": {
+   "files": [
+    "crowd_ko_1",
+    "crowd_ko_2"
+   ],
+   "gain": 0,
+   "pv": 0.2,
+   "vv": 0.05,
+   "pri": 6,
+   "voices": 1,
+   "loop": false,
+   "group": "толпа",
+   "desc": "толпа на нокауте: рёв и аплодисменты",
+   "words": "a crowd cheering and whooping; a small audience applauding",
+   "layers": [
+    {
+     "id": "crowd/cheer"
+    },
+    {
+     "id": "applause/audience",
+     "gain": -5,
+     "at": 600
+    }
+   ],
+   "lufs": -17
+  },
+  "crowd_boo": {
+   "files": [
+    "crowd_boo_1"
+   ],
+   "gain": 0,
+   "pv": 0.2,
+   "vv": 0.05,
+   "pri": 5,
+   "voices": 1,
+   "loop": false,
+   "group": "толпа",
+   "desc": "толпа освистывает поражение",
+   "words": "a crowd booing",
+   "layers": [
+    {
+     "id": "crowd/boo",
+     "crop": {
+      "start": 0,
+      "len": 3500
+     }
+    }
+   ],
+   "lufs": -20
+  },
+  "hall": {
+   "files": [
+    "hall_1"
+   ],
+   "gain": 0,
+   "pv": 0,
+   "vv": 0,
+   "pri": 0,
+   "voices": 1,
+   "loop": true,
+   "group": "толпа",
+   "desc": "фон зала: гул голосов, без звона посуды",
+   "words": "a busy restaurant with murmuring voices",
+   "layers": [
+    {
+     "id": "cafe/busy",
+     "lp": 1300,
+     "hp": 90
+    }
+   ],
+   "lufs": -30
+  },
+  "ui": {
+   "files": [
+    "ui_1",
+    "ui_2"
+   ],
+   "gain": 0,
+   "pv": 0.5,
+   "vv": 0.05,
+   "pri": 3,
+   "voices": 1,
+   "loop": false,
+   "group": "интерфейс",
+   "desc": "кнопка",
+   "words": "a soft rounded pop; a computer mouse button clicked",
+   "layers": [
+    {
+     "id": "ui_pop/soft"
+    },
+    {
+     "id": "click/mouse",
+     "gain": -8
+    }
+   ],
+   "lufs": -20
+  },
+  "tick": {
+   "files": [
+    "tick_1",
+    "tick_2"
+   ],
+   "gain": 0,
+   "pv": 0.5,
+   "vv": 0.05,
+   "pri": 4,
+   "voices": 1,
+   "loop": false,
+   "group": "интерфейс",
+   "desc": "сигнал замаха соперника «!»",
+   "words": "a small metallic tick",
+   "layers": [
+    {
+     "id": "tick/wood"
+    },
+    {
+     "id": "tick/metal",
+     "gain": -8
+    }
+   ],
+   "lufs": -18
+  },
+  "ready": {
+   "files": [
+    "ready_1"
+   ],
+   "gain": 0,
+   "pv": 0,
+   "vv": 0,
+   "pri": 5,
+   "voices": 1,
+   "loop": false,
+   "group": "интерфейс",
+   "desc": "мега-удар готов",
+   "words": "a quick rising arpeggio over two octaves; a fast sparkling run of four high bell notes",
+   "layers": [
+    {
+     "id": "power_up/rise",
+     "crop": {
+      "start": 0,
+      "len": 1200
+     }
+    },
+    {
+     "id": "gem/sparkle",
+     "gain": -7,
+     "at": 250
+    }
+   ],
+   "lufs": -17
+  },
+  "charge": {
+   "files": [
+    "charge_1",
+    "charge_2"
+   ],
+   "gain": 0,
+   "pv": 0.5,
+   "vv": 0.05,
+   "pri": 5,
+   "voices": 1,
+   "loop": false,
+   "group": "удары",
+   "desc": "замах мега-удара: воздух втягивается",
+   "words": "air sucked in backwards, then a heavy hit",
+   "layers": [
+    {
+     "id": "impact/suck",
+     "crop": {
+      "start": 0,
+      "len": 430
+     }
+    },
+    {
+     "id": "whoosh/heavy",
+     "gain": -6,
+     "crop": {
+      "start": 100,
+      "len": 400
+     }
+    }
+   ],
+   "lufs": -16
+  },
+  "combo": {
+   "files": [
+    "combo_1"
+   ],
+   "gain": 0,
+   "pv": 0,
+   "vv": 0,
+   "pri": 2,
+   "voices": 1,
+   "loop": false,
+   "group": "интерфейс",
+   "desc": "комбо (высота растёт с длиной серии)",
+   "words": "two very quick notes leaping up a fifth",
+   "layers": [
+    {
+     "id": "menu/select",
+     "crop": {
+      "start": 0,
+      "len": 400
+     }
+    }
+   ],
+   "lufs": -21
+  },
+  "win": {
+   "files": [
+    "win_1"
+   ],
+   "gain": 0,
+   "pv": 0,
+   "vv": 0,
+   "pri": 7,
+   "voices": 1,
+   "loop": false,
+   "group": "интерфейс",
+   "desc": "победа",
+   "words": "a rising six-note major fanfare",
+   "layers": [
+    {
+     "id": "win/fanfare"
+    }
+   ],
+   "lufs": -16
+  },
+  "lose": {
+   "files": [
+    "lose_1"
+   ],
+   "gain": 0,
+   "pv": 0,
+   "vv": 0,
+   "pri": 7,
+   "voices": 1,
+   "loop": false,
+   "group": "интерфейс",
+   "desc": "поражение",
+   "words": "three falling notes of a minor chord",
+   "layers": [
+    {
+     "id": "lose/descend"
+    }
+   ],
+   "lufs": -17
+  },
+  "star": {
+   "files": [
+    "star_1"
+   ],
+   "gain": 0,
+   "pv": 0,
+   "vv": 0,
+   "pri": 3,
+   "voices": 2,
+   "loop": false,
+   "group": "интерфейс",
+   "desc": "звезда на экране итога",
+   "words": "a fast sparkling run of four high bell notes",
+   "layers": [
+    {
+     "id": "gem/sparkle"
+    }
+   ],
+   "lufs": -19
+  },
+  "coin": {
+   "files": [
+    "coin_1"
+   ],
+   "gain": 0,
+   "pv": 0,
+   "vv": 0,
+   "pri": 3,
+   "voices": 2,
+   "loop": false,
+   "group": "интерфейс",
+   "desc": "монета / счётчик зубов",
+   "words": "two quick high bell notes",
+   "layers": [
+    {
+     "id": "coin/bright"
+    }
+   ],
+   "lufs": -19
+  }
+ }
+}

@@ -147,7 +147,7 @@ function updCubes(dt){
       pP[a]+=pV[a]*dt;pP[a+1]+=pV[a+1]*dt;pP[a+2]+=pV[a+2]*dt;
       if(pK[i]===1){wl=Math.sqrt(pW[a]*pW[a]+pW[a+1]*pW[a+1]+pW[a+2]*pW[a+2]);if(wl>1e-3){_ba.set(pW[a]/wl,pW[a+1]/wl,pW[a+2]/wl);_bq.setFromAxisAngle(_ba,wl*dt);_cq.set(pQ[q],pQ[q+1],pQ[q+2],pQ[q+3]).premultiply(_bq);pQ[q]=_cq.x;pQ[q+1]=_cq.y;pQ[q+2]=_cq.z;pQ[q+3]=_cq.w}}
       if(pP[a+1]<pS[i]*0.5){
-        if(pK[i]===0){stain(pP[a],pP[a+2],pS[i]);if(pS[i]>.004&&pV[a+1]<-2.2&&Math.random()<.5)blood(pP[a],.004,pP[a+2],rnd(-.5,.5),rnd(.4,1),rnd(-.5,.5),.0018,.5);pL[i]=0;continue}
+        if(pK[i]===0){stain(pP[a],pP[a+2],pS[i]);if(pS[i]>.0045)sfx.drip(Math.min(1,pS[i]*160));if(pS[i]>.004&&pV[a+1]<-2.2&&Math.random()<.5)blood(pP[a],.004,pP[a+2],rnd(-.5,.5),rnd(.4,1),rnd(-.5,.5),.0018,.5);pL[i]=0;continue}
         if(pK[i]!==1){pL[i]=0;continue}
         pP[a+1]=pS[i]*0.5;stain(pP[a],pP[a+2],pS[i]*0.6);
         if(Math.abs(pV[a+1])<.6){pR[i]=1;pW[a]=pW[a+1]=pW[a+2]=0}else{pV[a+1]*=-.3;pV[a]*=.5;pV[a+2]*=.5}
@@ -213,8 +213,8 @@ function updPieces(dt){
     var held=p.teth||(p.pins&&p.pins.length);
     if(p.g.position.y<p.r){p.g.position.y=p.r;if(!held||p.vel.y<-0.5)pool(p.g.position.x,p.g.position.z,p.r*1.2);
       if(held){if(p.vel.y<-0.8)sfx.squelch();p.vel.y=Math.max(0,p.vel.y);p.vel.x*=.9;p.vel.z*=.9;p.w.multiplyScalar(.8)}
-      else if(Math.abs(p.vel.y)<0.7){p.vel.set(0,0,0);p.w.set(0,0,0);p.rest=true;sfx.thud()}
-      else{p.vel.y*=-0.28;p.vel.x*=0.55;p.vel.z*=0.55;p.w.multiplyScalar(0.45);sfx.squelch()}}
+      else if(Math.abs(p.vel.y)<0.7){p.vel.set(0,0,0);p.w.set(0,0,0);p.rest=true;if(p.snd==='tooth')sfx.toothFloor(.7);else sfx.drop()}
+      else{p.vel.y*=-0.28;p.vel.x*=0.55;p.vel.z*=0.55;p.w.multiplyScalar(0.45);if(p.snd==='tooth')sfx.toothFloor(Math.min(1,.4+Math.abs(p.vel.y)*.25));else sfx.squelch()}}
   }
 }
 /* a piece hanging from anchor points on the body (jaw on its hinges): position-based correction of the attach points */
@@ -252,16 +252,26 @@ function updRings(dt){for(var i=0;i<4;i++){var r=rings[i];if(!r.m.visible)contin
   r.m.scale.setScalar(r.s0+(r.s1-r.s0)*(1-(1-k)*(1-k)));r.m.material.opacity=(1-k)*r.o;r.m.quaternion.copy(camera.quaternion)}}
 
 /* ---------- audio ---------- */
+/* Звуки — файлы из dist/sounds (набор earshot, см. docs/SOUND.md): manifest.json -> событие -> варианты. Пока файлы не
+   скачаны и не декодированы (и всегда из file://), играет прежний синтез syn.*. Декодирование идёт при первом касании
+   (audioInit), до гонга, не на первом ударе. Одновременных голосов не больше SNDMAX, у события свой предел. */
 var AC=null,master=null,noiseBuf=null;
-function audioInit(){if(AC)return;try{AC=new(window.AudioContext||window.webkitAudioContext)();master=AC.createGain();master.gain.value=.55;master.connect(AC.destination);
-  noiseBuf=AC.createBuffer(1,AC.sampleRate,AC.sampleRate);var d=noiseBuf.getChannelData(0);for(var i=0;i<d.length;i++)d[i]=Math.random()*2-1;if(AC.state==='suspended')AC.resume()}catch(e){AC=null}}
+function noop(){}
+function acResume(){if(AC&&AC.state!=='running'&&AC.state!=='closed')try{var p=AC.resume();if(p&&p.catch)p.catch(noop)}catch(e){}}
+function audioInit(){if(AC){acResume();return}try{AC=new(window.AudioContext||window.webkitAudioContext)();master=AC.createGain();master.gain.value=.55;master.connect(AC.destination);
+  noiseBuf=AC.createBuffer(1,AC.sampleRate,AC.sampleRate);var d=noiseBuf.getChannelData(0);for(var i=0;i<d.length;i++)d[i]=Math.random()*2-1;if(AC.state==='suspended')AC.resume()}catch(e){AC=null;return}
+  /* iOS: после звонка или сворачивания контекст 'interrupted'/'suspended': будим на возврате и на следующем касании */
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)acResume()});
+  ['pointerdown','touchend','keydown'].forEach(function(n){window.addEventListener(n,acResume,true)});
+  for(var f in SND.raw)sndDecode(f)}
 function noise(dur,freq,type,gain,delay,sweep){if(!AC)return;try{var t=AC.currentTime+(delay||0),s=AC.createBufferSource(),f=AC.createBiquadFilter(),g=AC.createGain();
   s.buffer=noiseBuf;f.type=type;f.frequency.setValueAtTime(freq,t);if(sweep)f.frequency.exponentialRampToValueAtTime(sweep,t+dur);
   g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);s.connect(f);f.connect(g);g.connect(master);s.start(t,Math.random()*.5);s.stop(t+dur+.03)}catch(e){}}
 function tone(f0,f1,dur,gain,type,delay){if(!AC)return;try{var t=AC.currentTime+(delay||0),o=AC.createOscillator(),g=AC.createGain();
   o.type=type||'sine';o.frequency.setValueAtTime(f0,t);if(f1!==f0)o.frequency.exponentialRampToValueAtTime(f1,t+dur);g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);
   o.connect(g);g.connect(master);o.start(t);o.stop(t+dur+.03)}catch(e){}}
-var sfx={
+/* прежний синтез: запасной путь */
+var syn={
   jab:function(){noise(.07,900,'lowpass',.7);tone(170,60,.09,.6)},
   heavy:function(w){noise(.18,700,'lowpass',1.1);noise(.05,2600,'bandpass',.5);tone(130,34,.3,1.1);tone(62,30,.36,.9,'triangle');if(w)noise(.12,1500,'bandpass',.35,.02)},
   block:function(){noise(.05,1400,'bandpass',.5);tone(220,120,.05,.3)},
@@ -280,6 +290,94 @@ var sfx={
   charge:function(){noise(.38,180,'bandpass',.55,0,3200);tone(70,240,.38,.4,'sawtooth')},
   mega:function(){noise(.5,500,'lowpass',1.3);noise(.08,2600,'bandpass',.6);tone(120,30,.5,1.3);tone(52,22,.9,1.2,'triangle');for(var i=0;i<3;i++)noise(.03,3400,'highpass',.6,.03+i*.04);noise(.2,1300,'bandpass',.4,.04)},
   tear:function(){noise(.25,600,'bandpass',.6,0,180);noise(.08,2600,'highpass',.4,.05);tone(80,30,.4,1)}
+};
+/* банк файлов */
+var SNDURL='sounds/',SNDMAX=20,SNDQ=4;
+var SND={man:null,ext:'mp3',raw:{},buf:{},bad:{},last:{},v:[],hall:null,dripT:0,n:{play:0,steal:0,drop:0}};
+function sndLoad(){
+  if(SND.man||SND.loading||!window.fetch||location.protocol==='file:')return;SND.loading=true;
+  try{var a=document.createElement('audio');if(a.canPlayType&&a.canPlayType('audio/webm; codecs="opus"'))SND.ext='webm'}catch(e){}
+  fetch(SNDURL+'manifest.json').then(function(r){return r.ok?r.json():null}).then(function(m){
+    if(!m||!m.events)return;SND.man=m;var q=[],e,i=0;for(e in m.events)q=q.concat(m.events[e].files);
+    function next(){if(i>=q.length)return;var f=q[i++];fetch(SNDURL+f+'.'+SND.ext).then(function(r){return r.ok?r.arrayBuffer():null}).then(function(b){if(b){SND.raw[f]=b;if(AC)sndDecode(f)}}).catch(noop).then(next)}
+    for(var k=0;k<SNDQ;k++)next()}).catch(noop)}
+/* не декодировалось как webm (старый Safari говорит «да», а потом не может): берём mp3 */
+function sndDecode(f,alt){var b=SND.raw[f];if(!AC||!b)return;delete SND.raw[f];
+  function ok(x){if(x)SND.buf[f]=x}
+  function bad(){if(alt||SND.ext!=='webm'){SND.bad[f]=1;return}fetch(SNDURL+f+'.mp3').then(function(r){return r.ok?r.arrayBuffer():null}).then(function(b2){if(b2){SND.raw[f]=b2;sndDecode(f,true)}}).catch(noop)}
+  try{var p=AC.decodeAudioData(b,ok,bad);if(p&&p.catch)p.catch(noop)}catch(e){bad()}}
+function sndKill(x,t){try{x.g.gain.setTargetAtTime(0,t,.012);x.s.stop(t+.06)}catch(e){}}
+/* одно событие: случайный вариант (не тот же, что в прошлый раз), разброс высоты и громкости, пределы голосов */
+function snd(ev,vol,rate,delay){
+  if(!AC||!SND.man)return false;var e=SND.man.events[ev];if(!e)return false;
+  var fs=e.files,n=fs.length,k=(Math.random()*n)|0,b=null,i,t=AC.currentTime,v=SND.v,same=0,os=-1,low=-1,x;
+  if(n>1&&k===SND.last[ev])k=(k+1+((Math.random()*(n-1))|0))%n;
+  for(i=0;i<n&&!b;i++)if(SND.buf[fs[(k+i)%n]]){k=(k+i)%n;b=SND.buf[fs[k]]}
+  if(!b)return false;SND.last[ev]=k;
+  for(i=v.length-1;i>=0;i--)if(v[i].end<=t)v.splice(i,1);
+  for(i=0;i<v.length;i++){x=v[i];if(x.ev===ev){same++;if(os<0)os=i}if(low<0||x.pri<v[low].pri||(x.pri===v[low].pri&&x.st<v[low].st))low=i}
+  if(same>=(e.voices||2)){sndKill(v[os],t);v.splice(os,1);SND.n.steal++}
+  else if(v.length>=SNDMAX){if(v[low].pri>(e.pri||0)){SND.n.drop++;return true}sndKill(v[low],t);v.splice(low,1);SND.n.steal++}
+  var r=(rate||1)*Math.pow(2,(Math.random()*2-1)*(e.pv||0)/12),s=AC.createBufferSource(),g=AC.createGain(),at=t+(delay||0);
+  s.buffer=b;s.playbackRate.value=r;g.gain.value=Math.pow(10,(e.gain||0)/20)*(vol==null?1:vol)*(1-Math.random()*(e.vv||0));
+  s.connect(g);g.connect(master);s.start(at);
+  v.push({s:s,g:g,ev:ev,pri:e.pri||0,st:at,end:at+b.duration/r});SND.n.play++;return true}
+/* фон зала: одна петля, идёт пока на экране бой, нокаут или проигрыш */
+function sndHall(on){
+  if(!AC)return;var H=SND.hall,t=AC.currentTime;
+  if(on&&!H){var e=SND.man&&SND.man.events.hall,b=e&&SND.buf[e.files[0]];if(!b)return;
+    var s=AC.createBufferSource(),g=AC.createGain();s.buffer=b;s.loop=true;g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(Math.pow(10,(e.gain||0)/20),t+1.5);
+    s.connect(g);g.connect(master);s.start(t,Math.random()*b.duration*.9);SND.hall={s:s,g:g}}
+  else if(!on&&H){H.g.gain.cancelScheduledValues(t);H.g.gain.setTargetAtTime(0,t,.35);try{H.s.stop(t+2)}catch(e){}SND.hall=null}}
+setInterval(function(){if(AC&&typeof G!=='undefined'&&G)sndHall(G.mode==='fight'||G.mode==='ko'||G.mode==='lost')},500);
+window.addEventListener('load',function(){setTimeout(sndLoad,300)});
+var CRACKZ={nose:'crack_nose',jaw:'crack_jaw',mouth:'crack_jaw',cheekL:'crack_cheek',cheekR:'crack_cheek',orbL:'crack_cheek',orbR:'crack_cheek',skull:'crack_skull',ribL:'crack_rib',ribR:'crack_rib',abs:'crack_rib',arm:'crack_arm'};
+/* имена и прежние вызовы те же; новые параметры необязательны */
+var sfx={
+  /* head===false: в корпус; fl: удар мега-серии */
+  jab:function(head,fl){snd(fl?'flurry':head===false?'jab_body':'jab_head')||syn.jab()},
+  /* w: по окровавленному; s: сила (g.pw*mult, 1..2.2); type: hook/upper/over/flurry */
+  heavy:function(w,s,head,type){s=s||1;var ev=type==='flurry'?'flurry':(type==='upper'||type==='over'?type:'hook')+(head===false?'_body':'_head');
+    if(snd(ev,clamp(.72+.32*(s-1),.6,1.15),1-.035*(s-1))){if(w)snd('wet',.85,1,.012)}else syn.heavy(w)},
+  block:function(){snd('block')||syn.block()},
+  guardBreak:function(){snd('guard_break')||syn.block()},
+  crack:function(zone){snd(CRACKZ[zone]||'crack_jaw')||syn.crack()},
+  whoosh:function(){snd('whoosh')||syn.whoosh()},
+  miss:function(){snd('miss')||syn.whoosh()},
+  dodge:function(){snd('dodge')||syn.whoosh()},
+  swing:function(){snd('swing')||syn.swing()},
+  bell:function(n){n=n||1;if(!snd('bell'))return syn.bell(n);for(var i=1;i<n;i++)snd('bell',1,1,i*.38)},
+  /* k: доля урона от полного удара соперника; вскользь это половина */
+  hurt:function(hook,k){snd(k!=null&&k<.6?'graze':hook?'hurt_hook':'hurt')||syn.hurt()},
+  step:function(){snd('step')||syn.step()},
+  tick:function(){snd('tick')||syn.tick()},
+  count:function(){snd('count')||syn.tick()},
+  tooth:function(chip){snd(chip?'tooth_chip':'tooth')||syn.tooth()},
+  toothFloor:function(v){snd('tooth_floor',v)},
+  thud:function(){snd('thud')||syn.thud()},
+  drop:function(){snd('drop')||syn.thud()},
+  clack:function(){snd('clack')||syn.clack()},
+  squelch:function(){snd('squelch')||syn.squelch()},
+  gut:function(){snd('gut')||syn.squelch()},
+  tear:function(){snd('tear')||syn.tear()},
+  flay:function(){snd('flay')||syn.crack()},
+  jawOff:function(){snd('jaw_off')||syn.tear()},
+  eye:function(){snd('eye')||syn.squelch()},
+  burst:function(){if(!snd('burst')){syn.crack();syn.tear();syn.squelch()}},
+  /* капли: не чаще раза в 70 мс, громкость от размера */
+  drip:function(v){if(!AC||AC.currentTime-SND.dripT<.07)return;SND.dripT=AC.currentTime;snd('drip',v)},
+  ready:function(){snd('ready')||syn.ready()},
+  charge:function(){snd('charge')||syn.charge()},
+  mega:function(){snd('mega')||syn.mega()},
+  breath:function(){snd('breath')},
+  cough:function(){snd('cough')},
+  crowd:function(k){snd('crowd_'+k)},
+  ui:function(){snd('ui')},
+  combo:function(n){snd('combo',1,Math.pow(2,Math.min(9,(n||3)-3)/12))},
+  win:function(){snd('win')},
+  lose:function(){snd('lose')},
+  star:function(){snd('star')},
+  coin:function(){snd('coin')}
 };
 
 /* ---------- screen fx and HUD ---------- */

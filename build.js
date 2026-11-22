@@ -16,4 +16,20 @@ for (const [name, html] of [['index.html', game], ['test.html', test]]) {
   const js = parts[parts.length - 1].split('</script>')[0];
   try { new Function(js) } catch (e) { console.error('SYNTAX ERROR in ' + name + ': ' + e.message); process.exit(1) }
 }
-console.log('build ok: dist/index.html ' + (game.length / 1024).toFixed(1) + ' KB, dist/test.html ' + (test.length / 1024).toFixed(1) + ' KB');
+/* звуки: сжатые копии из assets/sounds/web (их пишет tools/sounds/make.py) и облегчённый манифест */
+const SND = path.join(__dirname, 'assets', 'sounds'), SOUT = path.join(OUT, 'sounds');
+let sndKB = 0, sndN = 0;
+if (fs.existsSync(path.join(SND, 'manifest.json'))) {
+  fs.rmSync(SOUT, { recursive: true, force: true }); fs.mkdirSync(SOUT, { recursive: true });
+  const man = JSON.parse(fs.readFileSync(path.join(SND, 'manifest.json'), 'utf8')), ev = {};
+  for (const [k, e] of Object.entries(man.events)) {
+    ev[k] = { files: e.files, gain: e.gain, pv: e.pv, vv: e.vv, pri: e.pri, voices: e.voices, loop: e.loop };
+    for (const f of e.files) for (const x of ['webm', 'mp3']) {
+      const src = path.join(SND, 'web', f + '.' + x);
+      if (!fs.existsSync(src)) { console.error('missing sound ' + f + '.' + x); process.exit(1) }
+      fs.copyFileSync(src, path.join(SOUT, f + '.' + x)); sndKB += fs.statSync(src).size / 1024; sndN++;
+    }
+  }
+  fs.writeFileSync(path.join(SOUT, 'manifest.json'), JSON.stringify({ version: man.version, events: ev }));
+}
+console.log('build ok: dist/index.html ' + (game.length / 1024).toFixed(1) + ' KB, dist/test.html ' + (test.length / 1024).toFixed(1) + ' KB' + (sndN ? ', sounds ' + sndN + ' files ' + sndKB.toFixed(0) + ' KB' : ''));

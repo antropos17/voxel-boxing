@@ -16,3 +16,5 @@ Unity/.vs/
 Unity/.vscode/
 Unity/*_BurstDebugInformation_DoNotShip/
 Unity/.utmp/
+dist/sounds/
+__pycache__/

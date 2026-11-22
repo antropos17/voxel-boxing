@@ -77,7 +77,7 @@ function chipTooth(t){
   t.g.remove(t.v.group);t.v.dispose();t.v=makeToothBody(t,c);t.g.add(t.v.group);paintTooth(t);
   t.g.updateMatrixWorld(true);_tw.set(0,t.sl.low?.002:-.002,.002).applyMatrix4(t.g.matrixWorld);
   for(var k=0;k<5;k++)spawn(_tw.x,_tw.y,_tw.z,rnd(-.8,.8)+FD.x,rnd(.2,1.4),rnd(.4,1.6),236,230,212,.6,rnd(.0012,.0022),1,2);
-  sfx.tooth();
+  sfx.tooth(true);
 }
 /* the whole tooth comes out with its root and flies, the socket bleeds */
 function knockTooth(v,k,FDv){
@@ -85,7 +85,7 @@ function knockTooth(v,k,FDv){
   t.g.updateMatrixWorld(true);
   var fly={id:t.id,sl:t.sl,bl:Math.max(.25,t.bl),root:true,v:null};fly.v=makeToothBody(fly,t.chip?[.6,.7,.4]:null);paintTooth(fly);
   var ch=t.sl.low?-.005:.005;
-  addPiece(fly.v,t.g.matrixWorld,new T.Vector3(0,ch,0),new T.Vector3(FDv.x*rnd(.8,2.2)+rnd(-.8,.8),rnd(1.2,3),rnd(1,2.8)+FDv.z*.4),new T.Vector3(rnd(-30,30),rnd(-30,30),rnd(-30,30)));
+  addPiece(fly.v,t.g.matrixWorld,new T.Vector3(0,ch,0),new T.Vector3(FDv.x*rnd(.8,2.2)+rnd(-.8,.8),rnd(1.2,3),rnd(1,2.8)+FDv.z*.4),new T.Vector3(rnd(-30,30),rnd(-30,30),rnd(-30,30))).snd='tooth';
   /* socket: gum torn and bleeding */
   var gy=t.sl.low?-6.4:-4.0,i,gx,gz,gw=0;
   for(gx=-0.5;gx<=0.5;gx+=0.25)for(gz=-0.6;gz<=0.6;gz+=0.3){i=v.cell(t.cx+gx,gy,t.cz+gz);if(i>=0&&v.type[i]){var x=i%v.W,y=((i/v.W)|0)%v.H,z=(i/(v.W*v.H))|0;bloody(v,x,y,z,255);if(!gw){addWound(v,x,y,z,2.6);gw=1}}}

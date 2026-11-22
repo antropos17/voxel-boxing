@@ -95,7 +95,7 @@ function breakArm(k){
   boneShard(a.fo,sx*2.4,13.5,1.4,sx*1,0.5,0.7,4.2,.01);boneShard(a.fo,sx*2,12.4,-.8,sx*.8,-.4,-.4,2.6,.008);
   a.fo.group.updateMatrixWorld();_gv.set(sx*.016,.13,.01).applyMatrix4(a.fo.group.matrixWorld);bloodBurst(_gv,60,0,.6,.6,1);
   paintArmWound(a.fo,sx);
-  sfx.crack();vib([40,30,110]);banner('Перелом руки');chip('arm'+k,k?'рука ▶ сломана':'◀ рука сломана',true);G.stats.fract.push('рука');
+  sfx.crack('arm');vib([40,30,110]);banner('Перелом руки');chip('arm'+k,k?'рука ▶ сломана':'◀ рука сломана',true);G.stats.fract.push('рука');
   if(F.st==='guard'){setF('idle');F.next=.6}
 }
 function paintArmWound(v,sx){for(var i=0;i<v.n;i++){if(!v.type[i])continue;var W=v.W,H=v.H,X=v.X(i%W),Y=v.Y(((i/W)|0)%H),Z=v.Z((i/(W*H))|0);
@@ -234,7 +234,7 @@ function shatterAt(v,X,Y,Z,R,isHead){
   eachNear(v,X,Y,Z,R+.5,function(i,x,y,z){if(v.type[i]===CORE&&v.exp(x,y,z,i)){v.bl[i]=40+hash1(i*7)*90;v.mc(x,y,z)}});
   v.group.updateMatrixWorld();_gv.set(X*.01,Y*.01,Z*.01).applyMatrix4(v.group.matrixWorld);bloodBurst(_gv,70,FD.x,.8,.8,1.2);
   for(k=0;k<14;k++)spawn(_gv.x,_gv.y,_gv.z,rnd(-2,2)+nx*1.5,rnd(.2,2.4),rnd(-1,2)+nz*1.5,236,226,200,.4,rnd(.002,.0045),1,rnd(2,4));
-  sfx.crack();return L.length/4;
+  sfx.flay();return L.length/4;
 }
 function brainStrings(X,Y,Z,n){for(var k=0;k<n;k++)addRope({tmp:true,n:4+((Math.random()*3)|0),seg:.011,size:rnd(.011,.015),col:[224,160,164,.8],base:[160,60,70],a:bodyPt(HEADV,X+rnd(-1.2,1.2),Y+rnd(-1.2,1.2),Z+rnd(-1,1)),dir:_gv.set(rnd(-.3,.3),-1,.3).normalize(),damp:.95})}
 /* a lump of brain comes away where it is exposed near the blow */
@@ -266,7 +266,7 @@ function headBurst(v,X,Y,Z){
   brainStrings(cx,cy,cz,4);
   v.group.updateMatrixWorld();_gv.set(X*.01,Y*.01,Z*.01).applyMatrix4(v.group.matrixWorld);bloodBurst(_gv,220,FD.x,1.2,.8,1.5);
   for(k=0;k<40;k++)spawn(_gv.x,_gv.y,_gv.z,rnd(-2.6,2.6)+nx*2,rnd(.4,3.4),rnd(-1.2,2.6)+nz*2,214+rnd(20),140+rnd(40),150+rnd(30),.85,rnd(.004,.008),1,rnd(3,6));
-  screenSplat(5);sfx.crack();sfx.tear();sfx.squelch();vib([80,40,200]);hitStop(.2,1.1,true);if(!REDUCED)G.shake=Math.max(G.shake,.12);
+  screenSplat(5);sfx.burst();vib([80,40,200]);hitStop(.2,1.1,true);if(!REDUCED)G.shake=Math.max(G.shake,.12);
   chip('burst','череп раскрошен',true);G.stats.fract.push('череп вдребезги');
   knockout(true,'Голова разбита');
 }
