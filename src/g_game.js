@@ -60,6 +60,9 @@ var CHEAT={god:false,stam:false,mega:false,immortal:false,noKD:false,passive:fal
 try{var _cs=JSON.parse(localStorage.getItem('vb_cheat')||'{}');for(var _ck in CHEAT)if(_ck in _cs)CHEAT[_ck]=_cs[_ck]}catch(e){}
 /* ---------- state ---------- */
 var DODGE=.42,STRIKE=.13;
+/* the dodge hint fills only once a press is sure to save: from the press to the check pass the rest of the windup, STRIKE and up to two
+   frames lost at the state changes (2 x .05 s at 20 fps), and the dodge must still be above .04 then: .42-.04-.1=.28, a little less is safe */
+var DGO=DODGE-.15;
 var G={paused:false,cine:0,cineZ:0,tipT:0,mode:'load',level:1,time:0,anim:0,freeze:0,slow:0,shake:0,fall:0,koLook:0,fovK:0,endT:0,combo:0,comboT:0,stats:null};
 var P={hp:100,st:100,block:false,dodge:0,dodgeDir:1,dodgeCd:0,kick:0,gl:[],buf:null,cr:new T.Vector3(),cv:new T.Vector3()};
 var F=null,INSPECT=null;
@@ -126,7 +129,7 @@ function newFoe(level){var st=foeSteps(level),k;for(k=0;k<st.length;k++)st[k]()}
 function chip(key,text,bad){var c=F.chips[key];if(!c){c=document.createElement('span');$('chips').appendChild(c);F.chips[key]=c}c.textContent=text;c.className=bad?'bad':''}
 
 /* ---------- HUD ---------- */
-var hud={me:-1,st:-1,foe:-1,clock:-1,combo:-1,mega:-1,rd:null,wl:-1,wr:-1,tip:null,hs:0,hn:-1};
+var hud={me:-1,st:-1,foe:-1,clock:-1,combo:-1,mega:-1,rd:null,wl:-1,wr:-1,tip:null,hs:0,hg:0,hn:-1};
 function updHud(){
   var a=Math.round(clamp(P.hp,0,100)),b=Math.round(clamp(P.st,0,100)),c=Math.round(clamp(F.hp/F.max,0,1)*100),t=Math.floor(G.time);
   if(a!==hud.me){hud.me=a;$('hpMe').style.transform='scaleX('+a/100+')';$('vig').style.opacity=a<55?(.55-a/100)*1.5:0}
@@ -141,10 +144,12 @@ function updHud(){
   /* incoming punch: the screen edge on the attacking side glows red through the windup */
   var wl=0,wr=0;if(F&&G.mode==='fight'){var wk=F.st==='windup'?.25+.6*Math.min(1,F.t/F.dur):F.st==='strike'?1:0;if(F.hand<0)wl=wk;else wr=wk}
   if(wl!==hud.wl){hud.wl=wl;$('warnL').style.opacity=wl}if(wr!==hud.wr){hud.wr=wr;$('warnR').style.opacity=wr}
-  /* dodge hint: the button that takes the head away from the striking glove lights up through a real windup (not a feint); fades out over the ladder */
-  var hs=F&&G.mode==='fight'&&F.hn>0&&!F.feint&&(F.st==='windup'||F.st==='strike')?-F.side:0;
+  /* dodge hint on the button that takes the head away from the striking glove, through a real windup (not a feint), fading over the ladder:
+     a frame first ("get ready"), the fill only once a press is sure to save (DGO) */
+  var hs=F&&G.mode==='fight'&&F.hn>0&&!F.feint&&(F.st==='windup'||F.st==='strike')?-F.side:0,hg=hs&&(F.st==='strike'||F.dur-F.t+STRIKE<=DGO)?hs:0;
   if(F&&F.hn!==hud.hn){hud.hn=F.hn;$('pad').style.setProperty('--hn',F.hn)}
   if(hs!==hud.hs){hud.hs=hs;$('bL').classList.toggle('hint',hs<0);$('bR').classList.toggle('hint',hs>0)}
+  if(hg!==hud.hg){hud.hg=hg;$('bL').classList.toggle('go',hg<0);$('bR').classList.toggle('go',hg>0)}
   var tip=G.mode==='fight'&&G.tipT>0;if(tip!==hud.tip){hud.tip=tip;$('tips').classList.toggle('off',!tip)}
 }
 
@@ -348,7 +353,7 @@ function startWindup(chain,ctr){
   if(F.armBroken[F.hand<0?0:1])F.hand=-F.hand;if(F.armBroken[F.hand<0?0:1]){setF('idle');F.chain=0;F.next=rnd(1,1.8);return}F.kind=Math.random()<S.hk?'hook':'straight';
   fk=!chain&&!ctr&&!F.armBroken[0]&&!F.armBroken[1]&&Math.random()<F.feintP;
   if(!chain)F.chain=!ctr&&!fk&&Math.random()<F.chainP?1+((Math.random()*S.n)|0):0;
-  F.feint=fk;F.baited=false;F.side=F.hand;if(!chain){F.log.lead++;if(F.hand>0)F.log.right++}
+  F.feint=fk;F.baited=false;F.early=false;F.side=F.hand;if(!chain){F.log.lead++;if(F.hand>0)F.log.right++}
   setF('windup',F.wind*(chain?S.cw:1)*(ctr?.6:1)*(fk?.5:1)*F.slowMul*(F.groggy>0?1.3:1));
   if(fk){L_.feint++;return}
   if(!chain){if(ctr)L_.ctr++;else if(F.chain)L_.ser++;else L_.one++}
@@ -382,7 +387,7 @@ function foeAI(dt){
     case'idle':F.next-=dt;if(F.next<=0){if(Math.random()<F.guardP){F.guardHits=0;setF('guard',rnd(.9,1.6))}else startWindup(false)}break;
     case'guard':if(F.t>F.dur){if(Math.random()<.6)startWindup(false);else{setF('idle');F.next=rnd(.2,.6)*F.pace*gr}}break;
     case'windup':foeSide();if(F.t>F.dur){
-        if(F.feint){F.feint=false;F.hand=-F.hand;if(F.armBroken[F.hand<0?0:1]){setF('idle');F.next=rnd(.6,1.2);break}setF('windup',F.wind*(F.baited?.38:.55)*F.slowMul*(F.groggy>0?1.3:1));foeSide();windupCue();
+        if(F.feint){F.feint=false;F.early=false;F.hand=-F.hand;if(F.armBroken[F.hand<0?0:1]){setF('idle');F.next=rnd(.6,1.2);break}setF('windup',F.wind*(F.baited?.38:.55)*F.slowMul*(F.groggy>0?1.3:1));foeSide();windupCue();
           if(F.baited){F.log.bait++;_hp.copy(F.gw[0]).add(F.gw[1]).multiplyScalar(.5);_hp.y+=.24;popWorld('Финт!',_hp,'warn')}}
         else{setF('strike');sfx.whoosh()}}break;
     case'strike':
@@ -393,7 +398,7 @@ function foeAI(dt){
           if(CHEAT.stam)P.st=Math.max(P.st,0);if(P.st<0){P.st=0;playerHurt(F.dmg*.8,false,F.hand);popAt('Блок пробит',canvas.clientWidth/2,canvas.clientHeight*.6)}
           else{if(!CHEAT.god)P.hp-=F.dmg*F.sty.bc;sfx.block();P.kick=.4;P.bkv+=2.6;P.gl[0].sqv+=7;P.gl[1].sqv+=7;F.glv[F.hand<0?0:1].z-=3;P.cv.x+=1.6;if(!REDUCED)G.shake=Math.max(G.shake,.02);if(P.hp<=0){P.hp=0;G.mode='lost';G.endT=0;P.block=false;sfx.thud()}}
           setF('recover',rc*.83)}
-        else{playerHurt(F.dmg*(F.kind==='hook'?1.25:1),F.kind==='hook',F.hand);setF('recover',rc)}
+        else{playerHurt(F.dmg*(F.kind==='hook'?1.25:1),F.kind==='hook',F.hand);if(F.early){_hp.copy(F.gw[F.hand<0?0:1]);_hp.y+=.1;popWorld('Рано',_hp,'warn')}setF('recover',rc)}
       }break;
     case'recover':if(F.t>F.dur){if(F.chain>0){F.chain--;startWindup(true)}else{setF('idle');F.next=rnd(.7,1.5)*F.pace*F.slowMul*gr}}break;
     case'open':if(F.t>F.dur){setF('idle');F.next=rnd(.3,.7)*F.pace}break;
@@ -665,7 +670,7 @@ var _bcol=new T.Color(150,16,14);
 function tintGlove(v,c,amt){for(var i=0;i<v.n;i++){if(!v.type[i]||v.fl[i]===1)continue;var n=0.92+0.12*hash1(i),bl=hash1(i*3+1)<amt*1.2;
   v.rgb[i*3]=clamp((bl?140:c.r)*n,0,255);v.rgb[i*3+1]=clamp((bl?14:c.g)*n,0,255);v.rgb[i*3+2]=clamp((bl?14:c.b)*n,0,255);v.wet[i]=bl?220:56}
   v.allCol()}
-function dodge(dir){if(G.mode!=='fight'||P.dodge>0||P.dodgeCd>0)return;if(F&&F.st==='windup'&&F.feint)F.baited=true;P.dodge=DODGE;P.dodgeDir=dir;P.dodgeCd=DODGE+.28;P.st=Math.max(0,P.st-8);sfx.whoosh()}
+function dodge(dir){if(G.mode!=='fight'||P.dodge>0||P.dodgeCd>0)return;if(F&&F.st==='windup'){if(F.feint)F.baited=true;else if(dir===-F.side)F.early=true}P.dodge=DODGE;P.dodgeDir=dir;P.dodgeCd=DODGE+.28;P.st=Math.max(0,P.st-8);sfx.whoosh()}
 
 /* ---------- camera ---------- */
 var CAM0=new T.Vector3(0,1.6,0),LOOK0=new T.Vector3(0,1.5,-0.8),_lk=new T.Vector3(),BASEFOV=50,fovNow=0;

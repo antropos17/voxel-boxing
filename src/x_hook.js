@@ -210,8 +210,8 @@ window.__g.meshAB=function(reps){reps=reps||7;var o={};[['head',HEADV],['torso',
 window.__g.scene=scene;
 /* styles test: step frames without drawing (fixed 16.7 ms, no wall-clock meshing budget, so a seeded run repeats exactly), swing on demand */
 window.__g.CHEAT=CHEAT;window.__g.STY=STY;window.__g.dodge=dodge;window.__g.startFight=function(n){startFight(n,true)};window.__g.foeSide=function(){return F.side};
-window.__g.run=function(frames,fn){var rr=renderer.render,raf=window.requestAnimationFrame,t=last,i=0,mb=MESHB;MESHB=1e9;
+window.__g.run=function(frames,fn,ms){ms=ms||16.7;var rr=renderer.render,raf=window.requestAnimationFrame,t=last,i=0,mb=MESHB;MESHB=1e9;
   renderer.render=function(){scene.updateMatrixWorld();camera.updateMatrixWorld()};window.requestAnimationFrame=function(){};
-  try{for(;i<frames;i++){if(fn&&fn(i)===false)break;t+=16.7;frame(t)}}finally{renderer.render=rr;window.requestAnimationFrame=raf;MESHB=mb;last=performance.now()}return i};
-window.__g.swing=function(hand,kind,dur){F.hand=hand;F.kind=kind;F.feint=false;F.chain=0;F.side=hand;setF('windup',dur||.6)};
+  try{for(;i<frames;i++){if(fn&&fn(i)===false)break;t+=ms;frame(t)}}finally{renderer.render=rr;window.requestAnimationFrame=raf;MESHB=mb;last=performance.now()}return i};
+window.__g.swing=function(hand,kind,dur){F.hand=hand;F.kind=kind;F.feint=false;F.early=false;F.chain=0;F.side=hand;setF('windup',dur||.6)};
 window.__g.glovePx=function(k){var v=F.gw[k].clone().project(camera);return [(v.x*.5+.5)*canvas.clientWidth,(-v.y*.5+.5)*canvas.clientHeight]};
