@@ -65,3 +65,10 @@ window.__g.progs=function(){return {n:renderer.info.programs.length,ids:renderer
 window.__g.adm=function(a){admAct(a)};
 window.__g.chunkTimes=function(){function tm(v){var o=[],k,c,t0;for(var r=0;r<3;r++){o=[];for(k=0;k<v.chunks.length;k++){c=v.chunks[k];if(!c.geo)continue;t0=performance.now();v.meshCh(c);o.push(+(performance.now()-t0).toFixed(1))}}return o}
   return {head:tm(HEADV),torso:tm(TORSOV),W:[HEADV.W,HEADV.H,HEADV.D,TORSOV.W,TORSOV.H,TORSOV.D]}};
+/* styles test: step frames without drawing (fixed 16.7 ms, no wall-clock meshing budget, so a seeded run repeats exactly), swing on demand */
+window.__g.CHEAT=CHEAT;window.__g.STY=STY;window.__g.dodge=dodge;window.__g.startFight=function(n){startFight(n,true)};window.__g.foeSide=function(){return F.side};
+window.__g.run=function(frames,fn){var rr=renderer.render,raf=window.requestAnimationFrame,t=last,i=0,mb=MESHB;MESHB=1e9;
+  renderer.render=function(){scene.updateMatrixWorld();camera.updateMatrixWorld()};window.requestAnimationFrame=function(){};
+  try{for(;i<frames;i++){if(fn&&fn(i)===false)break;t+=16.7;frame(t)}}finally{renderer.render=rr;window.requestAnimationFrame=raf;MESHB=mb;last=performance.now()}return i};
+window.__g.swing=function(hand,kind,dur){F.hand=hand;F.kind=kind;F.feint=false;F.chain=0;F.side=hand;setF('windup',dur||.6)};
+window.__g.glovePx=function(k){var v=F.gw[k].clone().project(camera);return [(v.x*.5+.5)*canvas.clientWidth,(-v.y*.5+.5)*canvas.clientHeight]};
