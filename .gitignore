@@ -2,3 +2,17 @@ node_modules/
 shots/
 dist/test.html
 .DS_Store
+# Unity (проба в Unity/)
+Unity/[Ll]ibrary/
+Unity/[Tt]emp/
+Unity/[Oo]bj/
+Unity/[Ll]ogs/
+Unity/[Uu]ser[Ss]ettings/
+Unity/[Bb]uilds/
+Unity/[Bb]uild/
+Unity/*.csproj
+Unity/*.sln
+Unity/.vs/
+Unity/.vscode/
+Unity/*_BurstDebugInformation_DoNotShip/
+Unity/.utmp/
