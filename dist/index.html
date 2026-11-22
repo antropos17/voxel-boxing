@@ -47,8 +47,8 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
 .side .name{font:700 15px/1 var(--display);letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px;text-shadow:2px 2px 0 #000}
 .side.foe{text-align:right}
 .bar{height:14px;background:rgba(0,0,0,.55);border:2px solid var(--ink);box-sizing:border-box;position:relative}
-.bar i{position:absolute;top:0;bottom:0;left:0;width:100%;background:var(--bone);transition:width .15s}
-.foe .bar i{left:auto;right:0;background:var(--foe)}
+.bar i{position:absolute;top:0;bottom:0;left:0;width:100%;background:var(--bone);transform-origin:0 50%;transition:transform .15s}
+.foe .bar i{left:auto;right:0;transform-origin:100% 50%;background:var(--foe)}
 .bar.thin{height:7px;border-width:1px;margin-top:4px;border-color:var(--dim)}
 .bar.thin i{background:var(--gold)}
 .mid{text-align:center;font:500 12px/1.3 var(--display);color:var(--dim);text-transform:uppercase;letter-spacing:.05em;text-shadow:1px 1px 0 #000}
@@ -1788,9 +1788,9 @@ function chip(key,text,bad){var c=F.chips[key];if(!c){c=document.createElement('
 var hud={me:-1,st:-1,foe:-1,clock:-1,combo:-1,mega:-1,rd:null,wl:-1,wr:-1,tip:null};
 function updHud(){
   var a=Math.round(clamp(P.hp,0,100)),b=Math.round(clamp(P.st,0,100)),c=Math.round(clamp(F.hp/F.max,0,1)*100),t=Math.floor(G.time);
-  if(a!==hud.me){hud.me=a;$('hpMe').style.width=a+'%';$('vig').style.opacity=a<55?(.55-a/100)*1.5:0}
-  if(b!==hud.st){hud.st=b;$('stMe').style.width=b+'%'}
-  if(c!==hud.foe){hud.foe=c;$('hpFoe').style.width=c+'%'}
+  if(a!==hud.me){hud.me=a;$('hpMe').style.transform='scaleX('+a/100+')';$('vig').style.opacity=a<55?(.55-a/100)*1.5:0}
+  if(b!==hud.st){hud.st=b;$('stMe').style.transform='scaleX('+b/100+')'}
+  if(c!==hud.foe){hud.foe=c;$('hpFoe').style.transform='scaleX('+c/100+')'}
   if(t!==hud.clock){hud.clock=t;$('clock').textContent=Math.floor(t/60)+':'+('0'+t%60).slice(-2)}
   var cs=G.combo>=2&&G.comboT>0?G.combo:0;
   if(cs!==hud.combo){hud.combo=cs;var ce=$('cnum');if(cs){ce.textContent='Комбо ×'+cs;ce.style.opacity=1;ce.className=cs>=5?'big':''}else ce.style.opacity=0}

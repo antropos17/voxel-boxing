@@ -113,9 +113,9 @@ function chip(key,text,bad){var c=F.chips[key];if(!c){c=document.createElement('
 var hud={me:-1,st:-1,foe:-1,clock:-1,combo:-1,mega:-1,rd:null,wl:-1,wr:-1,tip:null};
 function updHud(){
   var a=Math.round(clamp(P.hp,0,100)),b=Math.round(clamp(P.st,0,100)),c=Math.round(clamp(F.hp/F.max,0,1)*100),t=Math.floor(G.time);
-  if(a!==hud.me){hud.me=a;$('hpMe').style.width=a+'%';$('vig').style.opacity=a<55?(.55-a/100)*1.5:0}
-  if(b!==hud.st){hud.st=b;$('stMe').style.width=b+'%'}
-  if(c!==hud.foe){hud.foe=c;$('hpFoe').style.width=c+'%'}
+  if(a!==hud.me){hud.me=a;$('hpMe').style.transform='scaleX('+a/100+')';$('vig').style.opacity=a<55?(.55-a/100)*1.5:0}
+  if(b!==hud.st){hud.st=b;$('stMe').style.transform='scaleX('+b/100+')'}
+  if(c!==hud.foe){hud.foe=c;$('hpFoe').style.transform='scaleX('+c/100+')'}
   if(t!==hud.clock){hud.clock=t;$('clock').textContent=Math.floor(t/60)+':'+('0'+t%60).slice(-2)}
   var cs=G.combo>=2&&G.comboT>0?G.combo:0;
   if(cs!==hud.combo){hud.combo=cs;var ce=$('cnum');if(cs){ce.textContent='Комбо ×'+cs;ce.style.opacity=1;ce.className=cs>=5?'big':''}else ce.style.opacity=0}
