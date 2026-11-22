@@ -846,13 +846,16 @@ canvas.addEventListener('webglcontextlost',function(e){e.preventDefault();CTXLOS
 canvas.addEventListener('webglcontextrestored',function(){CTXLOST=false;$('fail').style.display='none';resize()},false);
 $('fail').addEventListener('click',function(){if(CTXLOST)location.reload()});
 G.stats=newStats();resize();requestAnimationFrame(frame);
-var bstep=0;
+var bstep=0,lsteps=null;
 function buildNext(){
   try{
     if(bstep<4){buildAll(bstep);bstep++;setTimeout(buildNext,16);return}
-    newFoe(1);
-    /* compile both shader variants now, so the first punch does not stall on a shader build */
-    HEADV.setHits(true);TORSOV.setHits(true);renderer.compile(scene,camera);HEADV.setHits(false);TORSOV.setHits(false);renderer.compile(scene,camera);
+    /* the first opponent in the same slices as between fights, one task each, so loading never freezes the page for seconds */
+    if(!lsteps)lsteps=foeSteps(1);
+    if(bstep<4+lsteps.length){lsteps[bstep-4]();bstep++;setTimeout(buildNext,0);return}
+    /* compile both shader variants now, so the first punch does not stall on a shader build; one variant per task */
+    if(bstep===4+lsteps.length){HEADV.setHits(true);TORSOV.setHits(true);renderer.compile(scene,camera);HEADV.setHits(false);TORSOV.setHits(false);bstep++;setTimeout(buildNext,0);return}
+    renderer.compile(scene,camera);
     WARM=8;spawn(0,3,-9,0,0,0,0,0,0,0,.0005,6,.4);G.pristine=1;
     G.mode='menu';var b=$('goStart');b.disabled=false;b.textContent='В бой';
   }catch(e){$('fail').textContent='Ошибка загрузки: '+e.message;$('fail').style.display='flex';throw e}
