@@ -8,6 +8,7 @@ function syncAdm(){
   b=$('admLvl').children;for(k=0;k<b.length;k++)b[k].classList.toggle('on',+b[k].dataset.l===G.level);
   if(CHEAT.dmg!==1)n++;
   $('admDiag').textContent='FPS '+(DG.fps?Math.round(DG.fps):Math.round(1000/ftAvg))+' · худший кадр '+Math.round(Math.max(DG.w,DG.w0))+' мс · подвисаний '+DG.st+' · чёткость '+PR.toFixed(2)+(ERRN?' · ошибок '+ERRN+': '+ERRMSG:'');
+  $('admBox').textContent='Журнал: запусков '+BB.runs+', обрывов '+BB.lost+(BB.ev.length?'. '+BB.ev.slice().reverse().map(function(e){return e[0]+' '+e[1]+(e[2]?' '+e[2]+' мс':'')+(e.length>3?' ('+e.slice(3).filter(Boolean).join(', ')+')':'')}).join('; '):', событий нет');
   $('admBtn').classList.toggle('on',n>0);$('cheatTag').textContent=n?'читы: '+n:'';
 }
 function openAdm(on){if(on&&G.mode!=='fight'&&G.mode!=='ko')return;ADM.hidden=!on;G.paused=on;if(on){setBlock(false);touches={};syncAdm()}}
@@ -15,6 +16,7 @@ $('admBtn').addEventListener('click',function(){openAdm(ADM.hidden)});
 $('admClose').addEventListener('click',function(){openAdm(false)});
 ADM.addEventListener('click',function(e){
   var b=e.target.closest('button');if(!b)return;
+  if(b.id==='admBoxClr'){BB.ev=[];BB.lost=0;BB.runs=1;bbSave();syncAdm();return}
   if(b.dataset.c){var c=b.dataset.c;CHEAT[c]=!CHEAT[c];
     if(c==='mega'&&!CHEAT.mega){P.megaReady=false;P.mega=0}
     if(c==='passive'&&CHEAT.passive&&(F.st==='windup'||F.st==='strike')){setF('idle');F.next=1}

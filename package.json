@@ -1,6 +1,6 @@
 {
   "name": "voxel-box",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": true,
   "description": "Воксель Бокс — мобильный воксельный бокс от первого лица, один HTML-файл (three.js r128)",
   "scripts": {

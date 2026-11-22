@@ -527,6 +527,7 @@ function megaUse(){P.megaReady=false;P.mega=0;P.megaIdle=0}
 function punch(type,sx,sy,side,pw,dx,dy,buffered,opt){
   if(G.mode!=='fight'||P.block||P.dodge>.14||F.st==='down'||F.st==='rise')return;
   if(P.flurry&&!opt)return;
+  BBA=type;
   if(P.megaReady&&!opt&&!buffered){megaUse();if(type==='jab'){startFlurry(sx,sy);return}opt={mega:true}}
   var g=P.gl[side<0?0:1];
   if(opt){if(g.phase===1&&!opt.fl){g=P.gl[side<0?1:0]}g.phase=0}
@@ -744,6 +745,7 @@ var ERRN=0,ERRC=0,ERRMSG='';
 function frameErr(e){
   ERRN++;ERRC++;ERRMSG=String(e&&e.message||e)+' '+String(e&&e.stack||'').split('\n').slice(1,3).join(' ').replace(/\s+/g,' ').slice(0,160);
   try{console.error(e)}catch(x){}
+  if(ERRMSG.slice(0,60)!==BBE){BBE=ERRMSG.slice(0,60);bbLog('ошибка: '+BBE,0)}
   if(ERRC===5){try{clearPieces();clearRopes();ISLQ.v=null;WOUNDS.length=0;DRIPS.length=0}catch(x){}}
   else if(ERRC>=40){ERRC=0;try{if(G.mode!=='load'&&G.mode!=='menu'){G.building=false;startFight(false,true)}}catch(x){}}
 }
@@ -751,9 +753,19 @@ function frame(now){
   try{step(now);ERRC=0}catch(e){frameErr(e)}
   requestAnimationFrame(frame);
 }
+/* black box: slow frames, errors, a lost context and a tab that died on screen survive a reload; the admin panel shows them. At most BBMAX events */
+var BBMAX=12,BB={runs:0,lost:0,ev:[],at:null,open:false},BBA='',BBT=0,BBE='';
+try{var _bb=JSON.parse(localStorage.getItem('vb_box')||'null');if(_bb&&_bb.ev)BB=_bb}catch(e){}
+function bbSave(){try{localStorage.setItem('vb_box',JSON.stringify(BB))}catch(e){}}
+function bbWhere(){return [G.mode,F?F.st:'','бой '+G.level,BBA]}
+function bbLog(kind,ms,w){var d=new Date();BB.ev.push([d.getHours()+':'+('0'+d.getMinutes()).slice(-2),kind,ms].concat(w||bbWhere()));if(BB.ev.length>BBMAX)BB.ev.shift();bbSave()}
+BB.runs++;if(BB.open){BB.lost++;bbLog('обрыв',0,BB.at||[])}BB.open=true;BB.at=null;bbSave();
+document.addEventListener('visibilitychange',function(){BB.open=!document.hidden;bbSave()});window.addEventListener('pagehide',function(){BB.open=false;bbSave()});
 var DG={n:0,t:0,w:0,w0:0,st:0,fps:0};
 function diag(raw){
-  if(raw>1000||G.paused||(G.mode!=='fight'&&G.mode!=='ko'))return;
+  if(document.hidden||G.paused||(G.mode!=='fight'&&G.mode!=='ko'))return;
+  if(raw>250)bbLog('кадр',Math.round(raw));
+  BBT+=raw;if(BBT>2000){BBT=0;BB.at=bbWhere();bbSave()}
   DG.n++;DG.t+=raw;if(raw>DG.w)DG.w=raw;if(raw>60)DG.st++;
   if(DG.t>=5000){DG.fps=DG.n/DG.t*1000;DG.w0=DG.w;DG.n=0;DG.t=0;DG.w=0}
 }
@@ -791,7 +803,7 @@ function step(now){
 }
 /* the system took the graphics context away (memory pressure, a long stay in the background): say so instead of showing a dead picture */
 var CTXLOST=false,WARM=0;
-canvas.addEventListener('webglcontextlost',function(e){e.preventDefault();CTXLOST=true;var f=$('fail');f.textContent='Система остановила графику. Нажми, чтобы перезапустить.';f.style.display='flex';f.style.pointerEvents='auto'},false);
+canvas.addEventListener('webglcontextlost',function(e){e.preventDefault();CTXLOST=true;bbLog('графика отключена',0);var f=$('fail');f.textContent='Система остановила графику. Нажми, чтобы перезапустить.';f.style.display='flex';f.style.pointerEvents='auto'},false);
 canvas.addEventListener('webglcontextrestored',function(){CTXLOST=false;$('fail').style.display='none';resize()},false);
 $('fail').addEventListener('click',function(){if(CTXLOST)location.reload()});
 G.stats=newStats();resize();requestAnimationFrame(frame);
