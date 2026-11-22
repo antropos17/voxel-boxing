@@ -1,5 +1,5 @@
 {
   "name": "VoxProbe.Editor",
-  "references": ["VoxProbe", "Unity.RenderPipelines.Universal.Runtime", "Unity.RenderPipelines.Core.Runtime"],
+  "references": ["VoxProbe", "Unity.Mathematics", "Unity.Collections", "Unity.Burst", "Unity.RenderPipelines.Universal.Runtime", "Unity.RenderPipelines.Core.Runtime"],
   "includePlatforms": ["Editor"]
 }

@@ -132,7 +132,7 @@ namespace VoxProbe
 
         /// Фаска 3-4-5 до ближайшей пустой ячейки (за решёткой — пусто), как chamfer() в вебе.
         [BurstCompile(CompileSynchronously = true)]
-        struct ChamferJob : IJob
+        public struct ChamferJob : IJob
         {
             [ReadOnly] public NativeArray<byte> vox;
             public NativeArray<ushort> dist;

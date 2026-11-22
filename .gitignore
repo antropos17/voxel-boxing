@@ -16,5 +16,7 @@ Unity/.vs/
 Unity/.vscode/
 Unity/*_BurstDebugInformation_DoNotShip/
 Unity/.utmp/
+# снимки и срезы анатомической головы — часть отчёта этапов (Unity/ANATOMY-*.md)
+!Unity/Shots/
 dist/sounds/
 __pycache__/

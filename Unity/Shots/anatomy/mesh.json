@@ -1,0 +1,18 @@
+{
+  "chunks": 102,
+  "trisNaive": 182256,
+  "trisSmoothMerged": 180440,
+  "trisGreedyAONoSmooth": 146888,
+  "vertsSmoothMerged": 360880,
+  "meshBytesSmooth": 5413200,
+  "editorHeadChunkMsMean": 3.219,
+  "editorHeadChunkMsMax": 13.286,
+  "editorHeadRebuildOneThreadMs": 193.121,
+  "editorHeadRebuildParallelMs": 32.395,
+  "workers": 21,
+  "gridBytes": 5354286,
+  "renderTris": 180440,
+  "trisHead": 125768, "trisMandible": 13404, "trisEyes": 11152, "trisTeeth": 30116,
+  "headFacesOutside": 52372, "headFacesInnerCavities": 11336,
+  "ok": true
+}
