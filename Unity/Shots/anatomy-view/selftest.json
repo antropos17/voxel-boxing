@@ -1,0 +1,23 @@
+{
+  "window": "540x1170",
+  "intactTris": 108048, "chunks": 102,
+  "default": { "tris": 108048, "ms": 21.20, "removed": 0, "fps": 3 },
+  "orbit-60": { "tris": 108048, "ms": 21.20, "removed": 0, "fps": 3 },
+  "orbit-back-top": { "tris": 108048, "ms": 21.20, "removed": 0, "fps": 3 },
+  "zoom-eye": { "tris": 108048, "ms": 21.20, "removed": 0, "fps": 129 },
+  "cut-1": { "tris": 71222, "ms": 86.87, "removed": 0, "fps": 129 },
+  "cut-2": { "tris": 97438, "ms": 78.74, "removed": 0, "fps": 29 },
+  "cut-3": { "tris": 83080, "ms": 74.49, "removed": 0, "fps": 29 },
+  "cut-4": { "tris": 29704, "ms": 76.94, "removed": 0, "fps": 31 },
+  "cut-1-shift+0.4": { "tris": 74110, "ms": 75.57, "removed": 0, "fps": 15 },
+  "cut-0": { "tris": 108048, "ms": 59.58, "removed": 0, "fps": 15 },
+  "hit-light-cheek": { "tris": 108328, "ms": 4.09, "removed": 193, "fps": 15 },
+  "hit-medium-forehead": { "tris": 109208, "ms": 4.98, "removed": 870, "fps": 52 },
+  "hit-heavy-vault": { "tris": 112668, "ms": 7.51, "removed": 4971, "fps": 52 },
+  "hits-overview": { "tris": 112668, "ms": 7.51, "removed": 4971, "fps": 52 },
+  "hits-cut-1": { "tris": 78730, "ms": 76.44, "removed": 0, "fps": 52 },
+  "restored": { "tris": 108048, "ms": 58.94, "removed": 0, "fps": 52 },
+  "hits": [true, true, true],
+  "diffAfterRestore": 0,
+  "ok": true
+}

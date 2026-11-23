@@ -28,10 +28,22 @@ namespace VoxProbe
 
         static string F(double v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
 
+        bool viewMode;   // -anatView / -anatViewSelfTest: вместо замерного облёта — интерактивный просмотр (AnatViewer)
+
         void Awake()
         {
-            Application.targetFrameRate = 1000; QualitySettings.vSyncCount = 0;
             var args = System.Environment.GetCommandLineArgs();
+            int vi = System.Array.IndexOf(args, "-anatView"), si = System.Array.IndexOf(args, "-anatViewSelfTest");
+            if (vi >= 0 || si >= 0)
+            {
+                viewMode = true; enabled = false;
+                var w = gameObject.AddComponent<AnatViewer>();
+                w.anatMaterial = anatMaterial; w.selfTest = si >= 0;
+                int di = System.Array.IndexOf(args, "-anatShots");
+                if (di >= 0 && di + 1 < args.Length) w.shotsDir = args[di + 1];
+                return;
+            }
+            Application.targetFrameRate = 1000; QualitySettings.vSyncCount = 0;
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "-anatSeconds" && i + 1 < args.Length) seconds = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
@@ -142,6 +154,7 @@ namespace VoxProbe
 
         void OnDestroy()
         {
+            if (viewMode) return;
             foreach (var b in bodies) b.Destroy();
             a?.Dispose();
             if (layout.IsCreated) layout.Dispose();

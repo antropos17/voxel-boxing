@@ -75,13 +75,13 @@ namespace VoxProbe.Editor
             PlayerSettings.runInBackground = true;
             PlayerSettings.usePlayerLog = true;
             PlayerSettings.SplashScreen.show = false;
-            // старая система ввода (пакет Input System не ставим)
+            // обе системы ввода: проба (ProbeRunner) читает старый Input, просмотр головы (AnatViewer, -anatView) — пакет Input System
             var ps = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/ProjectSettings.asset");
             if (ps.Length > 0)
             {
                 var pso = new SerializedObject(ps[0]);
                 var p = pso.FindProperty("activeInputHandler");
-                if (p != null) { p.intValue = 0; pso.ApplyModifiedPropertiesWithoutUndo(); }
+                if (p != null) { p.intValue = 2; pso.ApplyModifiedPropertiesWithoutUndo(); }
             }
             AssetDatabase.SaveAssets();
             Debug.Log("PROBE_SETUP_OK");

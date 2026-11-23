@@ -1,6 +1,11 @@
 {
   "name": "VoxProbe",
-  "references": ["Unity.Burst", "Unity.Collections", "Unity.Mathematics"],
+  "references": [
+    "Unity.Burst",
+    "Unity.Collections",
+    "Unity.Mathematics",
+    "Unity.InputSystem"
+  ],
   "allowUnsafeCode": true,
   "autoReferenced": true
 }
