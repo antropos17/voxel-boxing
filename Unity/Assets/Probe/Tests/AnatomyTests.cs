@@ -16,7 +16,7 @@ namespace VoxProbe.Tests
 
         /// Зоны, где модель расходится с таблицей раздела 3 по известной причине (записано в Unity/ANATOMY-A.md).
         /// Тест ниже требует, чтобы расходились ровно они: исправление любой из них заметно, новое расхождение — тоже.
-        static readonly string[] KnownDeviations = { "бровь", "ухо" };
+        static readonly string[] KnownDeviations = { "бровь" };
 
         [Test]
         public void LayersMatchSpecTable()

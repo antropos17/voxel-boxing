@@ -1,0 +1,15 @@
+{
+  "style": 3, "visLim": 8,
+  "buildMs": 286.382, "visFullMs": 65.406,
+  "intact": { "head": 105480, "mandible": 0, "eyes": 2348, "teeth": 0, "all": 107828, "noCull": { "head": 127012, "mandible": 13280, "eyes": 12124, "teeth": 30116, "all": 182532 } },
+  "headMesh": { "chunkMsMean": 2.351, "chunkMsMax": 3.593, "oneThreadMs": 94.058, "parallelMs": 15.199, "chunks": 40 },
+  "headMeshNoCull": { "chunkMsMean": 2.462, "chunkMsMax": 6.542, "oneThreadMs": 100.945, "parallelMs": 13.014 },
+  "sinusHitNoReach": { "removed": 184, "visFlips": 184, "visUpdateMs": 7.838, "dirtyChunks": 5, "rebuildMs": 5.357, "incrementalVsFullDiff": 0 },
+  "cheekBreach": { "removed": 374, "visFlips": 852, "visUpdateMs": 11.064, "dirtyChunks": 30, "rebuildMs": 35.171, "incrementalVsFullDiff": 0 },
+  "afterCheekBreach": { "head": 107168, "mandible": 0, "eyes": 2348, "teeth": 3618, "all": 113134, "noCull": { "head": 127474, "mandible": 13280, "eyes": 12124, "teeth": 30116, "all": 182994 } },
+  "skullOpening": { "removed": 3462, "visFlips": 3462, "visUpdateMs": 0.441, "dirtyChunks": 4, "rebuildMs": 4.018, "incrementalVsFullDiff": 0 },
+  "afterSkullOpening": { "head": 107846, "mandible": 0, "eyes": 2348, "teeth": 3618, "all": 113812, "noCull": { "head": 128152, "mandible": 13280, "eyes": 12124, "teeth": 30116, "all": 183672 } },
+  "halfVisFullMs": 89.836,
+  "halfRemoved": { "head": 66542, "mandible": 112, "eyes": 1174, "teeth": 1668, "all": 69496, "noCull": { "head": 73668, "mandible": 6974, "eyes": 6062, "teeth": 16182, "all": 102886 } },
+  "ok": true
+}

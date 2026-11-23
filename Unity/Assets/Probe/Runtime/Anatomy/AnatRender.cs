@@ -19,6 +19,9 @@ namespace VoxProbe
         public readonly bool[] dirty;
         public int dirtyCount;
         public AnatState st;                       // состояния вокселей (этап B), у тела без повреждений — null
+        public bool cull = true;                   // отсекать невидимое (AnatVis); false — рисовать всё, как на этапе A
+        public int style = AnatMesher.StyleDefault; // вид поверхности (AnatMesher.Style*)
+        readonly bool isHead;
         NativeArray<VS> nopool; NativeArray<int> noslot;
         static MaterialPropertyBlock mpb;
         static readonly int ChunkOrgId = Shader.PropertyToID("_ChunkOrg"), BodyParId = Shader.PropertyToID("_BodyPar");
@@ -31,7 +34,7 @@ namespace VoxProbe
 
         public AnatBody(AnatGrid g, Transform parent, Material material, int bodyId)
         {
-            this.g = g;
+            this.g = g; isHead = g.name == "head";
             mpb ??= new MaterialPropertyBlock();
             root = new GameObject(g.name).transform;
             root.SetParent(parent, false);
@@ -72,6 +75,17 @@ namespace VoxProbe
 
         public void MarkDirty(int chunk) { if (!dirty[chunk]) { dirty[chunk] = true; dirtyCount++; } }
 
+        VisView Vis() => cull ? VisView.Of(g, isHead) : VisView.Off(g.mat);
+
+        /// Забрать из решётки ячейки, сменившие видимость (AnatGrid.Touch), и пометить чанки с отступом сетки (2 ячейки + угол).
+        public void SyncVis()
+        {
+            if (math.any(g.tmn > g.tmx)) return;
+            int3 c0 = math.max(g.tmn - 3, 0) / AnatMesher.CS, c1 = math.min(g.tmx + 3, g.dims - 1) / AnatMesher.CS;
+            for (int z = c0.z; z <= c1.z; z++) for (int y = c0.y; y <= c1.y; y++) for (int x = c0.x; x <= c1.x; x++) MarkDirty(x + nch.x * (y + nch.y * z));
+            g.tmn = int.MaxValue; g.tmx = int.MinValue;
+        }
+
         /// Поставить в работу до max грязных чанков (джобами, все потоки). Готовые сетки применяются в Complete().
         public void Schedule(NativeArray<VertexAttributeDescriptor> layout, int max)
         {
@@ -82,7 +96,7 @@ namespace VoxProbe
             jobOrg = new NativeArray<int3>(n, Allocator.TempJob); jobSt = new NativeArray<long>(n * 4, Allocator.TempJob);
             for (int k = 0; k < n; k++) jobOrg[k] = ChunkCoord(jobIdx[k]) * AnatMesher.CS;
             jobData = Mesh.AllocateWritableMeshData(n);
-            job = new AnatChunkJob { mat = g.mat, origins = jobOrg, layout = layout, dims = g.dims, sv = View(), dscale = 0.01f / g.step, meshes = jobData, stats = jobSt }.Schedule(n, 1);
+            job = new AnatChunkJob { mat = g.mat, origins = jobOrg, layout = layout, dims = g.dims, sv = View(), vv = Vis(), style = style, dscale = 0.01f / g.step, meshes = jobData, stats = jobSt }.Schedule(n, 1);
             inFlight = true;
         }
 
@@ -119,7 +133,7 @@ namespace VoxProbe
             var st = new NativeArray<long>(n * 4, Allocator.TempJob);
             for (int i = 0; i < n; i++) orgs[i] = ChunkCoord(i) * AnatMesher.CS;
             var data = Mesh.AllocateWritableMeshData(n);
-            new AnatChunkJob { mat = g.mat, origins = orgs, layout = layout, dims = g.dims, sv = View(), dscale = 0.01f / g.step, meshes = data, stats = st }.Schedule(n, 1).Complete();
+            new AnatChunkJob { mat = g.mat, origins = orgs, layout = layout, dims = g.dims, sv = View(), vv = Vis(), style = style, dscale = 0.01f / g.step, meshes = data, stats = st }.Schedule(n, 1).Complete();
             Mesh.ApplyAndDisposeWritableMeshData(data, meshes, MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices);
             for (int i = 0; i < n; i++)
             {
@@ -128,7 +142,7 @@ namespace VoxProbe
                 rs[i].enabled = quads[i] > 0;
                 dirty[i] = false;
             }
-            dirtyCount = 0;
+            dirtyCount = 0; g.tmn = int.MaxValue; g.tmx = int.MinValue;
             orgs.Dispose(); st.Dispose();
         }
 

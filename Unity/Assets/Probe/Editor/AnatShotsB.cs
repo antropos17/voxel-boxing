@@ -29,10 +29,11 @@ namespace VoxProbe.Editor
             public void Sync()
             {
                 for (int i = 0; i < d.dirty.Length; i++) if (d.dirty[i]) { d.dirty[i] = false; head.MarkDirty(i); }
-                if (head.dirtyCount == 0) return;
-                int r0 = head.rebuilt; var sw = System.Diagnostics.Stopwatch.StartNew();
-                head.RebuildDirty(layout);
-                double ms = sw.Elapsed.TotalMilliseconds; rebuilt += head.rebuilt - r0; rebuildMs += ms; rebuildMsMax = math.max(rebuildMsMax, ms); rebuildCalls++;
+                int n = 0, r0 = 0; foreach (var b in bodies) { b.SyncVis(); n += b.dirtyCount; r0 += b.rebuilt; }
+                if (n == 0) return;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                foreach (var b in bodies) b.RebuildDirty(layout);
+                double ms = sw.Elapsed.TotalMilliseconds; foreach (var b in bodies) rebuilt += b.rebuilt; rebuilt -= r0; rebuildMs += ms; rebuildMsMax = math.max(rebuildMsMax, ms); rebuildCalls++;
             }
 
             public void Shot(string name, Vector3 eye, Vector3 at, float fov)

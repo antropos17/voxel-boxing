@@ -131,10 +131,11 @@ namespace VoxProbe.Editor
                     var g = b.g; saved.Add(g.mat.ToArray());
                     for (int z = 0; z < g.dims.z; z++) for (int y = 0; y < g.dims.y; y++) for (int x = 0; x < g.dims.x; x++)
                         if (remove(g.World(g.Local(x, y, z)))) g.mat[g.Index(x, y, z)] = 0;
-                    b.BuildAll(layout);
                 }
+                a.vis.Full(); foreach (var b in bodies) b.BuildAll(layout);
                 Shot(name, eye, at, fov);
-                for (int i = 0; i < bodies.Count; i++) { bodies[i].g.mat.CopyFrom(saved[i]); bodies[i].BuildAll(layout); }
+                for (int i = 0; i < bodies.Count; i++) bodies[i].g.mat.CopyFrom(saved[i]);
+                a.vis.Full(); foreach (var b in bodies) b.BuildAll(layout);
             }
             lightGo.transform.rotation = Quaternion.Euler(25, 120, 0);
             Cut("cut-sagittal", p => p.x > 0.35f, C(62, 2, 2), ctr, 27);
@@ -176,6 +177,8 @@ namespace VoxProbe.Editor
             var nh = (h.dims + AnatMesher.CS - 1) / AnatMesher.CS;
             int n = nh.x * nh.y * nh.z;
             var org = new NativeArray<int3>(1, Allocator.TempJob);
+            var nopool = new NativeArray<VS>(1, Allocator.TempJob); var noslot = new NativeArray<int>(1, Allocator.TempJob);
+            var sv = new StateView { pool = nopool, slot = noslot, nch = 1 }; var vv = VisView.Of(h, true);
             var st = new NativeArray<long>(4, Allocator.TempJob);
             double sum = 0, max = 0;
             var sw = new System.Diagnostics.Stopwatch();
@@ -187,7 +190,7 @@ namespace VoxProbe.Editor
                 {
                     var md = Mesh.AllocateWritableMeshData(1);
                     sw.Restart();
-                    new AnatChunkJob { mat = h.mat, origins = org, layout = layout, dims = h.dims, meshes = md, stats = st }.Run(1);
+                    new AnatChunkJob { mat = h.mat, origins = org, layout = layout, dims = h.dims, sv = sv, vv = vv, meshes = md, stats = st }.Run(1);
                     double ms = sw.Elapsed.TotalMilliseconds;
                     md.Dispose();
                     if (rep > 0) best = math.min(best, ms);
@@ -202,7 +205,7 @@ namespace VoxProbe.Editor
             {
                 var md = Mesh.AllocateWritableMeshData(n);
                 sw.Restart();
-                new AnatChunkJob { mat = h.mat, origins = orgs, layout = layout, dims = h.dims, meshes = md, stats = sts }.Schedule(n, 1).Complete();
+                new AnatChunkJob { mat = h.mat, origins = orgs, layout = layout, dims = h.dims, sv = sv, vv = vv, meshes = md, stats = sts }.Schedule(n, 1).Complete();
                 double ms = sw.Elapsed.TotalMilliseconds;
                 md.Dispose();
                 if (rep > 0) bestAll = math.min(bestAll, ms);
@@ -212,7 +215,7 @@ namespace VoxProbe.Editor
             sb.Append("  \"workers\": ").Append(Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount).Append(",\n");
             long gridBytes = 0; foreach (var g in a.All) gridBytes += g.Count * 3L;
             sb.Append("  \"gridBytes\": ").Append(gridBytes).Append(",\n");
-            org.Dispose(); st.Dispose(); orgs.Dispose(); sts.Dispose();
+            org.Dispose(); st.Dispose(); orgs.Dispose(); sts.Dispose(); nopool.Dispose(); noslot.Dispose();
         }
     }
 }

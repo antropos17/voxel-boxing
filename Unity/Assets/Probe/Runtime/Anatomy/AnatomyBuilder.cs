@@ -16,6 +16,8 @@ namespace VoxProbe
     {
         public string name;
         public NativeArray<byte> mat, part, zone;
+        public NativeArray<byte> vis;                 // видимость открытых ячеек (AnatVis), создаётся вместе с AnatVis
+        public int3 tmn = int.MaxValue, tmx = int.MinValue;   // ячейки, чью сетку надо перестроить из-за видимости (забирает AnatBody)
         public int3 dims;
         public float step;
         public float3 org, pos;
@@ -41,7 +43,8 @@ namespace VoxProbe
             if (math.any(c < 0) || math.any(c >= dims)) return -1;
             return Index(c.x, c.y, c.z);
         }
-        public void Dispose() { if (mat.IsCreated) { mat.Dispose(); part.Dispose(); zone.Dispose(); } }
+        public void Touch(int3 mn, int3 mx) { tmn = math.min(tmn, mn); tmx = math.max(tmx, mx); }
+        public void Dispose() { if (mat.IsCreated) { mat.Dispose(); part.Dispose(); zone.Dispose(); } if (vis.IsCreated) vis.Dispose(); }
     }
 
     /// Анатомическая голова: голова (кожа, мышцы, череп, мозг, полости), нижняя челюсть, два глаза, 32 зуба.
@@ -50,6 +53,7 @@ namespace VoxProbe
         public AnatGrid head, mand, eyeL, eyeR;
         public AnatGrid[] teeth;
         public ToothDef[] toothDefs;
+        public AnatVis vis;
         public readonly Dictionary<string, double> ms = new Dictionary<string, double>();
         public IEnumerable<AnatGrid> All { get { yield return head; yield return mand; yield return eyeL; yield return eyeR; foreach (var t in teeth) yield return t; } }
 
@@ -162,6 +166,9 @@ namespace VoxProbe
 
             occ.Dispose(); dmask.Dispose(); dist.Dispose(); mmask.Dispose(); mdist.Dispose();
             teeth.Dispose(); arch.Dispose(); thick.Dispose(); anchors.Dispose(); vessels.Dispose();
+            sw.Restart();
+            r.vis = new AnatVis(r); r.vis.Full();
+            r.ms["visibility"] = sw.Elapsed.TotalMilliseconds;
             double total = 0; foreach (var kv in r.ms) total += kv.Value;
             r.ms["total"] = total;
             return r;
@@ -198,7 +205,7 @@ namespace VoxProbe
                         if (cornea && rc > 0.68f) m = AnatMat.Cornea;
                         else if (!cornea && r > ER - 0.1f) m = AnatMat.Sclera;
                         else if (p.z > 0.82f && p.z < 0.95f && r2 < 0.62f) m = r2 < 0.2f ? AnatMat.Pupil : AnatMat.Iris;
-                        else if (p.z > 0.82f) m = AnatMat.Vitreous; // водянистая влага передней камеры (отдельного материала нет)
+                        else if (p.z > 0.82f) m = AnatMat.Aqueous;  // водянистая влага передней камеры
                         else if (AnatGeo.InEll(p.x, p.y, p.z - 0.6f, 0.45f, 0.45f, 0.2f)) m = AnatMat.Lens;
                         else m = AnatMat.Vitreous;
                     }
@@ -266,7 +273,7 @@ namespace VoxProbe
                     for (int x = 0; x < dims.x; x++, i++)
                     {
                         float X = org.x + (x + 0.5f) * s;
-                        bool real = HeadSdf(X, Y, Z) <= 0 || InTongue(X, Y, Z);
+                        bool real = y > 0 && (HeadSdf(X, Y, Z) <= 0 || InTongue(X, Y, Z));   // нижний слой пуст: срез шеи закрыт кожей
                         occ[i] = (byte)(real ? 1 : 0);
                         // для глубины покровов рот заполнен: глубина считается от наружной кожи
                         dmask[i] = (byte)(real || MouthCav(X, Y, Z) < 0.3f ? 1 : 0);
@@ -339,6 +346,7 @@ namespace VoxProbe
                             Cell(X, Y, Z, depth, new int3(x, y, z), out m, out p);
                             zn = m != 0 ? ZoneAt(X, Y, Z) : (byte)0;
                         }
+                        else if (MouthCav(X, Y, Z) < 0) m = AnatMat.Air;   // полость рта вырезана из формы: это воздух полости, а не пустота снаружи
                         mat[i] = m; part[i] = p; zone[i] = zn;
                     }
                 }
@@ -369,7 +377,7 @@ namespace VoxProbe
                 // наружная кожа
                 if (depth < L.b0)
                 {
-                    m = LipZone(ax, y, z) ? AnatMat.Lip : BeardZone(x, y, z) ? AnatMat.Stubble : AnatMat.Skin;
+                    m = LipZone(ax, y, z) ? AnatMat.Lip : CellHash(c) < StubbleDensity(x, y, z) * 0.97f ? AnatMat.Stubble : AnatMat.Skin;
                     return;
                 }
                 // со стороны рта: слизистая, десна, альвеолы, мышцы щеки и губ
@@ -389,7 +397,7 @@ namespace VoxProbe
                 // ухо: хрящ под кожей
                 float ec = EarCanal(ax, y, z);
                 if (ec < 0.2f && depth >= 0.2f) { m = ec < 0 ? AnatMat.Air : AnatMat.Skin; return; }
-                if (EarZone(ax, y, z)) { m = AnatMat.Cartilage; return; }
+                if (EarZone(ax, y, z)) { m = y < -1.45f ? AnatMat.Fat : AnatMat.Cartilage; return; }   // мочка без хряща
                 // сосуды под кожей
                 for (int k = 0; k < vessels.Length; k++)
                 {

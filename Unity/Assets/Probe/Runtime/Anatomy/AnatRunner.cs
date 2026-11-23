@@ -89,7 +89,9 @@ namespace VoxProbe
             int tris = 0, chunks = 0, drawn = 0; long verts = 0;
             foreach (var b in bodies) { tris += b.Triangles; chunks += b.ChunkCount; for (int i = 0; i < b.ChunkCount; i++) if (b.quads[i] > 0) { drawn++; verts += b.quads[i] * 4; } }
             kv["tris"] = tris.ToString(); kv["verts"] = verts.ToString(); kv["chunks"] = chunks.ToString(); kv["chunksDrawn"] = drawn.ToString();
-            kv["meshBytes"] = (verts * 12 + verts / 4 * 6 * 2).ToString();
+            kv["meshBytes"] = (verts * 20 + verts / 4 * 6 * 2).ToString();
+            foreach (var b in bodies) { string k = b.g == a.head ? "trisHead" : b.g == a.mand ? "trisMandible" : b.g == a.eyeL || b.g == a.eyeR ? "trisEyes" : "trisTeeth"; kv.TryGetValue(k, out var o); kv[k] = ((o == null ? 0 : int.Parse(o)) + b.Triangles).ToString(); }
+            kv["visMs"] = F(a.ms["visibility"]);
             long grid = 0; foreach (var g in a.All) grid += g.Count * 3L;
             kv["gridBytes"] = grid.ToString();
             kv["bodies"] = bodies.Count.ToString();

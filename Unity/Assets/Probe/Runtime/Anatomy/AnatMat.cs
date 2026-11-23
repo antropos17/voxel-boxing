@@ -10,8 +10,10 @@ namespace VoxProbe
             Muscle = 10, Tendon = 11, Periost = 12, Compact = 13, Spongy = 14, Cartilage = 15, Dura = 16, Csf = 17, Grey = 18, White = 19,
             CerebGrey = 20, Stem = 21, VenSinus = 22, Artery = 23, Vein = 24, Sclera = 25, Cornea = 26, Iris = 27, Pupil = 28, Lens = 29,
             Vitreous = 30, Nerve = 31, OrbFat = 32, Enamel = 33, Dentin = 34, Pulp = 35, Hair = 36, Brow = 37, Lash = 38, Stubble = 39,
-            Air = 40, Clot = 41, Crushed = 42, Blood = 43, Covered = 44, Count = 45;
+            Air = 40, Clot = 41, Crushed = 42, Blood = 43, Covered = 44, Aqueous = 45, Shade = 46, Count = 47;
         /// Covered — ячейка занята другим телом (глаз, зуб, нижняя челюсть): для отсечения граней она сплошная, сама не рисуется.
+        /// Aqueous — водянистая влага передней камеры глаза. Она и роговица прозрачны: сетка их не рисует, грани за ними видны (Clear).
+        /// Shade — не материал ячейки: «тень полости», которой сетка закрывает видимый воздух там, где он переходит в скрытый (AnatVis).
 
         public const byte ClsEmpty = 0, ClsSoft = 1, ClsBone = 2, ClsLiquid = 3, ClsHard = 4, ClsHair = 5, ClsAir = 6;
 
@@ -77,6 +79,8 @@ namespace VoxProbe
             D("размозжённая ткань",   150,30,34, 150,30,34, .25f, 2f, .9f, .7f, ClsSoft),
             D("кровь",                110,8,12, 110,8,12, .10f, .5f, 1f, 0f, ClsLiquid),
             D("занято другим телом",  0,0,0, 0,0,0, 0, 0, 0, 0, ClsAir),
+            D("водянистая влага",     214,224,220, 210,222,218, .02f, 1f, 1f, 0f, ClsLiquid),
+            D("тень полости",         34,16,18, 34,16,18, .05f, 0, .3f, 0f, ClsAir),
         };
 
         /// Структуры тоньше шага решётки, утолщённые до одного вокселя (HEAD-SPEC, раздел 1). [название, настоящая толщина, в модели]
@@ -103,6 +107,8 @@ namespace VoxProbe
         public static bool Solid(byte m) => m != Empty && m != Air && m != Covered;
         /// Сплошная для отсечения граней (Covered закрывает грани соседей).
         public static bool Cull(byte m) => m != Empty && m != Air;
+        /// Прозрачна для сетки: роговица и водянистая влага (не рисуются и не закрывают грани за собой).
+        public static bool Clear(byte m) => m == Cornea || m == Aqueous;
     }
 
     /// Номера частей (второй байт вокселя): кость, мышца или сосуд. Бит 7 у кости — шов.

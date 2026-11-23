@@ -74,11 +74,14 @@ namespace VoxProbe
         public float3 lastTearDir; public byte lastTearZone;
         // счёт
         public int hits, removed, peakWounds, peakDrips, peakDrops;
-        public double hitMs, hitMsMax, stepMs, stepMsMax;
+        public double hitMs, hitMsMax, stepMs, stepMsMax, visMs, visMsMax;
+        Unity.Collections.NativeList<int> opened;   // ячейки, ставшие пустыми с прошлого обновления видимости
+        bool closed;                                 // ячейка закрылась (отёк века) — видимость заново
 
         public AnatDamage(AnatHead a, int seed = 1)
         {
             this.a = a; h = a.head; st = new AnatState(h); rng = new System.Random(seed);
+            opened = new Unity.Collections.NativeList<int>(256, Unity.Collections.Allocator.Persistent);
             dirty = new bool[st.nch.x * st.nch.y * st.nch.z];
             // веки: кожа зоны «глаз» в оболочке вокруг шара спереди
             for (int z = 0; z < h.dims.z; z++) for (int y = 0; y < h.dims.y; y++) for (int x = 0; x < h.dims.x; x++)
@@ -248,6 +251,7 @@ namespace VoxProbe
             if (noseAcc > 3 && zone == AnatZone.Nose)
                 for (int s = 0; s < 2; s++) if (nostril[s].x >= 0) AddWound(nostril[s].x, nostril[s].y, nostril[s].z, 2.2f + noseAcc * 0.25f, WNose, 45, "кровь из носа");
             sw.Stop(); r.ms = (float)sw.Elapsed.TotalMilliseconds; hitMs += r.ms; hitMsMax = math.max(hitMsMax, r.ms);
+            SyncVis();
             return r;
         }
 
@@ -262,6 +266,7 @@ namespace VoxProbe
             int i = h.Index(x, y, z); byte m = h.mat[i], part = h.part[i];
             exposed.Add((time, AnatMat.Table[m].name, h.zone[i]));
             h.mat[i] = AnatMat.Empty; if (st.Idx(x, y, z, false) >= 0) st.Set(x, y, z, default);
+            opened.Add(i);
             removed++;
             Dirty(x, y, z);
             byte now = T2(time);
@@ -510,6 +515,7 @@ namespace VoxProbe
                 if (done || math.length(d.p) > 60) drops.RemoveAt(k); else drops[k] = d;
             }
             eyeT += dt; if (eyeT >= 0.25f) { eyeT = 0; EyeCheck(); }
+            SyncVis();
             sw.Stop(); stepMs += sw.Elapsed.TotalMilliseconds; stepMsMax = math.max(stepMsMax, sw.Elapsed.TotalMilliseconds);
         }
 
@@ -570,7 +576,7 @@ namespace VoxProbe
                     int i = h.Index(q.x, q.y, q.z); if (!Open(h.mat[i])) continue;
                     float3 p = h.Local(q.x, q.y, q.z); float d = math.length(p - gc);
                     if (d < AnatGeo.ER - 0.1f || p.z < AnatGeo.EZ || math.abs(p.x - gc.x) > 1.55f || math.abs(p.y - gc.y) > 0.95f) continue;
-                    h.mat[i] = AnatMat.Skin; h.part[i] = 0; h.zone[i] = AnatZone.Eye;
+                    h.mat[i] = AnatMat.Skin; h.part[i] = 0; h.zone[i] = AnatZone.Eye; closed = true;
                     Put(q.x, q.y, q.z, new VS { swell = (byte)math.min(255, sw / 0.005f * 0.5f), rt = now, bruise = (byte)br, bt = now, red = (byte)rd });
                     filled++;
                 }
@@ -580,6 +586,15 @@ namespace VoxProbe
 
         static string F1(float v) => v.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
 
-        public void Dispose() => st.Dispose();
+        /// Видимость после изменений: от удалённых ячеек (в том же кадре), после закрытия — заново.
+        void SyncVis()
+        {
+            if (a.vis == null || (opened.Length == 0 && !closed)) return;
+            if (closed) a.vis.Full(); else a.vis.Opened(opened.AsArray());
+            opened.Clear(); closed = false;
+            visMs += a.vis.lastMs; visMsMax = math.max(visMsMax, a.vis.lastMs);
+        }
+
+        public void Dispose() { st.Dispose(); if (opened.IsCreated) opened.Dispose(); }
     }
 }

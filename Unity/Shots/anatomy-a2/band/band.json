@@ -1,0 +1,9 @@
+{
+  "style0": { "trisHead": 102860, "trisAll": 104440, "headChunkMsMean": 2.016, "headChunkMsMax": 3.516, "headOneThreadMs": 80.652, "headParallelMs": 13.391, "chunks": 40 },
+  "style1": { "trisHead": 102860, "trisAll": 104440, "headChunkMsMean": 2.087, "headChunkMsMax": 3.166, "headOneThreadMs": 83.483, "headParallelMs": 13.43, "chunks": 40 },
+  "style2": { "trisHead": 102860, "trisAll": 104440, "headChunkMsMean": 1.992, "headChunkMsMax": 2.822, "headOneThreadMs": 79.665, "headParallelMs": 13.075, "chunks": 40 },
+  "style3": { "trisHead": 102860, "trisAll": 104440, "headChunkMsMean": 2.071, "headChunkMsMax": 3.005, "headOneThreadMs": 82.83, "headParallelMs": 12.474, "chunks": 40 },
+  "style6": { "trisHead": 102860, "trisAll": 104440, "headChunkMsMean": 2.239, "headChunkMsMax": 3.312, "headOneThreadMs": 89.568, "headParallelMs": 16.741, "chunks": 40 },
+  "style7": { "trisHead": 102860, "trisAll": 104440, "headChunkMsMean": 2.408, "headChunkMsMax": 4.03, "headOneThreadMs": 96.304, "headParallelMs": 14.069, "chunks": 40 },
+  "order": "0 1 2 / 3 6 7"
+}

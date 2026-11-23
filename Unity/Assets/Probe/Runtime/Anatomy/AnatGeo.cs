@@ -64,9 +64,9 @@ namespace VoxProbe
             return dy >= top - 0.05f && dy < top + 0.36f;
         }
 
-        /// Наружная форма — headSDF веб-версии (d_models.js) плюс полнота щёк на уровне зубов
-        /// (в вебе щека там 3,45 см от средней линии — 32 зуба с корнями и щекой 1,5 см не помещаются).
-        public static float HeadSdf(float x, float y, float z)
+        /// Наружная форма — headSDF веб-версии (d_models.js) без уха; шея — столб до низа решётки (в вебе под ней туловище,
+        /// здесь шар шеи замыкался под челюстью бугром), низ решётки закрыт кожей (OccJob).
+        public static float Body(float x, float y, float z)
         {
             float ax = math.abs(x), d, e;
             d = SdEll(x, y - 3.4f, z + 1.2f, 7.5f, 9.4f, 9.4f);
@@ -79,18 +79,38 @@ namespace VoxProbe
             d = Smin(d, SdEll(x, y + 6.9f, z - 3.6f, 5.2f, 2.6f, 5.0f), 1.8f);
             d = Smin(d, SdEll(x, y + 8.6f, z - 7.1f, 2.5f, 2.0f, 1.7f), 1.4f);
             d = Smin(d, SdEll(ax - 4.9f, y + 6.4f, z - 0.2f, 1.3f, 1.8f, 1.9f), 1.4f);
-            d = Smin(d, SdEll(ax - 2.75f, y + 4.7f, z - 4.3f, 2.0f, 1.9f, 2.3f), 1.3f); // щека (добавлено)
             d = Smin(d, SdCap(new float3(ax, y, z), new float3(4.9f, -6.0f, 0.2f), new float3(5.0f, -0.8f, 0.6f), 1.2f, 1.2f), 1.2f);
-            d = Smin(d, SdEll(x, y + 7.4f, z + 2.4f, 5.0f, 4.2f, 4.8f), 2.2f);
+            d = Smin(d, SdEll(x, math.max(y + 7.4f, 0), z + 2.4f, 4.8f, 4.2f, 4.7f), 2.2f);
             e = SdCap(new float3(x, y, z), new float3(0, 3.0f, 8.3f), new float3(0, -1.4f, 10.3f), 0.55f, 0.72f);
             e = Smin(e, SdEll(x, y + 1.75f, z - 10.15f, 1.1f, 0.95f, 0.95f), 0.8f);
             e = Smin(e, SdEll(ax - 1.3f, y + 2.25f, z - 8.95f, 0.82f, 0.72f, 0.95f), 0.6f);
             d = Smin(d, e, 0.9f);
             d = Smin(d, SdEll(x, y + 4.45f, z - 8.55f, 2.45f, 0.72f, 1.0f), 0.7f);
             d = Smin(d, SdEll(x, y + 5.95f, z - 8.35f, 2.25f, 0.75f, 0.95f), 0.7f);
-            e = SdEll(ax - 7.65f, y - 0.6f, z + 1.0f, 0.95f, 3.1f, 2.0f);
-            e = Smax(e, -SdEll(ax - 8.35f, y - 0.2f, z + 0.7f, 0.55f, 1.5f, 1.05f), 0.3f);
-            d = Smin(d, e, 0.5f);
+            return d;
+        }
+
+        /// Ушная раковина — пластина толщиной 6–8 мм (кожа, хрящ, кожа): контур-эллипс в плоскости y–z, задний край отведён
+        /// от головы, у входа в слуховой проход — чаша раковины, по краю завиток толще.
+        public static float EarSdf(float ax, float y, float z)
+        {
+            float u = y - 0.55f, v = z + 1.05f;
+            float o = SdEll2(v, u, 1.85f, 3.05f);
+            if (o > 0.6f) return o;
+            float back = math.saturate(0.5f - 0.5f * v / 1.85f);
+            // от поверхности головы (один шаг Ньютона по x от 7,3): спереди пластина прирастает, задний край отходит на 1,6 см
+            float xs = 7.3f - Body(7.3f, y, z);
+            float xm = xs + 0.25f + 1.6f * back * back;
+            float bowl = math.saturate(1 - math.length(new float2((u + 0.35f) / 1.25f, (v - 0.2f) / 0.85f)));
+            xm -= 0.35f * bowl;
+            float t = 0.3f + 0.12f * Sstep(-0.55f, -0.05f, o);
+            return math.max(math.abs(ax - xm) - t, o);
+        }
+
+        public static float HeadSdf(float x, float y, float z)
+        {
+            float ax = math.abs(x);
+            float d = Smin(Body(x, y, z), EarSdf(ax, y, z), 0.35f);
             d = Smax(d, -SdEll(ax - EX, y - EY, z - 7.15f, 1.8f, 1.4f, 1.55f), 0.6f);
             d = Smax(d, -SdEll(x, y + 5.25f, z - 5.3f, 2.55f, 0.85f, 3.2f), 0.4f);
             d = Smax(d, -SdEll(ax - 0.56f, y + 2.72f, z - 9.35f, 0.3f, 0.24f, 0.55f), 0.15f);
@@ -120,14 +140,23 @@ namespace VoxProbe
             else h = -3.2f - 0.8f * (1 - math.min(1, ax / 6));
             return y > h;
         }
-        public static bool BeardZone(float x, float y, float z)
+        /// Плотность щетины 0..1 — гладкое поле по форме зоны beardZone() веб-версии (щёки, челюсть, шея, над губой, без центра
+        /// подбородка у губы), с переходом ~0,8 см вместо прямых краёв. Ячейка — щетина, если её хеш меньше плотности.
+        public static float StubbleDensity(float x, float y, float z)
         {
             float ax = math.abs(x);
-            if (z < 0.8f || ax > 7.2f || LipZone(ax, y, z)) return false;
-            if (y < -2.4f) return y < -6.9f || !(ax < 2.9f && z > 7.2f && y < -3.6f);
-            return ax < 2.6f && y > -3.98f && y < -3.0f && z > 8.2f;
+            float d = Sstep(-2.0f, -2.9f, y) * Sstep(0.3f, 1.3f, z) * Sstep(7.6f, 6.8f, ax);
+            // гладкий центр подбородка под губой
+            float ex = Sstep(3.4f, 2.4f, ax) * Sstep(6.7f, 7.7f, z) * Sstep(-7.4f, -6.4f, y) * Sstep(-3.1f, -4.1f, y);
+            d *= 1 - ex;
+            // усы над губой
+            float m = Sstep(3.0f, 2.1f, ax) * Sstep(-4.4f, -3.8f, y) * Sstep(-2.6f, -3.2f, y) * Sstep(7.8f, 8.5f, z);
+            return math.max(d, m);
         }
-        public static bool EarZone(float ax, float y, float z) => ax > 6.75f && y > -3.6f && y < 4.3f && z < 1.9f;
+        public static float CellHash(int3 c) { uint h = (uint)(c.x * 73856093 ^ c.y * 19349663 ^ c.z * 83492791); h ^= h >> 15; h *= 0x85EBCA77u; h ^= h >> 13; return (h & 0xFFFF) / 65535f; }
+
+        /// Ячейка раковины вне головы (хрящ или мочка под кожей).
+        public static bool EarZone(float ax, float y, float z) => ax > 6.3f && EarSdf(ax, y, z) < 0.05f && Body(ax, y, z) > 0.1f;
 
         /// Язык: тело и корень (в вебе — один эллипсоид у дна рта).
         public static bool InTongue(float x, float y, float z)
