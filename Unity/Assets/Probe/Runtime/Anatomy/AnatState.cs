@@ -25,13 +25,13 @@ namespace VoxProbe
         public int Chunks { get; private set; }
         public long Bytes => (long)pool.Capacity * 12 + slot.Length * 4;
 
-        public AnatState(AnatGrid g)
+        public AnatState(AnatGrid g, int reserveChunks = 4)
         {
             this.g = g;
             nch = (g.dims + CS - 1) / CS;
             slot = new NativeArray<int>(nch.x * nch.y * nch.z, Allocator.Persistent);
             for (int i = 0; i < slot.Length; i++) slot[i] = -1;
-            pool = new NativeList<VS>(CV * 4, Allocator.Persistent);
+            pool = new NativeList<VS>(CV * reserveChunks, Allocator.Persistent);
         }
 
         int Chunk(int x, int y, int z) => (x / CS) + nch.x * ((y / CS) + nch.y * (z / CS));

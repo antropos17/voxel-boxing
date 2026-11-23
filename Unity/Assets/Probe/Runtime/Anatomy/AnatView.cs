@@ -28,6 +28,16 @@ namespace VoxProbe
         AnatBloodFx drops;
         readonly AnatBody headBody; readonly int headK;
         readonly Material material;
+        // этап B, часть 2: поиск оторванных кусков (джоб, результат в следующем кадре) и сами куски
+        public readonly AnatIslands isl;
+        public readonly AnatPieces pieces;
+        public readonly bool[] gone;          // отдельное тело (челюсть, глаз, зуб) оторвалось и стало куском
+        float3 lastHit, lastDir; int lastStr;
+        public int crumbs, detachedBodies;
+        public double islMs, islMsMax, pieceMs, pieceMsMax;
+        public int frameChunks;               // чанков, перестроенных в последнем кадре
+        public double tSim, tBore, tRest, tMesh;   // последний удар: модель повреждений, пробой, разрывы и куски, сетки
+        public int hitChunks = 12;            // чанков, перестраиваемых сразу в кадре удара (остальное — в следующих кадрах по бюджету)
 
         /// Плоскости разрезов: удаляется всё, где dot(n, p) > d (p — см в рамке головы).
         public static readonly float3[] CutN = { float3.zero, new float3(1, 0, 0), new float3(0, 0, 1), new float3(0, 1, 0), new float3(0, 1, 0) };
@@ -59,6 +69,9 @@ namespace VoxProbe
             foreach (var g in a.All) { bodies.Add(new AnatBody(g, root, material, id++)); gl.Add(g); pristine.Add(g.mat.ToArray()); dmg.Add(g.mat.ToArray()); }
             grids = gl.ToArray();
             headK = gl.IndexOf(a.head); headBody = bodies[headK];
+            gone = new bool[grids.Length];
+            isl = new AnatIslands(a.head);
+            pieces = new AnatPieces(root, material);
             NewSim();
             var sw = System.Diagnostics.Stopwatch.StartNew();
             foreach (var b in bodies) b.BuildAll(layout);
@@ -78,6 +91,8 @@ namespace VoxProbe
             headBody.st = sim.st;
             drops?.Destroy(); drops = new AnatBloodFx(root, material, layout);
             Shader.SetGlobalFloat("_AnatTime", 0);
+            isl?.Reset(); pieces?.Clear(); crumbs = 0; detachedBodies = 0;
+            if (gone != null) for (int k = 0; k < gone.Length; k++) { if (gone[k]) bodies[k].root.gameObject.SetActive(true); gone[k] = false; }
         }
 
         /// Время боя: раны кровят, подтёки бегут, капли летят, отёк растёт, синяки меняют цвет; перестройка грязных чанков
@@ -88,8 +103,126 @@ namespace VoxProbe
             sim.Step(dt);
             Shader.SetGlobalFloat("_AnatTime", sim.time);
             drops.Update(sim.drops, sim.time);
+            // куски: результат поиска прошлого кадра, затем новый поиск, если накопились убранные ячейки
+            if (isl.Ready()) Islands();
+            Request(false);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            pieces.Step(dt);
+            double pm = sw.Elapsed.TotalMilliseconds; pieceMs = pm; pieceMsMax = math.max(pieceMsMax, pm);
             Flush(maxChunks);
         }
+
+        /// Передать убранные ячейки в поиск кусков и запустить его, если он свободен.
+        void Request(bool full)
+        {
+            if (sim.cutLog.Length > 0 || full) { isl.Request(sim.cutLog, full); sim.cutLog.Clear(); }
+            isl.Schedule();
+        }
+
+        /// Дождаться поиска кусков и разобрать его (для снимков и тестов: в игре это делает следующий кадр).
+        public void Settle(bool full = false) { if (full) { isl.Wait(); Request(true); } for (int k = 0; k < 8 && (isl.busy || isl.HasWork || sim.cutLog.Length > 0); k++) { Request(false); isl.Wait(); Islands(); } Flush(4096); }
+
+        /// Разобрать найденные острова: крошки (меньше MinPiece ячеек) рассыпаются, остальное — отдельные куски с физикой;
+        /// отдельное тело, под которым не осталось головы, отрывается целиком.
+        void Islands()
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var h = a.head; var cells = isl.cells.AsArray();
+            var tmp = new NativeList<int>(256, Allocator.Temp);
+            for (int k = 0; k < isl.comps.Length; k++)
+            {
+                int2 c = isl.comps[k];
+                if (c.y < 0) { for (int j = 0; j < -c.y; j++) { int i = cells[c.x + j]; if (h.mat[i] != AnatMat.Empty && !AnatIslands.Links(h.mat[i])) sim.Take(i); } orphans += -c.y; continue; }
+                tmp.Clear();
+                bool open = false;
+                for (int j = 0; j < c.y; j++) { int i = cells[c.x + j]; if (AnatIslands.Links(h.mat[i])) { tmp.Add(i); if (!open) open = Touches(h, i); } }
+                if (tmp.Length == 0) continue;
+                if (tmp.Length < MinPiece)
+                {
+                    // крошка: рассыпается, если её видно (в целой голове есть изолированные точки коры в ликворе — их не трогать)
+                    if (!open) continue;
+                    foreach (int i in tmp) sim.Take(i);
+                    crumbs++; continue;
+                }
+                float3 com = 0; foreach (int i in tmp) com += h.Local(i % h.dims.x, (i / h.dims.x) % h.dims.y, i / (h.dims.x * h.dims.y));
+                com /= tmp.Length;
+                var pc = pieces.Make(h, sim.st, tmp.AsArray(), 0, tmp.Length, Fling(com, tmp.Length), PieceName(tmp.AsArray()));
+                foreach (int i in tmp) sim.Take(i);
+                if (pc != null) Budget(pc);
+            }
+            tmp.Dispose();
+            // отдельные тела без опоры
+            for (int guard = 0; guard < 4; guard++)
+            {
+                bool any = false;
+                for (int k = 0; k < grids.Length; k++)
+                {
+                    if (k == headK || gone[k]) continue;
+                    if (Unsupported(grids[k])) { Detach(k); any = true; }
+                }
+                if (!any) break;
+            }
+            sim.Flush();
+            double ms = sw.Elapsed.TotalMilliseconds; islMs = ms + isl.lastSchedMs; islMsMax = math.max(islMsMax, islMs);
+        }
+
+        public int orphans;               // убрано висящей жидкости (полный обход)
+        public const int MinPiece = 60;   // меньше — крошка (≈ 0,5 см³): рассыпается, слота куска не занимает
+
+        static bool Touches(AnatGrid g, int i)
+        {
+            int x = i % g.dims.x, y = (i / g.dims.x) % g.dims.y, z = i / (g.dims.x * g.dims.y);
+            return NearOpen(g, new int3(x, y, z));
+        }
+
+        static string PieceName(NativeArray<int> cells) => "кусок";
+
+        /// Скорость куска: от точки последнего удара наружу и по удару, сила — по удару; большие куски медленнее.
+        float3 Fling(float3 com, int n)
+        {
+            float3 away = math.normalizesafe(com - lastHit, -lastDir);
+            float sp = (lastStr == 2 ? 160 : lastStr == 1 ? 110 : 60) / math.max(1, math.pow(n / 2000f, 0.25f));
+            return (away * 0.6f + lastDir * 0.4f) * sp + new float3(0, 40, 0);
+        }
+
+        /// Отдельное тело без опоры: больше 60% проверенных ячеек лежат над пустотой головы или в оторванном острове.
+        bool Unsupported(AnatGrid g) => SupportBad(g) > 0.6f;
+        /// Доля ячеек тела (выборка до 160) над пустотой головы или в оторванном острове.
+        public float SupportBad(AnatGrid g)
+        {
+            var h = a.head; int n = 0, bad = 0, stepI = math.max(1, g.Count / 2048);
+            for (int i = 0; i < g.Count && n < 160; i += stepI)
+            {
+                if (!AnatMat.Solid(g.mat[i])) continue;
+                int j = h.Lookup(g.World(g.Local(i % g.dims.x, (i / g.dims.x) % g.dims.y, i / (g.dims.x * g.dims.y))));
+                n++; if (j < 0 || h.mat[j] == AnatMat.Empty || isl.mark[j] == 2) bad++;
+            }
+            return n == 0 ? 0 : bad / (float)n;
+        }
+
+        /// Оторвать отдельное тело целиком: кусок из всех его ячеек, тело скрыто, его место в голове пустеет.
+        void Detach(int k)
+        {
+            var g = grids[k]; var dm = dmg[k]; var h = a.head;
+            var all = new NativeList<int>(g.Count, Allocator.Temp);
+            for (int i = 0; i < g.Count; i++) if (g.mat[i] != AnatMat.Empty) all.Add(i);
+            float3 com = 0; foreach (int i in all) com += g.World(g.Local(i % g.dims.x, (i / g.dims.x) % g.dims.y, i / (g.dims.x * g.dims.y)));
+            if (all.Length > 0) { com /= all.Length; var pc = pieces.Make(g, null, all.AsArray(), 0, all.Length, Fling(com, all.Length), g.name); if (pc != null) Budget(pc); }
+            foreach (int i in all)
+            {
+                int j = h.Lookup(g.World(g.Local(i % g.dims.x, (i / g.dims.x) % g.dims.y, i / (g.dims.x * g.dims.y))));
+                if (j >= 0 && h.mat[j] == AnatMat.Covered) sim.Take(j);
+                g.mat[i] = AnatMat.Empty; dm[i] = AnatMat.Empty;
+            }
+            all.Dispose();
+            gone[k] = true; detachedBodies++;
+            bodies[k].root.gameObject.SetActive(false);
+        }
+
+        void TryDetach(int k) { if (k >= 0 && k != headK && !gone[k]) { Detach(k); sim.Flush(); } }
+
+        /// Небольшой кусок строится сразу (1–2 чанка), большой — по бюджету в следующих кадрах.
+        void Budget(AnatPiece pc) { if (pc.body != null && pc.body.ChunkCount <= 2) { pc.body.BuildAll(layout); pc.ready = true; } }
 
         /// Тяжесть в рамке покоя головы: мировой низ, повёрнутый обратно поворотом черепа (всё выше C1 движется с ним жёстко).
         /// Кровь на шее стекает по той же оси — у якоря это отступление меньше угла изгиба шеи.
@@ -100,18 +233,26 @@ namespace VoxProbe
             return math.normalizesafe(math.mul(math.transpose(M), new float3(0, -1, 0)), new float3(0, -1, 0));
         }
 
+        /// Перестройка грязных чанков: всего не больше maxChunks за вызов на все тела и куски (голова первой).
         void Flush(int maxChunks)
         {
             for (int i = 0; i < sim.dirty.Length; i++) if (sim.dirty[i]) { sim.dirty[i] = false; headBody.MarkDirty(i); }
             foreach (var b in bodies) b.SyncVis();
+            frameChunks = 0;
             for (int guard = 0; guard < 64; guard++)
             {
-                bool any = false;
-                foreach (var b in bodies) if (b.dirtyCount > 0) { b.Schedule(layout, maxChunks); any = true; }
+                int left = maxChunks, keep = 0;
+                foreach (var p in pieces.list) if (p.body != null && p.body.dirtyCount > 0) { keep = math.min(4, maxChunks / 3); break; }   // доля кусков, чтобы они не ждали голову
+                foreach (var b in bodies) if (b.dirtyCount > 0 && left > keep) { int d0 = b.dirtyCount; b.Schedule(layout, left - keep); left -= d0 - b.dirtyCount; }
+                foreach (var p in pieces.list) if (p.body != null && p.body.dirtyCount > 0 && left > 0) { int d0 = p.body.dirtyCount; p.body.Schedule(layout, left); left -= d0 - p.body.dirtyCount; }
                 foreach (var b in bodies) b.Complete();
-                if (!any || maxChunks < 1000) break;
+                foreach (var p in pieces.list) p.body?.Complete();
+                frameChunks += maxChunks - left;
+                if (left == maxChunks || maxChunks < 1000) break;
             }
         }
+
+        public int PieceTriangles { get { int t = 0; foreach (var p in pieces.list) if (p.body != null) t += p.body.Triangles; return t; } }
 
         public float3 ToHead(Vector3 world) => (float3)(world - root.position) * 100f;
         public Vector3 ToWorld(float3 cm) => root.position + (Vector3)(cm * 0.01f);
@@ -198,6 +339,7 @@ namespace VoxProbe
             var sw = System.Diagnostics.Stopwatch.StartNew();
             int before = sim.removed;
             sim.Hit(hit, dir, s.E, s.power);
+            tSim = sw.Elapsed.TotalMilliseconds;
             int removed = 0;
             if (s.bore)
             {
@@ -216,6 +358,7 @@ namespace VoxProbe
                     {
                         byte m = g.mat[i];
                         if (m == AnatMat.Empty || m == AnatMat.Covered || keep(m) || math.dot(q - p0, dir) >= stop) return;
+                        if (AnatDamage.Protected(q)) return;   // культя шеи — якорь
                         int3 c = new int3(i % g.dims.x, (i / g.dims.x) % g.dims.y, i / (g.dims.x * g.dims.y));
                         if (isHead) sim.Cut(c.x, c.y, c.z);
                         else { g.mat[i] = AnatMat.Empty; dm[i] = AnatMat.Empty; removed++; mn = math.min(mn, c); mx = math.max(mx, c); }
@@ -223,19 +366,82 @@ namespace VoxProbe
                     if (!isHead && math.all(mn <= mx)) g.Touch(mn, mx);
                 }
                 // ликвор в проломе стекает: пустеют подоболочечное пространство и борозды до 1 см вокруг канала
-                for (int pass = 0; pass < 6; pass++)
-                    Scan(h, p0, p1 + dir * 1.0f, s.r + 1.0f, (i, q) =>
+                // (ячейки ликвора собираются одним проходом, дальше 6 волн только по ним)
+                var csf = new List<int>();
+                Scan(h, p0, p1 + dir * 1.0f, s.r + 1.0f, (i, q) => { if (h.mat[i] == AnatMat.Csf && !AnatDamage.Protected(q)) csf.Add(i); });
+                for (int pass = 0; pass < 6 && csf.Count > 0; pass++)
+                    for (int k = csf.Count - 1; k >= 0; k--)
                     {
-                        if (h.mat[i] != AnatMat.Csf) return;
+                        int i = csf[k]; if (h.mat[i] != AnatMat.Csf) { csf.RemoveAt(k); continue; }
                         int3 c = new int3(i % h.dims.x, (i / h.dims.x) % h.dims.y, i / (h.dims.x * h.dims.y));
-                        if (NearOpen(h, c)) sim.Cut(c.x, c.y, c.z);
-                    });
+                        if (NearOpen(h, c)) { sim.Cut(c.x, c.y, c.z); csf.RemoveAt(k); }
+                    }
                 sim.Flush();
             }
+            tBore = sw.Elapsed.TotalMilliseconds - tSim;
+            lastHit = hit; lastDir = dir; lastStr = strength;
+            bool full = false;
+            // разрывы: в том же шаре и отдельные тела (челюсть, глаза, зубы); после разрыва — полный поиск кусков
+            foreach (var rp in sim.rips)
+            {
+                full = true;
+                for (int k = 0; k < grids.Length; k++)
+                {
+                    var g = grids[k]; if (g == a.head || gone[k]) continue; var dm = dmg[k];
+                    int3 mn = int.MaxValue, mx = int.MinValue;
+                    Scan(g, rp.xyz, rp.xyz, rp.w, (i, q) =>
+                    {
+                        if (g.mat[i] == AnatMat.Empty) return;
+                        g.mat[i] = AnatMat.Empty; dm[i] = AnatMat.Empty; removed++;
+                        int3 c = new int3(i % g.dims.x, (i / g.dims.x) % g.dims.y, i / (g.dims.x * g.dims.y)); mn = math.min(mn, c); mx = math.max(mx, c);
+                    });
+                    if (math.all(mn <= mx)) g.Touch(mn, mx);
+                }
+            }
+            sim.rips.Clear();
+            // куски мозга на вылет: объёмный кусок с корой снаружи и белым веществом на изломе
+            foreach (var e in sim.ejects) Brainout(e);
+            sim.ejects.Clear();
+            sim.Flush();
+            Request(full);
+            // срыв челюсти и глаза (HEAD-SPEC, раздел 6): мощный удар в зону с травмой выше порога отрывает отдельное тело
+            if (s.power)
+            {
+                var all = new List<AnatGrid>(a.All);
+                byte z = sim.lastZone;
+                if ((z == AnatZone.Jaw || z == AnatZone.Mouth) && sim.Eff(AnatZone.Jaw) > 46) TryDetach(all.IndexOf(a.mand));
+                if (sim.Eff(AnatZone.Eye) > 42)
+                    for (int e = 0; e < 2; e++) { var eg = e == 0 ? a.eyeL : a.eyeR; if (math.distance(eg.World(eg.org + (float3)eg.dims * eg.step * 0.5f), hit) < 3.5f) TryDetach(all.IndexOf(eg)); }
+                if (sim.Eff(AnatZone.Mouth) > 30)
+                    for (int t = 0; t < a.teeth.Length; t++) { var tg = a.teeth[t]; if (math.distance(tg.World(tg.org + (float3)tg.dims * tg.step * 0.5f), hit) < 1.6f) TryDetach(all.IndexOf(tg)); }
+            }
             removed += sim.removed - before;
-            Flush(4096);
+            double t0 = sw.Elapsed.TotalMilliseconds; tRest = t0 - tSim - tBore;
+            Flush(hitChunks);
+            tMesh = sw.Elapsed.TotalMilliseconds - t0;
             lastMs = sw.Elapsed.TotalMilliseconds; lastWhat = "удар " + s.name; lastRemoved = removed;
             return removed;
+        }
+
+        /// Кусок мозга: ячейки мозга в неровном шаре вокруг e.c становятся отдельным мягким телом и вылетают из пролома.
+        void Brainout(AnatDamage.Eject e)
+        {
+            var h = a.head; var L = new NativeList<int>(512, Allocator.Temp);
+            int3 lo = math.max((int3)math.floor((e.c - e.r * 1.3f - h.org) / h.step), 0), hi = math.min((int3)math.floor((e.c + e.r * 1.3f - h.org) / h.step), h.dims - 1);
+            for (int z = lo.z; z <= hi.z; z++) for (int y = lo.y; y <= hi.y; y++) for (int x = lo.x; x <= hi.x; x++)
+            {
+                int i = h.Index(x, y, z); if (!AnatDamage.Brainy(h.mat[i])) continue;
+                float3 p = h.Local(x, y, z); float3 d = p - e.c; if (AnatDamage.Protected(p)) continue;
+                float rn = e.r * (1 + 0.25f * math.sin(d.x * 4.1f + d.y * 2.3f) * math.sin(d.z * 3.7f - d.y * 1.9f));
+                if (math.length(d) <= rn) L.Add(i);
+            }
+            if (L.Length >= MinPiece)
+            {
+                var pc = pieces.Make(h, sim.st, L.AsArray(), 0, L.Length, e.dir * 140 + new float3(0, 60, 0), "мозг");
+                foreach (int i in L) { int x = i % h.dims.x, y = (i / h.dims.x) % h.dims.y, z = i / (h.dims.x * h.dims.y); sim.Cut(x, y, z); }
+                if (pc != null) Budget(pc);
+            }
+            L.Dispose();
         }
 
         static bool NearOpen(AnatGrid g, int3 c)
@@ -273,6 +479,7 @@ namespace VoxProbe
 
         public void Dispose()
         {
+            pieces?.Clear(); isl?.Dispose();
             sim?.Dispose(); sim = null; drops?.Destroy();
             foreach (var b in bodies) b.Destroy();
             bodies.Clear();

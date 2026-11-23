@@ -78,12 +78,27 @@ namespace VoxProbe
         public int hits, removed, peakWounds, peakDrips, peakDrops;
         public double hitMs, hitMsMax, stepMs, stepMsMax, visMs, visMsMax;
         Unity.Collections.NativeList<int> opened;   // ячейки, ставшие пустыми с прошлого обновления видимости
+        // ---------- часть 2: переломы, мозг, разрыв ----------
+        /// Культя: ниже этой высоты (с неровным краем) разрыв не уходит — шея остаётся якорем (уровень C5: позвонок с каналом
+        /// и спинным мозгом, гортань, пищевод, сонные артерии, яремные вены, мышцы, кожа).
+        public const float StumpY = -10.4f;
+        public static float StumpAt(float x, float z) => StumpY + 0.35f * math.sin(x * 1.7f + z * 0.9f) + 0.25f * math.sin(z * 2.3f - x * 0.6f);
+        public static bool Protected(float3 p) => p.y < StumpAt(p.x, p.z);
+        public static bool Brainy(byte m) => m == AnatMat.Grey || m == AnatMat.White || m == AnatMat.CerebGrey || m == AnatMat.Stem;
+        public Unity.Collections.NativeList<int> cutLog;   // убранные ячейки с прошлого запроса поиска кусков (забирает AnatView)
+        public struct Eject { public float3 c, dir; public float r; }
+        public readonly List<Eject> ejects = new List<Eject>();   // куски мозга на вылет (делает AnatView: это отдельные тела)
+        public readonly List<float4> rips = new List<float4>();    // разрывы: центр и радиус (AnatView убирает и другие тела, полный поиск кусков)
+        public readonly List<float3> fractures = new List<float3>();
+        public int ripCount, brainHits; public byte lastZone;
+        readonly HashSet<int> seenMat = new HashSet<int>();
         bool closed;                                 // ячейка закрылась (отёк века) — видимость заново
 
         public AnatDamage(AnatHead a, int seed = 1)
         {
             this.a = a; h = a.head; st = new AnatState(h); rng = new System.Random(seed);
             opened = new Unity.Collections.NativeList<int>(256, Unity.Collections.Allocator.Persistent);
+            cutLog = new Unity.Collections.NativeList<int>(1024, Unity.Collections.Allocator.Persistent);
             dirty = new bool[st.nch.x * st.nch.y * st.nch.z];
             // веки: кожа зоны «глаз» в оболочке вокруг шара спереди
             for (int z = 0; z < h.dims.z; z++) for (int y = 0; y < h.dims.y; y++) for (int x = 0; x < h.dims.x; x++)
@@ -222,7 +237,7 @@ namespace VoxProbe
                 PL.Add((i, x, y, z, pp));
                 if (pp > best && h.zone[i] != 0) { best = pp; zone = h.zone[i]; }
             }
-            r.zone = zone; r.cells = PL.Count; r.entryMat = h.mat[h.Index(hc.x, hc.y, hc.z)];
+            r.zone = zone; lastZone = zone; r.cells = PL.Count; r.entryMat = h.mat[h.Index(hc.x, hc.y, hc.z)];
             // травма зоны: 30% общей травмы головы добавляется к каждой зоне
             float add = E * (power ? 1 : 0.5f);
             trauma[zone] += add; traumaAll += add;
@@ -290,6 +305,7 @@ namespace VoxProbe
             }
             Smear(dir, n);
             r.macer = Macerate(zone, eff, h.Local(hc.x, hc.y, hc.z), E, power);
+            if (power) Break(hc, n, l, dir, E, zone, eff);
             if (noseAcc > 3 && zone == AnatZone.Nose)
                 for (int s = 0; s < 2; s++) if (nostril[s].x >= 0) AddWound(nostril[s].x, nostril[s].y, nostril[s].z, 2.2f + noseAcc * 0.25f, WNose, 45, "кровь из носа");
             sw.Stop(); r.ms = (float)sw.Elapsed.TotalMilliseconds; hitMs += r.ms; hitMsMax = math.max(hitMsMax, r.ms);
@@ -310,7 +326,8 @@ namespace VoxProbe
         void Remove(int x, int y, int z)
         {
             int i = h.Index(x, y, z); byte m = h.mat[i], part = h.part[i];
-            exposed.Add((time, AnatMat.Table[m].name, h.zone[i]));
+            if (seenMat.Add(h.zone[i] * 64 + m)) exposed.Add((time, AnatMat.Table[m].name, h.zone[i]));   // первое появление материала в зоне
+            cutLog.Add(i);
             SetMat(i, AnatMat.Empty); if (st.Idx(x, y, z, false) >= 0) st.Set(x, y, z, default);
             opened.Add(i);
             removed++;
@@ -423,8 +440,8 @@ namespace VoxProbe
             bool did = false;
             if (eff > 7 && (power || rng.NextDouble() < 0.4)) { Pulp(c, power ? 1.5f : 0.9f, power ? 0.32f : 0.18f); did = true; Once(zone, 0, "каша (травма зоны > 7)"); }
             if (power && eff > 14) { Strip(c, 1.4f + math.min(1.4f, E * 0.17f)); did = true; Once(zone, 1, "мясо до кости (> 14)"); }
-            if (power && eff > 24) { Chips(c, 0.9f + math.min(0.9f, E * 0.1f)); did = true; Once(zone, 2, "сколы кости (> 24); летящие осколки — этап C"); }
-            if (power && eff > 42) Once(zone, 3, "порог разрыва (> 42) — сам разрыв головы на этапе D");
+            if (power && eff > 24) { Chips(c, 0.9f + math.min(0.9f, E * 0.1f)); did = true; Once(zone, 2, "сколы кости (> 24), перелом"); }
+            if (power && eff > 42) Once(zone, 3, "порог разрыва (> 42)");
             return did;
         }
 
@@ -651,6 +668,107 @@ namespace VoxProbe
             visMs += a.vis.lastMs; visMsMax = math.max(visMsMax, a.vis.lastMs);
         }
 
-        public void Dispose() { st.Dispose(); if (opened.IsCreated) opened.Dispose(); }
+        public void Dispose() { st.Dispose(); if (opened.IsCreated) opened.Dispose(); if (cutLog.IsCreated) cutLog.Dispose(); }
+
+        // ---------- часть 2: переломы, мозг, разрыв ----------
+        int3 CellOf(float3 p) => (int3)math.floor((p - h.org) / S);
+
+        /// Убрать ячейку без крови (её забрал оторванный кусок).
+        public void Take(int i)
+        {
+            if (h.mat[i] == AnatMat.Empty) return;
+            int x = i % h.dims.x, y = (i / h.dims.x) % h.dims.y, z = i / (h.dims.x * h.dims.y);
+            SetMat(i, AnatMat.Empty); if (st.Idx(x, y, z, false) >= 0) st.Set(x, y, z, default);
+            opened.Add(i); removed++; Dirty(x, y, z);
+        }
+
+        /// Мощный удар по кости и в пролом: оболочка и мозг в проломе, перелом кольцом (травма зоны > 24), разрыв (> 42).
+        void Break(int3 hc, float3 n, float3 l, float3 dir, float E, byte zone, float eff)
+        {
+            float3 hp = h.Local(hc.x, hc.y, hc.z); byte em = h.mat[h.Index(hc.x, hc.y, hc.z)];
+            if (em == AnatMat.Dura || em == AnatMat.Csf) TearDura(hp, 1.0f + 0.1f * E);
+            else if (Brainy(em))
+            {
+                // мягкий мозг: удар вырывает кусок с корой снаружи и белым веществом на изломе
+                brainHits++; TearDura(hp, 1.2f);
+                ejects.Add(new Eject { c = hp + dir * 0.4f, dir = math.normalizesafe(n - dir * 0.3f), r = 0.6f + 0.1f * E });
+            }
+            if (eff > 24) Fracture(hp, l, E, zone);
+            // разрыв: травма зоны > 42 (как в вебе) или общая травма головы > 90 — дальше каждый мощный удар рвёт голову
+            if (eff > 42 || traumaAll > 90) { float R = 1.6f + 0.3f * E + math.min(0.8f, traumaAll / 400f); Rip(hp + dir * R * 0.4f, R); }
+        }
+
+        /// Перелом: кость под ударом раскалывается по кольцу (неровному) вместе с мягкими тканями над ним; оболочка под отломком
+        /// рвётся, ликвор в бороздах под ним вытекает. Отломок со скальпом становится островом и отрывается (AnatIslands).
+        void Fracture(float3 hp, float3 l, float E, byte zone)
+        {
+            float3 B = 0; bool got = false;
+            for (int k = 0; k < 20 && !got; k++) { int i = h.Lookup(hp + l * (k * S)); if (i < 0) break; byte m = h.mat[i]; if (m == AnatMat.Compact || m == AnatMat.Spongy) { B = hp + l * (k * S); got = true; } }
+            if (!got || Protected(B)) return;
+            foreach (var f in fractures) if (math.distance(f, B) < 1.3f) return;   // здесь уже сломано — дальше работает разрыв
+            fractures.Add(B);
+            float Rf = 1.3f + 0.12f * E;
+            float3 u = math.normalize(math.cross(l, math.abs(l.y) < 0.9f ? new float3(0, 1, 0) : new float3(1, 0, 0))), w = math.cross(l, u);
+            float ph = (float)rng.NextDouble() * 6.28f, ph2 = (float)rng.NextDouble() * 6.28f;
+            int3 bc = CellOf(B); int Rc = (int)math.ceil((Rf * 1.25f + 3f) / S); int cut = 0;
+            for (int dz = -Rc; dz <= Rc; dz++) for (int dy = -Rc; dy <= Rc; dy++) for (int dx = -Rc; dx <= Rc; dx++)
+            {
+                int x = bc.x + dx, y = bc.y + dy, z = bc.z + dz; if (!In(x, y, z)) continue;
+                int i = h.Index(x, y, z); byte m = h.mat[i]; if (!AnatMat.Cull(m) || m == AnatMat.Covered || Brainy(m)) continue;
+                float3 p = h.Local(x, y, z); if (Protected(p)) continue;
+                float3 q = p - B; float al = math.dot(q, l); if (al < -2.6f || al > 3.5f) continue;
+                float3 rv = q - l * al; float rad = math.length(rv), ang = math.atan2(math.dot(rv, w), math.dot(rv, u));
+                float R = Rf * (1 + 0.14f * math.sin(ang * 3 + ph) + 0.07f * math.sin(ang * 7 + ph2));
+                bool ring = math.abs(rad - R) < 0.17f && al < 1.6f;
+                bool under = rad < R && al > 0 && (m == AnatMat.Dura || m == AnatMat.Csf);
+                if (ring || under) { Remove(x, y, z); cut++; }
+            }
+            events.Add(F1(time) + " с: перелом — " + AnatZone.Names[zone] + ", отломок ~" + F1(Rf * 2) + " см, трещина " + cut + " ячеек");
+        }
+
+        /// Оболочка и ликвор в шаре: оболочка рвётся, ликвор вытекает — открываются извилины коры с бороздами.
+        void TearDura(float3 c, float R)
+        {
+            int3 lo = math.max(CellOf(c - R), 0), hi = math.min(CellOf(c + R), h.dims - 1);
+            for (int pass = 0; pass < 3; pass++)
+                for (int z = lo.z; z <= hi.z; z++) for (int y = lo.y; y <= hi.y; y++) for (int x = lo.x; x <= hi.x; x++)
+                {
+                    byte m = h.mat[h.Index(x, y, z)]; if (m != AnatMat.Dura && m != AnatMat.Csf) continue;
+                    float3 p = h.Local(x, y, z); if (math.lengthsq(p - c) > R * R || Protected(p)) continue;
+                    if (m == AnatMat.Dura || Exposed(x, y, z)) Remove(x, y, z);
+                }
+        }
+
+        /// Разрыв: всё в неровном шаре (кость тоже) уходит; культя ниже StumpAt не трогается. AnatView добавляет другие тела
+        /// в том же шаре и полный поиск кусков.
+        public void Rip(float3 c, float R)
+        {
+            rips.Add(new float4(c, R)); ripCount++;
+            int3 lo = math.max(CellOf(c - R * 1.25f), 0), hi = math.min(CellOf(c + R * 1.25f), h.dims - 1);
+            float ph = (float)rng.NextDouble() * 6.28f; int cut = 0;
+            for (int z = lo.z; z <= hi.z; z++) for (int y = lo.y; y <= hi.y; y++) for (int x = lo.x; x <= hi.x; x++)
+            {
+                int i = h.Index(x, y, z); byte m = h.mat[i]; if (!AnatMat.Cull(m)) continue;
+                float3 p = h.Local(x, y, z); if (Protected(p)) continue;
+                float3 d = p - c; float r = math.length(d);
+                float Rn = R * (1 + 0.18f * math.sin(d.x * 2.1f + ph) * math.sin(d.y * 1.7f - ph) + 0.1f * math.sin(d.z * 3.3f + ph * 2));
+                if (r > Rn) continue;
+                // разрыв убирает без пропитки соседей кровью: иначе срез (культя) сплошь красный и слоёв не видно;
+                // кровь — пятнами на краю и из вскрытых сосудов
+                byte part = h.part[i];
+                Take(i); cutLog.Add(i); cut++;
+                if (seenMat.Add(h.zone[i] * 64 + m)) exposed.Add((time, AnatMat.Table[m].name, h.zone[i]));
+                if (m == AnatMat.Artery || m == AnatMat.Vein) OpenVessel(part, x, y, z);
+            }
+            // край: кровь пятнами на трети открытых ячеек
+            byte now = T2(time);
+            for (int z = lo.z; z <= hi.z; z++) for (int y = lo.y; y <= hi.y; y++) for (int x = lo.x; x <= hi.x; x++)
+            {
+                byte m = h.mat[h.Index(x, y, z)]; if (!AnatMat.Cull(m) || m == AnatMat.Covered) continue;
+                float3 d = h.Local(x, y, z) - c; if (math.lengthsq(d) > R * R * 1.6f || rng.NextDouble() > 0.33 || !Exposed(x, y, z)) continue;
+                var v = Get(x, y, z); float ba = 40 + 60 * (float)rng.NextDouble(); v.blt = Wt(v.blt, v.blood, now, ba); v.blood = Add8(v.blood, ba); Put(x, y, z, v);
+            }
+            events.Add(F1(time) + " с: разрыв — шар " + F1(R) + " см, " + cut + " ячеек");
+        }
     }
 }

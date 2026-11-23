@@ -43,6 +43,7 @@ namespace VoxProbe.Tests
             for (int k = 0; k < 40; k++)
             {
                 d.Hit(ray.from, ray.dir, 3.6f, true); Run(0.5f);
+                if (d.ripCount > 0) break;               // разрыв (часть 2 этапа B) уносит шар целиком — послойность проверяем до него
                 var now = AnatChecks.Trace(a, ray.from, ray.dir, alongNormal: false);
                 if (now.Count == 0) continue;
                 int idx = stack.IndexOf(now[0].mat);

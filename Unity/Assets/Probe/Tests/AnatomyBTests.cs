@@ -131,5 +131,122 @@ namespace VoxProbe.Tests
             }
             finally { v.Dispose(); }
         }
+
+        // ---------- часть 2: куски, культя ----------
+
+        static int Cnt(AnatGrid h, System.Func<float3, byte, bool> f)
+        {
+            int n = 0;
+            for (int z = 0; z < h.dims.z; z++) for (int y = 0; y < h.dims.y; y++) for (int x = 0; x < h.dims.x; x++)
+            { byte m = h.mat[h.Index(x, y, z)]; if (m != AnatMat.Empty && f(h.Local(x, y, z), m)) n++; }
+            return n;
+        }
+
+        /// Целая голова: полный поиск кусков не делает ни одного куска и не отрывает ни челюсть, ни глаза, ни зубы.
+        [Test]
+        public void IntactHeadHoldsTogether()
+        {
+            var v = new AnatView(null, new Vector3(0, 1.6f, 0), null);
+            try
+            {
+                v.Settle(true);
+                Assert.AreEqual(0, v.pieces.list.Count, "кусков у целой головы");
+                for (int k = 0; k < v.gone.Length; k++) Assert.IsFalse(v.gone[k], "оторвалось тело " + k);
+                Debug.Log("ANAT_TEST intact: crumbs " + v.crumbs + " orphans " + v.orphans + " island ms " + v.isl.lastMs.ToString("0.0"));
+            }
+            finally { v.Dispose(); }
+        }
+
+        /// Срез свода плоскостью: всё выше — один кусок, он падает и засыпает на полу; в голове над срезом ничего не висит.
+        [Test]
+        public void CutVaultBecomesPiece()
+        {
+            var v = new AnatView(null, new Vector3(0, 1.6f, 0), null);
+            try
+            {
+                var h = v.a.head;
+                int above = Cnt(h, (p, m) => p.y >= 8.5f && AnatIslands.Links(m) && m != AnatMat.Covered);
+                for (int z = 0; z < h.dims.z; z++) for (int y = 0; y < h.dims.y; y++) for (int x = 0; x < h.dims.x; x++)
+                {
+                    int i = h.Index(x, y, z); float py = h.Local(x, y, z).y;
+                    if (py > 8 && py < 8.5f && h.mat[i] != AnatMat.Empty) { v.sim.Take(i); v.sim.cutLog.Add(i); }
+                }
+                v.sim.Flush();
+                v.Settle(true);
+                Assert.GreaterOrEqual(v.pieces.list.Count, 1, "кусков");
+                AnatPiece big = null; foreach (var pc in v.pieces.list) if (big == null || pc.cells > big.cells) big = pc;
+                int left = Cnt(h, (p, m) => p.y >= 8.5f && AnatIslands.Links(m));
+                Assert.Greater(big.cells, above * 0.8f, "в куске мало ячеек");
+                Assert.Less(left, above * 0.02f, "над срезом осталось в голове");
+                float y0 = big.x.y;
+                for (int f = 0; f < 600 && !big.asleep; f++) v.Tick(1 / 60f, 64);
+                Assert.IsTrue(big.asleep, "кусок не уснул"); Assert.Less(big.x.y, y0 - 20, "кусок не упал");
+                Assert.Greater(big.x.y, AnatPieces.Floor - 2, "кусок провалился под пол");
+                Debug.Log("ANAT_TEST cut vault: above " + above + " piece " + big.cells + " left " + left + " fell to " + big.x.y.ToString("0.0"));
+            }
+            finally { v.Dispose(); }
+        }
+
+        /// Предел кусков: при 40 новых кусках остаётся MaxPieces, убираются самые старые.
+        [Test]
+        public void PiecesTrimOldest()
+        {
+            var v = new AnatView(null, new Vector3(0, 1.6f, 0), null);
+            var ps = new AnatPieces(null, null);
+            var cells = new Unity.Collections.NativeList<int>(128, Unity.Collections.Allocator.Persistent);
+            try
+            {
+                var h = v.a.head;
+                for (int i = 0; i < h.Count && cells.Length < 100; i++) if (h.mat[i] == AnatMat.Skin) cells.Add(i);
+                for (int k = 0; k < 40; k++) ps.Make(h, null, cells.AsArray(), 0, cells.Length, 0, "t");
+                Assert.AreEqual(AnatPieces.MaxPieces, ps.list.Count);
+                Assert.AreEqual(40 - AnatPieces.MaxPieces, ps.trimmed);
+                Assert.AreEqual(ps.list[1].id - 1, ps.list[0].id, "порядок");
+                Assert.AreEqual(100 + 40 - AnatPieces.MaxPieces, ps.list[0].id, "убраны не самые старые");
+            }
+            finally { ps.Clear(); cells.Dispose(); v.Dispose(); }
+        }
+
+        /// Серия тяжёлых ударов: куски и ячейки кусков в пределах, культя ниже StumpAt не тронута,
+        /// на срезе культи есть кость, артерия, вена, мышца, кожа и дыхательные пути (воздух или хрящ).
+        [Test]
+        public void HeavyHitsKeepPieceLimitsAndStump()
+        {
+            var v = new AnatView(null, new Vector3(0, 1.6f, 0), null);
+            try
+            {
+                var h = v.a.head;
+                var keep = new System.Collections.Generic.List<int>(); var was = new System.Collections.Generic.List<byte>();
+                for (int z = 0; z < h.dims.z; z++) for (int y = 0; y < h.dims.y; y++) for (int x = 0; x < h.dims.x; x++)
+                { int i = h.Index(x, y, z); if (h.mat[i] != AnatMat.Empty && AnatDamage.Protected(h.Local(x, y, z) + new float3(0, 0.6f, 0))) { keep.Add(i); was.Add(h.mat[i]); } }
+                var r = new System.Random(11);
+                for (int k = 0; k < 60; k++)
+                {
+                    var p = new float3((float)(r.NextDouble() * 12 - 6), (float)(r.NextDouble() * 16 - 4), 14);
+                    v.Hit(p, math.normalize(new float3((float)(r.NextDouble() - 0.5), (float)(r.NextDouble() - 0.5), -2)), 2);
+                    for (int s = 0; s < 3; s++)
+                    {
+                        v.Tick(1 / 30f, 12);
+                        Assert.LessOrEqual(v.pieces.list.Count, AnatPieces.MaxPieces);
+                        Assert.IsTrue(v.pieces.list.Count <= 1 || v.pieces.Cells <= AnatPieces.MaxCells, "ячеек в кусках");
+                    }
+                }
+                v.Settle();
+                int changed = 0; for (int j = 0; j < keep.Count; j++) if (h.mat[keep[j]] != was[j]) changed++;
+                Assert.AreEqual(0, changed, "культя изменилась");
+                var seen = new System.Collections.Generic.HashSet<byte>();
+                for (int z = 0; z < h.dims.z; z++) for (int y = 0; y < h.dims.y; y++) for (int x = 0; x < h.dims.x; x++)
+                {
+                    float3 p = h.Local(x, y, z); float s0 = AnatDamage.StumpAt(p.x, p.z);
+                    if (p.y < s0 && p.y > s0 - 0.5f) seen.Add(h.mat[h.Index(x, y, z)]);
+                }
+                Assert.IsTrue(seen.Contains(AnatMat.Compact) || seen.Contains(AnatMat.Spongy), "кость на срезе");
+                Assert.IsTrue(seen.Contains(AnatMat.Artery), "артерия на срезе"); Assert.IsTrue(seen.Contains(AnatMat.Vein), "вена на срезе");
+                Assert.IsTrue(seen.Contains(AnatMat.Muscle), "мышца на срезе"); Assert.IsTrue(seen.Contains(AnatMat.Skin), "кожа на срезе");
+                Assert.IsTrue(seen.Contains(AnatMat.Air) || seen.Contains(AnatMat.Cartilage), "дыхательные пути на срезе");
+                Debug.Log("ANAT_TEST heavy: pieces made " + v.pieces.made + " peak " + v.pieces.peak + " trimmed " + v.pieces.trimmed + " crumbs " + v.crumbs + " rips " + v.sim.ripCount + " fractures " + v.sim.fractures.Count);
+            }
+            finally { v.Dispose(); }
+        }
     }
 }

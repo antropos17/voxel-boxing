@@ -85,7 +85,7 @@ Shader "VoxProbe/Anatomy"
                 float3 p = i.p.xyz + normalize(i.n.xyz) * (sw * grow / max(_BodyPar.x, 0.01));
                 float3 ws = TransformObjectToWorld(p);
                 float3 nw = TransformObjectToWorldNormal(normalize(i.n.xyz));
-                if (_SkinOn > 0.5)
+                if (_SkinOn > 0.5 && _ChunkOrg.w < 99.5)   // оторванные куски (тело ≥ 100) лежат в мире сами по себе
                 {
                     float3 h = mul(_AnatW2H, float4(ws, 1)).xyz, hn = mul((float3x3)_AnatW2H, nw);
                     Skin(h, hn);

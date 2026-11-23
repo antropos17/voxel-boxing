@@ -1,0 +1,136 @@
+using System.Collections.Generic;
+using Unity.Collections;
+using Unity.Mathematics;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace VoxProbe
+{
+    /// Оторванные куски (этап B, часть 2): своя маленькая решётка с материалами, частями, зонами и состояниями (кровь, синяк),
+    /// своё тело с сеткой (AnatBody, без изгиба шеи — номер тела ≥ 100) и простая физика твёрдого тела в рамке корня головы (см):
+    /// тяжесть, пол, отскок с потерей, трение, засыпание. Куски не сталкиваются друг с другом и с головой.
+    /// Пределы: не больше MaxPieces кусков и MaxCells ячеек во всех кусках; лишние — самые старые — убираются.
+    public class AnatPiece
+    {
+        public AnatGrid g; public AnatState st; public AnatBody body;
+        public float3 com;                 // центр масс в рамке решётки куска (см)
+        public float3 x, v, w;             // положение центра масс в рамке корня (см), скорость (см/с), угловая скорость (рад/с)
+        public quaternion q = quaternion.identity;
+        public float age, still; public bool asleep, ready; public int cells; public string what; public int id;
+        public float3 ext;                 // полуразмер решётки, см
+    }
+
+    public class AnatPieces
+    {
+        public const int MaxPieces = 24, MaxCells = 900000;
+        public const float Floor = -26f;   // пол, см рамки головы (низ шеи на −20)
+        public readonly List<AnatPiece> list = new List<AnatPiece>();
+        readonly Transform root; readonly Material material;
+        public int made, trimmed, crumbs, peak; int nextId = 100;
+        public int Cells { get { int c = 0; foreach (var p in list) c += p.cells; return c; } }
+
+        public AnatPieces(Transform root, Material material) { this.root = root; this.material = material; }
+
+        /// Новый кусок из ячеек src (индексы решётки src). Позиция — как у головы в текущей позе (жёстко с черепом у точки центра).
+        public AnatPiece Make(AnatGrid src, AnatState srcSt, NativeArray<int> cells, int from, int count, float3 vel, string what)
+        {
+            int3 mn = int.MaxValue, mx = int.MinValue; float3 sum = 0;
+            for (int k = 0; k < count; k++)
+            {
+                int i = cells[from + k]; int3 c = Cell(src, i);
+                mn = math.min(mn, c); mx = math.max(mx, c);
+            }
+            int3 dims = mx - mn + 3;
+            var g = new AnatGrid("piece", dims, src.step, src.org + (float3)(mn - 1) * src.step);
+            var st = new AnatState(g, 1);
+            int n = 0;
+            for (int k = 0; k < count; k++)
+            {
+                int i = cells[from + k]; byte m = src.mat[i];
+                if (m == AnatMat.Empty || m == AnatMat.Air || m == AnatMat.Covered) continue;
+                int3 c = Cell(src, i), l = c - mn + 1; int j = g.Index(l.x, l.y, l.z);
+                g.mat[j] = m; g.part[j] = src.part[i]; g.zone[j] = src.zone[i];
+                if (srcSt != null) { var v = srcSt.Get(c.x, c.y, c.z); if (!v.Zero) st.Set(l.x, l.y, l.z, v); }
+                sum += g.Local(l.x, l.y, l.z); n++;
+            }
+            if (n == 0) { st.Dispose(); g.Dispose(); return null; }
+            var p = new AnatPiece { g = g, st = st, cells = n, what = what, id = nextId++, v = vel, ext = (float3)dims * g.step * 0.5f };
+            p.com = sum / n;
+            // в позе: кусок стартует там, где его видно (поворот черепа у центра масс)
+            float3 rest = math.mul(src.rot, p.com) + src.pos;
+            if (AnatSkin.on) { float3 posed = AnatSkin.Skin(rest, out float3x3 M); p.x = posed; p.q = new quaternion(M); }
+            else p.x = rest;
+            var rnd = new Unity.Mathematics.Random((uint)(p.id * 7919 + 13));
+            p.w = rnd.NextFloat3(-6, 6) / math.max(1, math.length(p.ext) * 0.5f);
+            if (root != null)
+            {
+                p.body = new AnatBody(g, root, material, p.id) { cull = false, st = st };
+                Place(p);
+            }
+            list.Add(p); made++;
+            Trim(); peak = math.max(peak, list.Count);
+            return p;
+        }
+
+        static int3 Cell(AnatGrid g, int i) => new int3(i % g.dims.x, (i / g.dims.x) % g.dims.y, i / (g.dims.x * g.dims.y));
+
+        /// Убрать лишние: сверх MaxPieces кусков или MaxCells ячеек — сначала самые старые.
+        void Trim()
+        {
+            while (list.Count > MaxPieces || (list.Count > 1 && Cells > MaxCells)) { Kill(list[0]); list.RemoveAt(0); trimmed++; }
+        }
+
+        void Kill(AnatPiece p) { p.body?.Destroy(); p.st.Dispose(); p.g.Dispose(); }
+
+        public void Clear() { foreach (var p in list) Kill(p); list.Clear(); }
+
+        /// Физика: тяжесть, пол с отскоком и трением, засыпание. Сетка куска строится по бюджету в AnatView; пока её нет, кусок висит на месте.
+        public void Step(float dt)
+        {
+            if (dt <= 0) return;
+            int sub = math.max(1, (int)math.ceil(dt / 0.008f)); float h = dt / sub;
+            foreach (var p in list)
+            {
+                if (!p.ready && p.body != null) { p.ready = p.body.dirtyCount == 0; if (!p.ready) continue; }
+                p.age += dt;   // с момента, когда сетка готова и кусок полетел
+                if (p.asleep) continue;
+                for (int s = 0; s < sub; s++)
+                {
+                    p.v.y -= 981f * h;
+                    p.x += p.v * h;
+                    float a = math.length(p.w);
+                    if (a > 1e-5f) p.q = math.normalize(math.mul(quaternion.AxisAngle(p.w / a, a * h), p.q));
+                    // пол: самая низкая из 8 вершин решётки куска (вокруг центра масс)
+                    float3x3 R = new float3x3(p.q); float low = 0; float3 lowArm = 0;
+                    float3 c0 = p.g.org - p.com, c1 = p.g.org + (float3)p.g.dims * p.g.step - p.com;
+                    for (int k = 0; k < 8; k++)
+                    {
+                        float3 arm = math.mul(R, new float3((k & 1) != 0 ? c1.x : c0.x, (k & 2) != 0 ? c1.y : c0.y, (k & 4) != 0 ? c1.z : c0.z));
+                        float y = p.x.y + arm.y - Floor; if (y < low) { low = y; lowArm = arm; }
+                    }
+                    if (low < 0)
+                    {
+                        p.x.y -= low * 0.8f;   // выталкивание (оболочка решётки шире самого куска — оставить немного утопленным)
+                        float3 vc = p.v + math.cross(p.w, lowArm);
+                        if (vc.y < 0) { p.v.y = -p.v.y * 0.25f; p.v.xz *= 0.6f; p.w *= 0.6f; p.w += math.cross(lowArm, new float3(0, -vc.y, 0)) / math.max(1, math.lengthsq(lowArm)) * 0.3f; }
+                        else { p.v.xz *= math.exp(-6 * h); p.w *= math.exp(-6 * h); }
+                    }
+                }
+                bool slow = math.lengthsq(p.v) < 25 && math.lengthsq(p.w) < 0.04f;
+                p.still = slow ? p.still + dt : 0;
+                if (p.still > 0.6f || p.age > 12) { p.asleep = true; p.v = 0; p.w = 0; }
+                Place(p);
+            }
+        }
+
+        /// Корень тела куска: точка решётки r ↦ x + q·(r − com).
+        public static void Place(AnatPiece p)
+        {
+            var R = new float3x3(p.q);
+            p.g.rot = R; p.g.pos = p.x - math.mul(R, p.com);
+            if (p.body == null) return;
+            p.body.root.localPosition = (Vector3)(p.g.World(p.g.org) * 0.01f);
+            p.body.root.localRotation = p.q;
+        }
+    }
+}
