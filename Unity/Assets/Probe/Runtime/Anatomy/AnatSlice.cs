@@ -10,12 +10,12 @@ namespace VoxProbe
     {
         public struct Result { public Color32[] px; public int w, h; public int[] matCount; }
 
-        public static Result Render(AnatHead a, float3 o, float3 u, float3 v, float w, float h, float px)
+        public static Result Render(AnatHead a, float3 o, float3 u, float3 v, float w, float h, float px, AnatState st = null)
         {
             u = math.normalize(u); v = math.normalize(v);
             float3 n = math.normalize(math.cross(u, v));
             int W = (int)math.ceil(w / px), H = (int)math.ceil(h / px);
-            var mats = new byte[W * H]; var parts = new byte[W * H]; var cells = new int[W * H];
+            var mats = new byte[W * H]; var parts = new byte[W * H]; var cells = new int[W * H]; var hcell = new int[W * H];
             var res = new Result { px = new Color32[W * H], w = W, h = H, matCount = new int[AnatMat.Count] };
             for (int j = 0; j < H; j++)
             for (int i = 0; i < W; i++)
@@ -23,7 +23,7 @@ namespace VoxProbe
                 float3 p = o + u * ((i + 0.5f) * px - w * 0.5f) + v * ((j + 0.5f) * px - h * 0.5f);
                 byte m = a.Sample(p, out byte part, out AnatGrid g);
                 int k = i + W * j;
-                mats[k] = m; parts[k] = part;
+                mats[k] = m; parts[k] = part; hcell[k] = g == a.head ? g.Lookup(p) : -1;
                 cells[k] = g != null ? g.Lookup(p) * 7 + (g == a.head ? 0 : g.name.GetHashCode() & 0xFFFF) : 0;
                 if (m < AnatMat.Count) res.matCount[m]++;
             }
@@ -61,6 +61,14 @@ namespace VoxProbe
                         if (e < 0.12f) c = Color.Lerp(c, new Color(0.93f, 0.9f, 0.8f), 0.55f);                     // перегородки долек
                     }
                     if ((parts[k] & AnatPart.Suture) != 0) c *= 0.55f;
+                }
+                // этап B: кровь и синяк на срезе (st — состояния головы)
+                if (st != null && hcell[k] >= 0)
+                {
+                    int hi = hcell[k], hx = hi % a.head.dims.x, hy = (hi / a.head.dims.x) % a.head.dims.y, hz = hi / (a.head.dims.x * a.head.dims.y);
+                    var vs = st.Get(hx, hy, hz);
+                    if (vs.bruise > 0) c = Color.Lerp(c, new Color(0.36f, 0.12f, 0.30f), vs.bruise / 255f * 0.6f);
+                    if (vs.blood > 0) c = Color.Lerp(c, new Color(0.42f, 0.03f, 0.04f), math.saturate(vs.blood / 255f * 1.4f) * 0.85f);
                 }
                 // граница материалов
                 bool edge = false;
