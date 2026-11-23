@@ -17,8 +17,8 @@ namespace VoxProbe
     public static class AnatGeo
     {
         public const float S = 0.2f;   // шаг решётки головы, см (2,0 мм)
-        public static readonly float3 Org = new float3(-9.5f, -11.95f, -11.2f);
-        public static readonly int3 Dims = new int3(95, 134, 117);
+        public static readonly float3 Org = new float3(-9.5f, -19.95f, -11.2f);   // этап A3: низ — срез шеи у основания (C7–T2, трапеции)
+        public static readonly int3 Dims = new int3(95, 174, 117);
         public const float EX = 3.2f, EY = 2.3f, EZ = 6.2f, ER = 1.2f, LR = 1.5f;
 
         // ---------- примитивы ----------
@@ -80,7 +80,8 @@ namespace VoxProbe
             d = Smin(d, SdEll(x, y + 8.6f, z - 7.1f, 2.5f, 2.0f, 1.7f), 1.4f);
             d = Smin(d, SdEll(ax - 4.9f, y + 6.4f, z - 0.2f, 1.3f, 1.8f, 1.9f), 1.4f);
             d = Smin(d, SdCap(new float3(ax, y, z), new float3(4.9f, -6.0f, 0.2f), new float3(5.0f, -0.8f, 0.6f), 1.2f, 1.2f), 1.2f);
-            d = Smin(d, SdEll(x, math.max(y + 7.4f, 0), z + 2.4f, 4.8f, 4.2f, 4.7f), 2.2f);
+            d = Smin(d, SdEll(x, math.max(y + 7.4f, 0), z - NeckCz(y), NeckRx(y), 4.2f, NeckRz(y)), 2.2f);
+            d = Smin(d, SdEll(x, y + 11.0f, z - 2.85f, 1.0f, 1.3f, 0.75f), 0.8f);   // выступ гортани
             e = SdCap(new float3(x, y, z), new float3(0, 3.0f, 8.3f), new float3(0, -1.4f, 10.3f), 0.55f, 0.72f);
             e = Smin(e, SdEll(x, y + 1.75f, z - 10.15f, 1.1f, 0.95f, 0.95f), 0.8f);
             e = Smin(e, SdEll(ax - 1.3f, y + 2.25f, z - 8.95f, 0.82f, 0.72f, 0.95f), 0.6f);
@@ -89,6 +90,14 @@ namespace VoxProbe
             d = Smin(d, SdEll(x, y + 5.95f, z - 8.35f, 2.25f, 0.75f, 0.95f), 0.7f);
             return d;
         }
+
+        // шея (этап A3): ниже челюсти шея толще и глубже спереди (гортань, трахея, пищевод перед позвоночником), у основания
+        // расширяется в трапеции; выше −9 см форма как на этапе A
+        public static float NeckT(float y) => math.saturate((-9.0f - y) / 3.0f);
+        public static float NeckF(float y) => math.saturate((-15.5f - y) / 4.45f);
+        public static float NeckRx(float y) { float f = NeckF(y); return 4.8f + 0.8f * NeckT(y) + 3.0f * f * f; }
+        public static float NeckRz(float y) => 4.7f + 0.5f * NeckT(y) + 0.6f * NeckF(y);
+        public static float NeckCz(float y) => -2.4f + 0.5f * NeckT(y) - 0.2f * NeckF(y);
 
         /// Ушная раковина — пластина толщиной 6–8 мм (кожа, хрящ, кожа): контур-эллипс в плоскости y–z, задний край отведён
         /// от головы, у входа в слуховой проход — чаша раковины, по краю завиток толще, внутри гребень противозавитка, спереди козелок.
@@ -287,7 +296,7 @@ namespace VoxProbe
         public static float Pharynx(float x, float y, float z)
         {
             float naso = SdBox(new float3(x, y, z), new float3(0, -1.6f, 2.2f), new float3(1.1f, 1.3f, 0.8f));
-            float oro = math.max(SdEll2(x, z - 0.9f, 1.1f, 0.5f), y + 2.8f);
+            float oro = math.max(math.max(SdEll2(x, z - 0.9f, 1.1f, 0.5f), y + 2.8f), -9.4f - y);   // ниже −9,4 — гортань и пищевод (A3)
             float fauces = SdBox(new float3(x, y, z), new float3(0, -5.0f, 1.9f), new float3(0.9f, 0.55f, 0.75f));
             return math.min(math.min(naso, oro), fauces);
         }
@@ -539,6 +548,8 @@ namespace VoxProbe
                 case AnatPart.MedPterygoid: d = new float3(4.2f, -7.4f, 0.9f) - new float3(1.7f, -1.0f, 2.6f); break;
                 case AnatPart.LatPterygoid: d = new float3(4.6f, -1.0f, 0.7f) - new float3(2.0f, -0.6f, 2.8f); break;
                 case AnatPart.Scm: d = new float3(-0.4f, -1, 0.5f); break;
+                case AnatPart.Trapezius: d = new float3(1.0f, -0.6f, 0); break;
+                case AnatPart.Strap: case AnatPart.Esophagus: case AnatPart.LarynxM: d = new float3(0, 1, 0); break;
                 case AnatPart.RectusSup: case AnatPart.RectusInf: case AnatPart.RectusMed: case AnatPart.RectusLat: case AnatPart.ObliqueSup:
                     d = new float3(EX, EY, EZ) - Apex; break;
                 case AnatPart.ObliqueInf: d = new float3(1.9f, 0.85f, -1.5f); break;

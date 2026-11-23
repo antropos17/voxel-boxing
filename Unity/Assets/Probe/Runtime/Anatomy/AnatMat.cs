@@ -121,6 +121,7 @@ namespace VoxProbe
             Frontalis = 32, Occipitalis = 33, OrbOculi = 34, OrbOris = 35, ZygMajor = 36, ZygMinor = 37, Buccinator = 38, Mentalis = 39,
             Masseter = 40, Temporalis = 41, Platysma = 42, MedPterygoid = 43, LatPterygoid = 44, RectusSup = 45, RectusInf = 46,
             RectusMed = 47, RectusLat = 48, ObliqueSup = 49, ObliqueInf = 50, NeckDeep = 51, Scm = 52, SoftPalate = 53, TongueM = 54,
+            Trapezius = 55, Strap = 56, Esophagus = 57, LarynxM = 58,
             SupTemporalA = 64, FacialA = 65, ScalpV = 66, NasalMucosaV = 67, MiddleMeningealA = 68, SagittalSinus = 69, CarotidA = 70,
             JugularV = 71, InfAlveolarA = 72, TransverseSinus = 73,
             Suture = 0x80;
@@ -143,6 +144,7 @@ namespace VoxProbe
                 case RectusLat: return "латеральная прямая"; case ObliqueSup: return "верхняя косая"; case ObliqueInf: return "нижняя косая";
                 case NeckDeep: return "мышцы шеи"; case Scm: return "грудино-ключично-сосцевидная"; case SoftPalate: return "мягкое нёбо";
                 case TongueM: return "язык";
+                case Trapezius: return "трапециевидная"; case Strap: return "подподъязычные"; case Esophagus: return "пищевод"; case LarynxM: return "мышцы гортани";
                 case SupTemporalA: return "поверхностная височная артерия"; case FacialA: return "лицевая артерия"; case ScalpV: return "сосуды кожи головы";
                 case NasalMucosaV: return "сосуды слизистой носа"; case MiddleMeningealA: return "средняя менингеальная артерия";
                 case SagittalSinus: return "верхний сагиттальный синус"; case CarotidA: return "сонная артерия"; case JugularV: return "яремная вена";

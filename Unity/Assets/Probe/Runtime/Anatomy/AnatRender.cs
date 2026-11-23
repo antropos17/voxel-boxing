@@ -22,6 +22,7 @@ namespace VoxProbe
         public bool cull = true;                   // отсекать невидимое (AnatVis); false — рисовать всё, как на этапе A
         public int style = AnatMesher.StyleDefault; // вид поверхности (AnatMesher.Style*)
         readonly bool isHead;
+        readonly Bounds bnd;                       // границы сетки чанка (ячейки) с запасом 15 см на изгиб шеи (AnatSkin)
         NativeArray<VS> nopool; NativeArray<int> noslot;
         static MaterialPropertyBlock mpb;
         static readonly int ChunkOrgId = Shader.PropertyToID("_ChunkOrg"), BodyParId = Shader.PropertyToID("_BodyPar");
@@ -35,6 +36,7 @@ namespace VoxProbe
         public AnatBody(AnatGrid g, Transform parent, Material material, int bodyId)
         {
             this.g = g; isHead = g.name == "head";
+            bnd = new Bounds(new Vector3(16, 16, 16), Vector3.one * (40 + 2 * 15f / g.step));
             mpb ??= new MaterialPropertyBlock();
             root = new GameObject(g.name).transform;
             root.SetParent(parent, false);
@@ -114,7 +116,7 @@ namespace VoxProbe
             for (int k = 0; k < ms.Length; k++)
             {
                 int i = jobIdx[k];
-                ms[k].bounds = new Bounds(new Vector3(16, 16, 16), new Vector3(40, 40, 40));
+                ms[k].bounds = bnd;
                 quads[i] = (int)jobSt[k * 4 + 1]; naive[i] = (int)jobSt[k * 4];
                 rs[i].enabled = quads[i] > 0;
                 sum += (jobSt[k * 4 + 3] - jobSt[k * 4 + 2]) * 1000.0 / freq;
@@ -140,7 +142,7 @@ namespace VoxProbe
             Mesh.ApplyAndDisposeWritableMeshData(data, meshes, MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices);
             for (int i = 0; i < n; i++)
             {
-                meshes[i].bounds = new Bounds(new Vector3(16, 16, 16), new Vector3(40, 40, 40));
+                meshes[i].bounds = bnd;
                 quads[i] = (int)st[i * 4 + 1]; naive[i] = (int)st[i * 4];
                 rs[i].enabled = quads[i] > 0;
                 dirty[i] = false;

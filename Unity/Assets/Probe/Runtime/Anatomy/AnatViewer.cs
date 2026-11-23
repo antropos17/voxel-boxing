@@ -9,6 +9,7 @@ namespace VoxProbe
     /// Интерактивный просмотр головы в сборке: VoxelAnat.exe -anatView (окно 540×1170).
     /// ЛКМ — орбита, колесо — зум, СКМ или Shift+ЛКМ — сдвиг, F или двойной клик — вид по умолчанию;
     /// 1–4 — разрезы, 0 — целая, [ ] — плоскость на воксель; ПКМ или Ctrl+ЛКМ — удар, Q/W/E — сила, R — восстановить;
+    /// ↑↓ — кивок, ←→ — поворот, Shift+←→ — наклон к плечу, пробел — толчок (изгиб шеи, этап A3);
     /// H — подсказка, Esc — выход. -anatViewSelfTest [-anatShots папка] — пройти шаги сам и снять кадр после каждого.
     public class AnatViewer : MonoBehaviour
     {
@@ -29,6 +30,13 @@ namespace VoxProbe
         readonly StringBuilder sb = new StringBuilder(512);
         GUIContent text = new GUIContent(""); GUIStyle style; Texture2D bg;
         float fpsAcc; int fpsN; float fps; float hudT;
+        bool freezeSkin; int pushN;   // самопроверка держит позу и отлёт неподвижными; номер толчка пробелом
+        // толчки пробелом по кругу: (точка удара, направление) в см головы — в лицо, в левую и правую скулу, апперкот
+        static readonly (float3 at, float3 dir)[] Pushes =
+        {
+            (new float3(0, 3, 10), new float3(0, 0, -1)), (new float3(-6.5f, -1, 5), new float3(1, 0, -0.3f)),
+            (new float3(6.5f, -1, 5), new float3(-1, 0, -0.3f)), (new float3(0, -8.5f, 7), new float3(0, 1, -0.2f)),
+        };
 
         void Awake()
         {
@@ -42,6 +50,7 @@ namespace VoxProbe
             cam.clearFlags = CameraClearFlags.SolidColor; cam.backgroundColor = new Color(0.12f, 0.13f, 0.15f);
             cam.nearClipPlane = 0.005f; cam.farClipPlane = 10; cam.fieldOfView = 30;
             v = new AnatView(null, Center, anatMaterial);
+            AnatSkin.Reset(); AnatSkin.on = true; AnatSkin.SetGlobals(v.root);
             Default(true);
             Rebuild();
             if (selfTest) StartCoroutine(SelfTest());
@@ -78,7 +87,9 @@ namespace VoxProbe
             float dt = Time.unscaledDeltaTime;
             fpsAcc += dt; fpsN++;
             if (fpsAcc >= 0.25f) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
-            if (!selfTest) Controls();
+            if (!selfTest) Controls(dt);
+            if (!freezeSkin) AnatSkin.Step(dt);
+            AnatSkin.SetGlobals(v.root);
             float k = 1 - math.exp(-dt * 14f);
             yaw = math.lerp(yaw, tYaw, k); pitch = math.lerp(pitch, tPitch, k); dist = math.exp(math.lerp(math.log(dist), math.log(tDist), k));
             pivot = Vector3.Lerp(pivot, tPivot, k);
@@ -88,7 +99,7 @@ namespace VoxProbe
 
         void OnApplicationFocus(bool f) { if (!f) { dragOrbit = dragPan = false; } }
 
-        void Controls()
+        void Controls(float dt)
         {
             var kb = Keyboard.current; var ms = Mouse.current;
             if (kb != null && kb.escapeKey.wasPressedThisFrame) { Application.Quit(); return; }
@@ -105,7 +116,16 @@ namespace VoxProbe
             if (kb.qKey.wasPressedThisFrame) { strength = 0; Rebuild(); }
             if (kb.wKey.wasPressedThisFrame) { strength = 1; Rebuild(); }
             if (kb.eKey.wasPressedThisFrame) { strength = 2; Rebuild(); }
-            if (kb.rKey.wasPressedThisFrame) { v.Restore(); Rebuild(); }
+            if (kb.rKey.wasPressedThisFrame) { v.Restore(); AnatSkin.Reset(); Rebuild(); }
+            // поза: стрелки держать, 60°/с; пробел — толчок
+            float rate = math.radians(60f) * dt;
+            float3 dp = 0;
+            if (kb.upArrowKey.isPressed) dp.x -= rate;
+            if (kb.downArrowKey.isPressed) dp.x += rate;
+            if (kb.leftArrowKey.isPressed) { if (shift) dp.z += rate; else dp.y += rate; }
+            if (kb.rightArrowKey.isPressed) { if (shift) dp.z -= rate; else dp.y -= rate; }
+            if (math.any(dp != 0)) AnatSkin.Turn(dp);
+            if (kb.spaceKey.wasPressedThisFrame) { var pu = Pushes[pushN++ % Pushes.Length]; AnatSkin.Push(pu.at, pu.dir, strength); }
             if (kb.hKey.wasPressedThisFrame) hud = !hud;
             if (kb.fKey.wasPressedThisFrame) Default(false);
 
@@ -132,11 +152,14 @@ namespace VoxProbe
         }
 
         /// Удар по лучу из камеры через точку экрана.
+        float3 lastPick;
         bool Strike(Vector2 screen)
         {
             var ray = cam.ScreenPointToRay(new Vector3(screen.x, screen.y, 0));
             if (!v.Pick(ray, out var hit, out _, out _)) { v.lastWhat = "мимо"; Rebuild(); return false; }
-            v.Hit(hit, (float3)ray.direction, strength);
+            AnatSkin.Push(hit, v.pickDir, strength);
+            v.Hit(hit, v.pickDir, strength);
+            lastPick = hit;
             Rebuild();
             return true;
         }
@@ -148,8 +171,11 @@ namespace VoxProbe
             sb.Append("ЛКМ — вращать · колесо — ближе/дальше\nСКМ или Shift+ЛКМ — сдвиг · F, двойной клик — вид\n");
             sb.Append("ПКМ или Ctrl+ЛКМ — удар · Q/W/E — сила · R — восстановить\n");
             sb.Append("1–4 — разрезы, 0 — целая · [ ] — плоскость · H — скрыть · Esc — выход\n");
+            sb.Append("↑↓ — кивок · ←→ — поворот · Shift+←→ — наклон · пробел — толчок\n");
             sb.Append("Сила: ").Append(AnatView.Strengths[strength].name).Append(" · разрез: ").Append(AnatView.CutName[v.cut]);
             if (v.cut > 0) sb.Append(" (").Append(v.shift[v.cut] >= 0 ? "+" : "").Append(v.shift[v.cut].ToString("0.0")).Append(" см)");
+            float3 pd = math.degrees(AnatSkin.Total);
+            sb.Append('\n').Append("Поза: кивок ").Append(pd.x.ToString("0")).Append("°, поворот ").Append(pd.y.ToString("0")).Append("°, наклон ").Append(pd.z.ToString("0")).Append('°');
             sb.Append('\n').Append("Кадров/с: ").Append(fps.ToString("0")).Append(" · треугольников: ").Append(v.Triangles.ToString("N0"));
             sb.Append('\n').Append("Чанков: ").Append(v.Chunks).Append(" (с сеткой ").Append(v.ChunksDrawn).Append(')');
             sb.Append('\n').Append("Перестройка: ").Append(v.lastWhat).Append(" — ").Append(v.lastMs.ToString("0.0")).Append(" мс");
@@ -167,7 +193,7 @@ namespace VoxProbe
                 bg = new Texture2D(1, 1); bg.SetPixel(0, 0, new Color(0, 0, 0, 0.55f)); bg.Apply();
             }
             style.fontSize = Mathf.Max(11, Mathf.RoundToInt(Screen.height / 92f));
-            float w = Mathf.Min(Screen.width - 16, style.fontSize * 34f);
+            float w = Mathf.Min(Screen.width - 16, style.fontSize * 37f);
             float h = style.CalcHeight(text, w - 12);
             GUI.DrawTexture(new Rect(8, 8, w, h + 10), bg);
             GUI.Label(new Rect(14, 13, w - 12, h), text, style);
@@ -201,6 +227,45 @@ namespace VoxProbe
             for (int c = 1; c <= 4; c++) { v.SetCut(c); CutView(c, true); yield return Shot("cut-" + c); }
             v.SetCut(1); CutView(1, true); v.Shift(0.2f); v.Shift(0.2f); yield return Shot("cut-1-shift+0.4");
             v.SetCut(0); Default(true); yield return Shot("cut-0");
+            // изгиб шеи (A3): кивок, наклон, поворот на 60°, удар в повёрнутой голове, отлёт; поза держится неподвижно
+            freezeSkin = true;
+            View(90, 4, 0.85f, new float3(0, -3, 0), true);
+            AnatSkin.pose = math.radians(new float3(30, 0, 0)); yield return Shot("pose-nod-forward-30");
+            AnatSkin.pose = math.radians(new float3(-30, 0, 0)); yield return Shot("pose-nod-back-30");
+            View(0, 4, 0.85f, new float3(0, -3, 0), true);
+            AnatSkin.pose = math.radians(new float3(0, 0, 30)); yield return Shot("pose-tilt-30");
+            AnatSkin.pose = math.radians(new float3(0, 60, 0)); yield return Shot("pose-turn-60");
+            View(-35, 6, 0.85f, new float3(0, -3, 0), true); yield return Shot("pose-turn-60-3q");
+            // удар в скулу повёрнутой головы: прицел — изогнутая точка скулы; камера смотрит на неё по её нормали
+            float3 cheekRest = new float3(-4.5f, -2.5f, 6), cheekPosed = AnatSkin.Skin(cheekRest, out var cm);
+            float3 look = math.mul(cm, math.normalize(new float3(-0.6f, 0, 1)));
+            strength = 1; View(math.degrees(math.atan2(look.x, look.z)), 0, 0.40f, cheekPosed, true); yield return null;
+            bool hp = Strike(new Vector2(Screen.width * 0.5f, Screen.height * 0.5f));
+            float3 pickRest = lastPick;
+            AnatSkin.recoil = 0; AnatSkin.recoilV = 0;
+            yield return Shot("pose-turn-60-hit");
+            View(-35, 6, 0.85f, new float3(0, -3, 0), true); yield return Shot("pose-turn-60-hit-wide");
+            log.Append("  \"poseHit\": { \"hit\": ").Append(hp ? "true" : "false").Append(", \"restPoint\": \"").Append(pickRest.ToString()).Append("\", \"aimRest\": \"").Append(cheekRest.ToString()).Append("\" },\n");
+            v.Restore();
+            // отлёт: тяжёлый удар в лицо, кадр на пике (0,12 с) и после затухания (ещё 1,4 с)
+            AnatSkin.Reset(); View(90, 4, 0.85f, new float3(0, -3, 0), true);
+            AnatSkin.Push(new float3(0, 3, 10), new float3(0, 0, -1), 2);
+            for (int i = 0; i < 7; i++) AnatSkin.Step(1 / 60f); yield return Shot("recoil-peak");
+            log.Append("  \"recoilPeakDeg\": \"").Append(math.degrees(AnatSkin.recoil).ToString()).Append("\",\n");
+            for (int i = 0; i < 84; i++) AnatSkin.Step(1 / 60f); yield return Shot("recoil-settled");
+            // цена изгиба: время кадра без вертикальной синхронизации, изгиб выкл/вкл (поза — поворот 60°)
+            AnatSkin.Reset(); AnatSkin.pose = math.radians(new float3(0, 60, 0)); Default(true);
+            QualitySettings.vSyncCount = 0; Application.targetFrameRate = -1;
+            int bn = 0;
+            foreach (bool sk in new[] { false, true, false, true })
+            {
+                AnatSkin.on = sk;
+                for (int i = 0; i < 30; i++) yield return null;
+                float acc = 0; for (int i = 0; i < 240; i++) { yield return null; acc += Time.unscaledDeltaTime; }
+                log.Append("  \"frameMsSkin").Append(sk ? "On" : "Off").Append(++bn).Append("\": ").Append((acc / 240 * 1000).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)).Append(",\n");
+            }
+            AnatSkin.on = true; AnatSkin.Reset(); QualitySettings.vSyncCount = 1; Application.targetFrameRate = 120;
+            freezeSkin = false;
             // три удара по лучу из камеры в центр экрана: щека (лёгкий), лоб (средний), свод (тяжёлый)
             Vector2 mid = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
             strength = 0; View(-40, 0, 0.45f, new float3(-4.5f, -2.5f, 6), true); yield return null; bool h1 = Strike(mid); yield return Shot("hit-light-cheek");

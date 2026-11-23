@@ -94,30 +94,39 @@ namespace VoxProbe
             lastMs = sw.Elapsed.TotalMilliseconds; lastWhat = what; lastRemoved = 0;
         }
 
-        /// Луч (мир) → первая сплошная ячейка (кожа, кость, зуб, глаз…). Точка и нормаль входа — в см головы.
+        /// Направление удара в осях покоя у последней точки Pick (при изгибе шеи отличается от направления луча).
+        public float3 pickDir;
+
+        /// Луч (мир) → первая сплошная ячейка (кожа, кость, зуб, глаз…). Точка входа — в см головы, в позе покоя.
+        /// При изгибе шеи (AnatSkin.on) луч идёт в позе, каждая его точка переводится в покой обратным изгибом.
         public bool Pick(Ray ray, out float3 hit, out byte mat, out AnatGrid from)
         {
             hit = 0; mat = 0; from = null;
             float3 o = ToHead(ray.origin), dir = math.normalize((float3)ray.direction);
+            pickDir = dir;
+            bool bent = AnatSkin.on && math.any(math.abs(AnatSkin.Total) > 1e-5f);
+            float3 Rest(float3 q) => bent ? AnatSkin.Unskin(q) : q;
             var h = a.head;
-            // рамка решётки головы (в её собственных осях: pos и rot)
+            // рамка решётки головы (в её собственных осях: pos и rot); при изгибе — с запасом на сдвиг
             var ir = math.transpose(h.rot);
             float3 ol = math.mul(ir, o - h.pos), dl = math.mul(ir, dir);
-            float3 lo = h.org, hi = h.org + (float3)h.dims * h.step;
+            float pad = bent ? 15f : 0f;
+            float3 lo = h.org - pad, hi = h.org + (float3)h.dims * h.step + pad;
             float3 inv = 1f / dl, t0 = (lo - ol) * inv, t1 = (hi - ol) * inv;
             float tn = math.cmax(math.min(t0, t1)), tf = math.cmin(math.max(t0, t1));
             if (tf < math.max(tn, 0)) return false;
             const float st = 0.04f;
             for (float t = math.max(tn, 0); t <= tf; t += st)
             {
-                float3 p = o + dir * t;
+                float3 p = Rest(o + dir * t);
                 byte m = a.Sample(p, out _, out var g);
                 if (!AnatMat.Solid(m)) continue;
                 // уточнить вход: половинным делением между прошлым и этим шагом
                 float ta = t - st, tb = t;
-                for (int it = 0; it < 6; it++) { float tm = (ta + tb) * 0.5f; if (AnatMat.Solid(a.Sample(o + dir * tm, out _, out _))) tb = tm; else ta = tm; }
-                hit = o + dir * tb; mat = a.Sample(hit, out _, out from);
+                for (int it = 0; it < 6; it++) { float tm = (ta + tb) * 0.5f; if (AnatMat.Solid(a.Sample(Rest(o + dir * tm), out _, out _))) tb = tm; else ta = tm; }
+                hit = Rest(o + dir * tb); mat = a.Sample(hit, out _, out from);
                 if (!AnatMat.Solid(mat)) { hit = p; mat = m; from = g; }
+                if (bent) pickDir = math.normalizesafe(Rest(o + dir * (tb + 0.1f)) - Rest(o + dir * (tb - 0.1f)), dir);
                 return true;
             }
             return false;

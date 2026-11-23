@@ -27,6 +27,11 @@ Shader "VoxProbe/Anatomy"
             float _AnatTime, _BruiseDay;
             float4 _ChunkOrg;   // начало чанка в ячейках тела; w — номер тела
             float4 _BodyPar;    // x — шаг решётки тела, см; yzw — центр тела в ячейках (у глаза — ось взгляда)
+            // этап A3, изгиб шеи (AnatSkin): мир ↔ см головы, поворот сустава (вектор: ось × угол), (z начала наклона границы, высота, z оси, полуширина),
+            // наклон границ в области головы (вперёд, назад, низ и верх перехода по y)
+            float4x4 _AnatW2H, _AnatH2W;
+            float4 _SkinJ[8], _SkinP[8], _SkinS;
+            float _SkinOn;
             CBUFFER_START(UnityPerMaterial)
             float _Ambient;
             CBUFFER_END
@@ -44,6 +49,23 @@ Shader "VoxProbe/Anatomy"
                 float4 t : TEXCOORD6;
             };
 
+            float3 Rod(float3 v, float3 k, float a) { float c = cos(a), s = sin(a); return v * c + cross(k, v) * s + k * dot(k, v) * (1.0 - c); }
+            // изгиб точки покоя h (см головы) и нормали: повороты суставов сверху вниз, вес — по точке покоя
+            void Skin(inout float3 h, inout float3 n)
+            {
+                float3 r = h;
+                float ye = r.y + smoothstep(_SkinS.z, _SkinS.w, r.y) * (_SkinS.x * max(0.0, r.z - _SkinP[0].x) + _SkinS.y * max(0.0, _SkinP[0].x - r.z));
+                if (_ChunkOrg.w > 1.5 && _ChunkOrg.w < 98.0) ye = 100.0;   // глаза и зубы — целиком с черепом; челюсть — по весам тканей вокруг (иначе кость выходит из угла челюсти)
+                [unroll] for (int j = 0; j < 8; j++)
+                {
+                    float4 P = _SkinP[j];
+                    float w = smoothstep(P.y - P.w, P.y + P.w, ye);
+                    float3 rv = _SkinJ[j].xyz * w;
+                    float a = length(rv);
+                    if (a > 1e-6) { float3 k = rv / a; float3 piv = float3(0, P.y, P.z); h = piv + Rod(h - piv, k, a); n = Rod(n, k, a); }
+                }
+            }
+
             static const float3 N6[6] = { float3(1,0,0), float3(-1,0,0), float3(0,1,0), float3(0,-1,0), float3(0,0,1), float3(0,0,-1) };
 
             Vary vert(Attr i)
@@ -56,11 +78,19 @@ Shader "VoxProbe/Anatomy"
                 float sw = i.t.w * 255.0 * 0.005;
                 float grow = 1.0 - exp(-max(0.0, _AnatTime - i.t.x * 510.0) / 4.0);
                 float3 p = i.p.xyz + normalize(i.n.xyz) * (sw * grow / max(_BodyPar.x, 0.01));
-                o.pos = TransformObjectToHClip(p);
+                float3 ws = TransformObjectToWorld(p);
+                float3 nw = TransformObjectToWorldNormal(normalize(i.n.xyz));
+                if (_SkinOn > 0.5)
+                {
+                    float3 h = mul(_AnatW2H, float4(ws, 1)).xyz, hn = mul((float3x3)_AnatW2H, nw);
+                    Skin(h, hn);
+                    ws = mul(_AnatH2W, float4(h, 1)).xyz; nw = normalize(mul((float3x3)_AnatH2W, hn));
+                }
+                o.pos = TransformWorldToHClip(ws);
                 o.os = i.p.xyz;
-                o.ws = TransformObjectToWorld(p);
+                o.ws = ws;
                 o.c = i.c; o.t = i.t;
-                o.nw = TransformObjectToWorldNormal(normalize(i.n.xyz));
+                o.nw = nw;
                 o.md = float2(mat, dir);
                 o.ao = saturate(i.n.w * 127.0 / 126.0);
                 return o;

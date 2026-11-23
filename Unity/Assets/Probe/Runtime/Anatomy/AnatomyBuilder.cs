@@ -92,8 +92,9 @@ namespace VoxProbe
 
     public static class AnatomyBuilder
     {
+        public const float NeckTop = -9.4f;   // ниже — шея (этап A3), классификация своя (ClassJob.Neck)
         // нижняя челюсть: решётка выровнена с решёткой головы (тот же шаг, сдвиг на целое число ячеек)
-        public static readonly int3 MandOff = new int3(17, 5, 51), MandDims = new int3(61, 57, 52);
+        public static readonly int3 MandOff = new int3(17, 45, 51), MandDims = new int3(61, 57, 52);
 
         public static Vessel[] Vessels()
         {
@@ -114,6 +115,9 @@ namespace VoxProbe
             Add(new float3(1.9f, -11.95f, 0.6f), new float3(2.0f, -4.0f, 0.4f), 0.3f, AnatPart.CarotidA, AnatMat.Artery, 0);
             Add(new float3(2.0f, -4.0f, 0.4f), new float3(1.8f, -1.2f, 0.6f), 0.28f, AnatPart.CarotidA, AnatMat.Artery, 0);
             Add(new float3(2.3f, -11.95f, -0.2f), new float3(2.6f, -3.0f, -1.2f), 0.35f, AnatPart.JugularV, AnatMat.Vein, 0);
+            // шея (A3): общая сонная артерия сбоку от трахеи, внутренняя яремная вена снаружи от неё, до основания шеи
+            Add(new float3(2.3f, -19.95f, 1.0f), new float3(1.9f, -11.95f, 0.6f), 0.36f, AnatPart.CarotidA, AnatMat.Artery, 0);
+            Add(new float3(3.1f, -19.95f, 0.7f), new float3(2.3f, -11.95f, -0.2f), 0.5f, AnatPart.JugularV, AnatMat.Vein, 0);
             // средняя менингеальная артерия: от остистого отверстия вверх по внутренней стороне виска
             Add(new float3(3.8f, 0.8f, 0.8f), new float3(5.4f, 2.0f, 1.2f), 0.3f, AnatPart.MiddleMeningealA, AnatMat.Artery, 2);
             Add(new float3(5.4f, 2.0f, 1.2f), new float3(5.8f, 4.0f, 1.8f), 0.3f, AnatPart.MiddleMeningealA, AnatMat.Artery, 2);
@@ -140,9 +144,15 @@ namespace VoxProbe
             var anchors = new NativeArray<float>(Anchors, Allocator.TempJob);
             var vessels = new NativeArray<Vessel>(Vessels(), Allocator.TempJob);
 
+            // глубина покровов: шея внизу продолжена вниз на PadY ячеек (как столб), чтобы срез у основания шеи не считался кожей
+            var pdims = head.dims + new int3(0, PadY, 0);
+            var pmask = new NativeArray<byte>(pdims.x * pdims.y * pdims.z, Allocator.TempJob);
+            var pdist = new NativeArray<ushort>(pmask.Length, Allocator.TempJob);
             var h = new OccJob { occ = occ, dmask = dmask, dims = head.dims, org = head.org, s = S }.Schedule(head.dims.z, 1);
-            h = new HeadBuilder.ChamferJob { vox = dmask, dist = dist, dims = head.dims }.Schedule(h);
-            h.Complete(); r.ms["head.occ+chamfer"] = sw.Elapsed.TotalMilliseconds; sw.Restart();
+            h = new PadJob { src = dmask, dst = pmask, dims = head.dims, pad = PadY }.Schedule(head.dims.z, 1, h);
+            h = new HeadBuilder.ChamferJob { vox = pmask, dist = pdist, dims = pdims }.Schedule(h);
+            h = new UnpadJob { src = pdist, dst = dist, dims = head.dims, pad = PadY }.Schedule(head.dims.z, 1, h);
+            h.Complete(); pmask.Dispose(); pdist.Dispose(); r.ms["head.occ+chamfer"] = sw.Elapsed.TotalMilliseconds; sw.Restart();
             new ClassJob { occ = occ, dist = dist, mat = head.mat, part = head.part, zone = head.zone, dims = head.dims, org = head.org, s = S,
                 teeth = teeth, arch = arch, thick = thick, anchors = anchors, vessels = vessels }.Schedule(head.dims.z, 1).Complete();
             r.ms["head.classify"] = sw.Elapsed.TotalMilliseconds; sw.Restart();
@@ -268,6 +278,32 @@ namespace VoxProbe
         }
 
         // ---------- голова ----------
+        const int PadY = 30;
+        [BurstCompile(CompileSynchronously = true)]
+        struct PadJob : IJobParallelFor
+        {
+            [ReadOnly] public NativeArray<byte> src;
+            [NativeDisableParallelForRestriction] public NativeArray<byte> dst;
+            public int3 dims; public int pad;
+            public void Execute(int z)
+            {
+                int H = dims.y + pad;
+                for (int y = 0; y < H; y++) { int sy = math.max(y - pad, 0); for (int x = 0; x < dims.x; x++) dst[x + dims.x * (y + H * z)] = src[x + dims.x * (sy + dims.y * z)]; }
+            }
+        }
+        [BurstCompile(CompileSynchronously = true)]
+        struct UnpadJob : IJobParallelFor
+        {
+            [ReadOnly] public NativeArray<ushort> src;
+            [NativeDisableParallelForRestriction] public NativeArray<ushort> dst;
+            public int3 dims; public int pad;
+            public void Execute(int z)
+            {
+                int H = dims.y + pad;
+                for (int y = 0; y < dims.y; y++) for (int x = 0; x < dims.x; x++) dst[x + dims.x * (y + dims.y * z)] = src[x + dims.x * (y + pad + H * z)];
+            }
+        }
+
         [BurstCompile(CompileSynchronously = true)]
         struct OccJob : IJobParallelFor
         {
@@ -283,10 +319,11 @@ namespace VoxProbe
                     for (int x = 0; x < dims.x; x++, i++)
                     {
                         float X = org.x + (x + 0.5f) * s;
-                        bool real = y > 0 && (HeadSdf(X, Y, Z) <= 0 || InTongue(X, Y, Z));   // нижний слой пуст: срез шеи закрыт кожей
+                        bool inside = HeadSdf(X, Y, Z) <= 0 || InTongue(X, Y, Z);
+                        bool real = y > 0 && inside;   // нижний слой пуст: срез у основания шеи открыт (видно строение на срезе)
                         occ[i] = (byte)(real ? 1 : 0);
-                        // для глубины покровов рот заполнен: глубина считается от наружной кожи
-                        dmask[i] = (byte)(real || MouthCav(X, Y, Z) < 0.3f ? 1 : 0);
+                        // для глубины покровов рот заполнен: глубина считается от наружной кожи; нижний слой — как продолжение шеи
+                        dmask[i] = (byte)(inside || MouthCav(X, Y, Z) < 0.3f ? 1 : 0);
                     }
                 }
             }
@@ -374,6 +411,7 @@ namespace VoxProbe
                 if (y > -7.8f && y < -2.6f && ax < 3.8f && z > 2.2f && z < 9.4f) tsd = TeethSdf(teeth, 0, 32, pp, out tq, out ti);
                 if (tsd < 0) { m = AnatMat.Covered; p = 3; return; }                       // зуб в лунке — отдельное тело
                 if (InTongue(x, y, z)) { m = AnatMat.Tongue; p = AnatPart.TongueM; return; }
+                if (y < NeckTop) { Neck(x, y, z, depth, out m, out p); return; }
 
                 var L = Stack(anchors, ax, y, z);
                 // веки: кожа, круговая мышца, конъюнктива
@@ -480,7 +518,7 @@ namespace VoxProbe
                 float ph = Pharynx(x, y, z);
                 if (ph < 0.2f && depth >= 0.6f) { m = ph < 0 ? AnatMat.Air : AnatMat.Mucosa; return; }
                 // позвоночник и спинной мозг
-                if (y < -3.6f && ax < 3.6f && z > -5.4f && z < 0.3f)
+                if (y < -3.6f && ax < 3.6f && z > -6.4f && z < 0.3f)
                 {
                     byte sm = Spine(x, y, z, out byte sp);
                     if (sm != 0) { m = sm; p = sp; return; }
@@ -557,12 +595,16 @@ namespace VoxProbe
                 int lvl = -1; float y0 = 0, y1 = 0;
                 if (y >= -4.6f && y < -3.8f) { lvl = 1; y0 = -4.6f; y1 = -3.8f; }
                 else if (y >= -6.4f && y < -4.6f) { lvl = 2; y0 = -6.4f; y1 = -4.8f; }
-                else if (y >= -8.3f && y < -6.4f) { lvl = 3; y0 = -8.1f; y1 = -6.6f; }
-                else if (y >= -10f && y < -8.3f) { lvl = 4; y0 = -9.8f; y1 = -8.3f; }
-                else if (y < -10f) { lvl = 5; y0 = -11.5f; y1 = -10f; }
+                else if (y < -6.4f)
+                {
+                    // C3–C7 и T1–T3 (A3): тела по 1,5 см, диски 0,2 см сверху и снизу, ниже — крупнее
+                    lvl = math.min(3 + (int)math.floor((-6.4f - y) / 1.7f), 10);
+                    y1 = -6.6f - (lvl - 3) * 1.7f; y0 = y1 - 1.5f;
+                }
                 if (lvl < 0) return 0;
                 bool inBand = y >= y0 && y < y1;
-                float body = SdEll2(x, z + 1.0f, 0.85f, 0.75f);
+                int lv = math.max(lvl - 3, 0);
+                float body = SdEll2(x, z + 1.0f, 0.85f + 0.05f * lv, 0.75f + 0.03f * lv);
                 if (lvl == 1)
                 {
                     if (SdEll2(x, z + 1.1f, 0.45f, 0.45f) < 0) return AnatMat.Compact;                    // зуб C2 внутри кольца атланта
@@ -573,10 +615,84 @@ namespace VoxProbe
                 float arch = SdEll2(x, z + 2.6f, 1.15f, 0.95f);
                 if (arch < 0 && (z < -1.6f || ax > 0.6f)) return inBand ? AnatMat.Compact : AnatMat.Tendon;   // дуга / жёлтая связка
                 float my = (y0 + y1) * 0.5f;
-                if (ax < 0.25f && z < -3.4f && z > -4.8f && y < y1 - 0.2f && y > y0 - 0.3f && lvl >= 2) return AnatMat.Compact; // остистый
+                if (ax < 0.25f && z < -3.4f && z > -4.8f - 0.17f * lv && y < y1 - 0.2f && y > y0 - 0.3f && lvl >= 2) return AnatMat.Compact; // остистый (у C7 — длинный)
                 float tw = lvl == 1 ? 3.3f : 2.3f;
                 if (ax > 1.0f && ax < tw && z > -1.9f && z < -1.0f && math.abs(y - my) < 0.3f) return AnatMat.Compact;      // поперечные
                 return 0;
+            }
+
+            /// Шея ниже NeckTop (этап A3): кожа, жир, подкожная мышца, грудино-ключично-сосцевидная, трапециевидная, глубокие мышцы,
+            /// позвонки с каналом и спинным мозгом, подъязычная кость, гортань (щитовидный и перстневидный хрящи, просвет со складками),
+            /// трахея с кольцами, пищевод, щитовидная железа, сонные артерии и яремные вены. Глубина — от боковой кожи.
+            void Neck(float x, float y, float z, float depth, out byte m, out byte p)
+            {
+                m = 0; p = 0;
+                float ax = math.abs(x);
+                float3 q = new float3(ax, y, z);
+                if (depth < 0.2f) { m = StubbleDensity(x, y, z) > 0.4f ? AnatMat.Stubble : AnatMat.Skin; return; }
+                float cz = NeckCz(y);
+                float fat = z > cz ? 0.4f : 0.6f;
+                if (depth < fat) { m = AnatMat.Fat; return; }
+                // позвоночник
+                if (ax < 3.6f && z > -6.4f && z < 0.3f) { byte sm = Spine(x, y, z, out byte sp); if (sm != 0) { m = sm; p = sp; return; } }
+                // сосуды и их влагалище
+                for (int k = 0; k < vessels.Length; k++)
+                {
+                    var v = vessels[k];
+                    if (v.band == 0 && SdCap(q, v.a, v.b, v.r, v.r) < 0) { m = v.mat; p = v.part; return; }
+                }
+                for (int k = 0; k < vessels.Length; k++)
+                {
+                    var v = vessels[k];
+                    if (v.band == 0 && v.a.y < -12f && SdCap(q, v.a, v.b, v.r + 0.2f, v.r + 0.2f) < 0) { m = AnatMat.Fascia; return; }
+                }
+                // подъязычная кость
+                if (y > -9.8f && math.abs(math.length(new float2(x, (z - 1.0f) * 0.85f)) - 1.9f) < 0.22f && z > 1.6f) { m = AnatMat.Compact; p = AnatPart.Hyoid; return; }
+                // гортань: щитовидный хрящ (пластинки открыты сзади), просвет; голосовые складки сужают щель
+                if (y >= -11.9f)
+                {
+                    float o = SdEll2(x, z - 1.9f, 1.45f, 1.2f);
+                    if (o < 0)
+                    {
+                        float lu = SdEll2(x, z - 2.0f, y > -11.0f && y < -10.6f ? 0.15f : 0.5f, 0.72f);
+                        if (lu < 0) { m = lu > -0.15f ? AnatMat.Mucosa : AnatMat.Air; return; }
+                        if (o > -0.25f && z > 1.3f && y < -9.8f) { m = AnatMat.Cartilage; return; }
+                        m = AnatMat.Muscle; p = AnatPart.LarynxM; return;
+                    }
+                }
+                else
+                {
+                    // перстневидный хрящ и трахея: кольца открыты сзади, там мышца
+                    float zt = y < -12.6f ? 1.8f - 0.05f * (-12.6f - y) : 1.8f;
+                    float rx = y < -12.6f ? 1.0f : 1.05f, rz = y < -12.6f ? 0.85f : 0.95f;
+                    float o = SdEll2(x, z - zt, rx, rz);
+                    if (o < 0)
+                    {
+                        float wall = y < -12.6f ? 0.25f : 0.3f;
+                        if (o > -wall)
+                        {
+                            if (y < -12.6f && z < zt - 0.45f) { m = AnatMat.Muscle; p = AnatPart.LarynxM; return; }
+                            bool ring = y >= -12.6f || math.frac((y + 40f) / 0.6f) < 0.67f;
+                            m = ring ? AnatMat.Cartilage : AnatMat.Fascia; return;
+                        }
+                        m = o > -wall - 0.2f ? AnatMat.Mucosa : AnatMat.Air; return;
+                    }
+                    // щитовидная железа: доли по бокам трахеи и перешеек спереди
+                    if (y > -14.8f && (InEll(ax - 1.45f, y + 13.5f, z - 1.9f, 0.65f, 1.25f, 0.6f) || InEll(x, y + 13.2f, z - 2.75f, 1.0f, 0.35f, 0.3f)))
+                    { m = AnatMat.Parotid; return; }
+                }
+                // пищевод: сплющенная трубка перед позвоночником, чуть левее средней линии
+                float oe = SdEll2(x - 0.2f, z - 0.45f, 0.9f, 0.42f);
+                if (oe < 0) { if (oe > -0.2f) { m = AnatMat.Muscle; p = AnatPart.Esophagus; } else m = AnatMat.Mucosa; return; }
+                // мышцы
+                if (depth < fat + 0.2f && z > cz - 1.0f) { m = AnatMat.Muscle; p = AnatPart.Platysma; return; }
+                if (ax < 0.25f && z < -4.2f) { m = AnatMat.Tendon; return; }                                   // выйная связка
+                if (depth < 2.2f && SegDist(q, new float3(5.3f, -2.0f, -2.2f), new float3(1.9f, -19.5f, 2.9f)) < 1.5f) { m = AnatMat.Muscle; p = AnatPart.Scm; return; }
+                if ((z < cz - 1.5f && depth < fat + 1.4f && y < -11f) || (ax > 5.0f && y < -15f)) { m = AnatMat.Muscle; p = AnatPart.Trapezius; return; }
+                if (z > 2.6f && ax < 2.2f && depth < fat + 0.8f) { m = AnatMat.Muscle; p = AnatPart.Strap; return; }
+                if (z > -2.5f && z < 0.5f && ax < 6.0f) { m = AnatMat.Muscle; p = AnatPart.NeckDeep; return; }        // длинная мышца шеи, лестничные, мышца, поднимающая лопатку
+                if (z < -2.0f) { m = AnatMat.Muscle; p = AnatPart.NeckDeep; return; }                             // глубокие разгибатели
+                m = AnatMat.Loose;
             }
 
             void Brain(float x, float y, float z, float dB, out byte m, out byte p)
