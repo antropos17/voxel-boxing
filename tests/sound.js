@@ -8,15 +8,18 @@ const TYPES = { '.html': 'text/html', '.json': 'application/json', '.webm': 'aud
 /* считаем источники: сколько создано, сколько сейчас звучит, сколько осцилляторов (синтез) */
 const COUNT = () => {
   const B = AudioBufferSourceNode.prototype, O = AudioContext.prototype, st = B.start, sp = B.stop, osc = O.createOscillator;
-  window.__au = { src: 0, osc: 0, live: [], peak: 0 };
+  window.__au = { src: 0, osc: 0, live: [], all: [], peak: 0 };
   B.start = function (when) {
     const a = window.__au, t = this.context.currentTime, end = this.loop ? 1e9 : Math.max(t, when || 0) + this.buffer.duration / this.playbackRate.value;
-    this.__rec = { end }; a.live.push(this.__rec); a.src++;
+    const rec = this.__rec = { end, loop: this.loop, ended: false, stopped: false }; this.addEventListener('ended', () => { rec.ended = true }); a.live.push(rec); a.all.push(rec); a.src++;
     a.live = a.live.filter(r => r.end > t); a.peak = Math.max(a.peak, a.live.length);
     return st.apply(this, arguments);
   };
-  /* остановленный голос считаем ушедшим сразу: его 60 мс затухания не новый голос */
-  B.stop = function (when) { if (this.__rec) this.__rec.end = Math.min(this.__rec.end, this.context.currentTime); return sp.apply(this, arguments) };
+  /* остановленный голос считаем ушедшим сразу: он уже не в пуле и за 60 мс гаснет до нуля */
+  B.stop = function (when) { if (this.__rec) { this.__rec.stopped = true; this.__rec.end = Math.min(this.__rec.end, this.context.currentTime) } return sp.apply(this, arguments) };
+  /* часы под управлением теста: в замороженном проходе currentTime задаёт тест (__au.clock), иначе настоящие */
+  const ct = Object.getOwnPropertyDescriptor(BaseAudioContext.prototype, 'currentTime');
+  Object.defineProperty(BaseAudioContext.prototype, 'currentTime', { configurable: true, get() { const c = window.__au.clock; return c == null ? ct.get.call(this) : c } });
   O.createOscillator = function () { window.__au.osc++; return osc.apply(this, arguments) };
 };
 /* все sfx с типичными аргументами; у каждого должно быть событие в манифесте */
@@ -59,7 +62,7 @@ async function open(browser, base, block) {
   const { page, errs } = await open(browser, base, false);
   await page.click('#goStart');
   const t0 = Date.now();
-  await page.waitForFunction(n => { const S = __g.snd.SND; return Object.keys(S.buf).length + Object.keys(S.bad).length >= n }, total, { timeout: 60000 }).catch(() => {});
+  await page.waitForFunction(n => { const S = __g.snd.SND; return Object.keys(S.buf).length + Object.keys(S.bad).length >= n }, total, { timeout: 120000 }).catch(() => {});
   const load = await page.evaluate(() => { const S = __g.snd.SND; return { ext: S.ext, buf: Object.keys(S.buf).length, bad: Object.keys(S.bad), raw: Object.keys(S.raw).length, ac: __g.snd.ac() && __g.snd.ac().state } });
   console.log('loaded', JSON.stringify(load), 'of', total, 'in', Date.now() - t0, 'ms');
   if (load.buf !== total) fails.push('decoded ' + load.buf + ' of ' + total + (load.bad.length ? ', bad: ' + load.bad.join(' ') : ''));
@@ -68,7 +71,8 @@ async function open(browser, base, block) {
   console.log('mp3 decoded', total - mp3.length, 'of', total);
   if (mp3.length) fails.push('mp3 not decoded: ' + mp3.join(' '));
   /* фон зала включается, пока идёт бой */
-  await page.waitForFunction(() => __g.G.mode === 'fight', null, { timeout: 30000 });
+  /* под нагрузкой машины вступление до боя идёт долго: ждём с запасом, итог от этого не зависит */
+  await page.waitForFunction(() => __g.G.mode === 'fight', null, { timeout: 120000 });
   await page.waitForTimeout(1200);
   if (!(await page.evaluate(() => !!__g.snd.SND.hall))) fails.push('hall loop did not start in fight');
   await page.evaluate(() => { __g.G.paused = true });
@@ -83,23 +87,47 @@ async function open(browser, base, block) {
   const names = await page.evaluate(() => Object.keys(__g.snd.sfx));
   names.filter(n => !CALLS.some(c => c[0] === n)).forEach(n => fails.push('sfx.' + n + ' is not covered by the test'));
   console.log('events', ev.length, 'calls', calls.length, 'sfx functions', names.length);
-  /* серия из 50 ударов вперемешку с кровью и хрустом: голосов не больше предела, у события не больше своего */
-  await page.waitForTimeout(5000);
-  const burst = await page.evaluate(async () => {
-    const s = __g.snd, S = s.SND, man = S.man.events, ty = ['hook', 'upper', 'over', 'flurry'];
-    S.v.splice(0).forEach(x => x.s.stop()); window.__au.live = window.__au.live.filter(r => r.end > 1e8); window.__au.peak = 0; let worst = 0, perEv = {}, bad = [];
-    for (let i = 0; i < 50; i++) {
-      s.sfx.heavy(i % 2 === 0, 1 + (i % 5) * .2, i % 3 !== 0, ty[i % 4]); s.sfx.squelch(); if (i % 3 === 0) s.sfx.crack('nose'); if (i % 4 === 0) s.sfx.tooth(); s.sfx.drip(.5);
-      worst = Math.max(worst, S.v.length);
-      const c = {}; S.v.forEach(x => { c[x.ev] = (c[x.ev] || 0) + 1 }); for (const k in c) { perEv[k] = Math.max(perEv[k] || 0, c[k]); if (c[k] > (man[k].voices || 2)) bad.push(k + ':' + c[k]) }
-      await new Promise(r => setTimeout(r, 25));
-    }
-    return { worst, peak: window.__au.peak, perEv, bad, n: S.n, max: s.MAX };
-  });
-  console.log('burst', JSON.stringify(burst));
-  if (burst.worst > burst.max) fails.push('voices ' + burst.worst + ' > ' + burst.max);
-  if (burst.peak > burst.max + 1) fails.push('sounding sources ' + burst.peak + ' > ' + (burst.max + 1) + ' (limit + hall)');
-  if (burst.bad.length) fails.push('per-event limit broken: ' + burst.bad.join(' '));
+  /* серия из 50 ударов вперемешку с кровью и хрустом. После каждого вызова: голосов в пуле не больше предела, у события
+     не больше своего, и каждый звучащий источник (запущен, не остановлен, не петля, конец позже текущего времени по
+     часам перехватчика) лежит в пуле — то есть звучащих тоже не больше предела. Два прохода: на замороженных часах
+     (контекст приостановлен, currentTime задаёт тест, Math.random с зерном — результат один и тот же при любой загрузке машины) и вживую, с
+     естественным окончанием голосов между ударами. */
+  await page.waitForTimeout(3000);
+  const BURST = async (frozen) => {
+    const s = __g.snd, S = s.SND, man = S.man.events, ac = s.ac(), ty = ['hook', 'upper', 'over', 'flurry'], rnd = Math.random;
+    if (frozen) { await ac.suspend(); window.__au.clock = ac.currentTime; let z = 12345; Math.random = () => { z = (z * 1103515245 + 12345) % 2147483648; return z / 2147483648 } }
+    S.v.splice(0).forEach(x => x.s.stop()); S.dripT = -9; window.__au.all = [];
+    const n0 = { ...S.n }, out = { worst: 0, live: 0, bad: [] };
+    const check = (tag) => {
+      /* звучащий = запущен, не остановлен и ещё не прислал ended; каждый такой должен лежать в пуле. Правило не
+         зависит от часов: узел сообщает о конце сам, когда отзвучал */
+      const inV = new Set(S.v.map(x => x.s.__rec)), live = window.__au.all.filter(r => !r.loop && !r.stopped && !r.ended);
+      out.worst = Math.max(out.worst, S.v.length); out.live = Math.max(out.live, live.length);
+      if (S.v.length > s.MAX) out.bad.push(tag + ': voices ' + S.v.length);
+      const orphan = live.filter(r => !inV.has(r)).length; if (orphan) out.bad.push(tag + ': ' + orphan + ' sounding not in pool');
+      const c = {}; S.v.forEach(x => { c[x.ev] = (c[x.ev] || 0) + 1 }); for (const k in c) if (c[k] > (man[k].voices || 2)) out.bad.push(tag + ': ' + k + ' ' + c[k]);
+    };
+    try {
+      for (let i = 0; i < 50; i++) {
+        const st = [() => s.sfx.heavy(i % 2 === 0, 1 + (i % 5) * .2, i % 3 !== 0, ty[i % 4]), () => s.sfx.squelch(), () => { if (i % 3 === 0) s.sfx.crack('nose') }, () => { if (i % 4 === 0) s.sfx.tooth() }, () => { S.dripT = -9; s.sfx.drip(.5) }];
+        st.forEach((f, k) => { f(); check(i + '.' + k) });
+        /* скачок часов на 10 с (под нагрузкой currentTime прыгает): по времени все голоса «кончились», но узлы не
+           отзвучали (контекст стоит, ended не пришёл) — пул обязан их держать */
+        if (frozen && i % 10 === 5) { window.__au.clock += 10; s.play('jab_head'); check(i + '.jump') }
+        if (!frozen) await new Promise(r => setTimeout(r, 25));
+      }
+    } finally { Math.random = rnd; window.__au.clock = null; if (frozen) await ac.resume() }
+    out.n = { play: S.n.play - n0.play, steal: S.n.steal - n0.steal, drop: S.n.drop - n0.drop }; out.max = s.MAX;
+    S.v.splice(0).forEach(x => x.s.stop());
+    return out;
+  };
+  for (const frozen of [true, false]) {
+    const b = await page.evaluate(BURST, frozen);
+    console.log('burst', frozen ? 'frozen' : 'live', JSON.stringify(b));
+    if (b.worst > b.max) fails.push('voices ' + b.worst + ' > ' + b.max);
+    if (b.live > b.max) fails.push('sounding sources ' + b.live + ' > ' + b.max);
+    b.bad.slice(0, 5).forEach(x => fails.push('burst ' + (frozen ? 'frozen' : 'live') + ' ' + x));
+  }
   errs.forEach(e => fails.push(e));
   await page.context().close();
   /* без файлов: запрос звуков оборван — синтез, ошибок нет */

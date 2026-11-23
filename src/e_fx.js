@@ -314,14 +314,16 @@ function snd(ev,vol,rate,delay){
   if(n>1&&k===SND.last[ev])k=(k+1+((Math.random()*(n-1))|0))%n;
   for(i=0;i<n&&!b;i++)if(SND.buf[fs[(k+i)%n]]){k=(k+i)%n;b=SND.buf[fs[k]]}
   if(!b)return false;SND.last[ev]=k;
-  for(i=v.length-1;i>=0;i--)if(v[i].end<=t)v.splice(i,1);
+  for(i=v.length-1;i>=0;i--)if(v[i].done)v.splice(i,1);
   for(i=0;i<v.length;i++){x=v[i];if(x.ev===ev){same++;if(os<0)os=i}if(low<0||x.pri<v[low].pri||(x.pri===v[low].pri&&x.st<v[low].st))low=i}
   if(same>=(e.voices||2)){sndKill(v[os],t);v.splice(os,1);SND.n.steal++}
   else if(v.length>=SNDMAX){if(v[low].pri>(e.pri||0)){SND.n.drop++;return true}sndKill(v[low],t);v.splice(low,1);SND.n.steal++}
   var r=(rate||1)*Math.pow(2,(Math.random()*2-1)*(e.pv||0)/12),s=AC.createBufferSource(),g=AC.createGain(),at=t+(delay||0);
   s.buffer=b;s.playbackRate.value=r;g.gain.value=Math.pow(10,(e.gain||0)/20)*(vol==null?1:vol)*(1-Math.random()*(e.vv||0));
   s.connect(g);g.connect(master);s.start(at);
-  v.push({s:s,g:g,ev:ev,pri:e.pri||0,st:at,end:at+b.duration/r});SND.n.play++;return true}
+  /* голос держит место, пока узел не скажет ended: время конца, посчитанное из currentTime, ненадёжно — часы движутся
+     и внутри задачи, а под нагрузкой прыгают на сотню мс, и узел с прошедшим временем старта звучит дольше расчётного */
+  x={s:s,g:g,ev:ev,pri:e.pri||0,st:at};s.onended=function(){x.done=1};v.push(x);SND.n.play++;return true}
 /* фон зала: одна петля, идёт пока на экране бой, нокаут или проигрыш */
 function sndHall(on){
   if(!AC)return;var H=SND.hall,t=AC.currentTime;
