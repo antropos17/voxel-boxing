@@ -35,6 +35,63 @@ U="X:/Programs/Unity/6000.3.21f1/Editor/Unity.exe"; P="X:/Projects 2027/Voxel Bo
 
 Пакетный запуск не пройдёт, если этот проект открыт в редакторе.
 
+## Два способа работы: пакетный запуск и открытый редактор через Unity CLI
+
+С 23.11.2026 в проекте стоит пакет `com.unity.pipeline` (`Packages/manifest.json`). Через него Unity CLI (`unity`, версия 1.0.1) управляет открытым редактором этого проекта.
+
+**Когда какой:**
+
+- **Открытый редактор + CLI** — для частых шагов: тесты, снимки, замеры в редакторе, `script eval` своих методов. Нет холодного старта.
+- **Пакетный запуск** — сборки Windows и Android, чистые замеры времени, CI. Перед ним свой редактор закрыть (`unity close`), иначе Unity не пустит второй процесс на проект.
+- Правка C# → перекомпиляция → снимок одинаково долгие обоими способами (~22 с): основное время — сама перекомпиляция и перезагрузка домена.
+
+Замер 23.11.2026 (три повтора каждого шага, машина загружена другими сессиями; разброс между повторами до 10%):
+
+| Шаг | Пакетный, с | CLI, открытый редактор, с | Во сколько раз |
+|---|---|---|---|
+| правка цвета в `AnatMat.cs` → перекомпиляция → снимок головы 3/4 (`AnatShotsA2.One`) | 21,4 (22,7 / 20,4 / 21,2) | 22,0 (21,7 / 22,0 / 22,4) | 1,0 |
+| то же без правки кода (только снимок) | ~21 | 5,6 | ~3,8 |
+| EditMode-тесты строения и видимости (13 прошли) | 39,1 (40,8 / 38,0 / 38,6) | 11,4 (12,4 / 10,9 / 10,9) | 3,4 |
+| полный набор снимков A2 (`AnatShotsA2.Run`) | 26,9 (28,4 / 24,6 / 27,7) | 10,0 (10,2 / 10,5 / 9,3) | 2,7 |
+
+Первое открытие редактора (сразу после установки пакета, импорт пакетов): 149 с до `ready`; повторное — 35 с. Память: редактор 2,1–2,8 ГБ плюс 2–5 процессов импорта ассетов по ~0,85 ГБ, пока они живы.
+
+Результат одинаковый: снимок `One` и все 18 снимков A2 совпали попиксельно, треугольники во всех состояниях те же, тесты — 13 прошли, 11 этапа B пропущены.
+
+### Команды (Git Bash)
+
+```bash
+export UNITY_NO_CONSENT_PROMPT=1 UNITY_NON_INTERACTIVE=1 UNITY_NO_AGENT_HINTS=1
+P="X:/Projects 2027/Voxel Boxing - Fight 2027/Unity"
+# открыть свой редактор и дождаться готовности (всегда с полным путём: на машине бывает открыт чужой проект)
+unity open "$P"
+unity status --until-ready --project-path "$P" --format json
+# перекомпиляция после правки C#; затем ОБЯЗАТЕЛЬНО дождаться готовности — recompile возвращается до конца перезагрузки домена
+unity recompile --project-path "$P" --timeout 300 --format json
+unity status --until-ready --project-path "$P" --format json
+# свой метод в живом редакторе
+unity command script eval --code 'VoxProbe.Editor.AnatShotsA2.Run(); return "ok";' --timeout 900 --project-path "$P" --caller plugin --skill unity-cli --format json
+# EditMode-тесты: фильтр — подстрока имени (не регулярка); результат по каждому тесту в JSON
+J=$(unity command test run --filter "VoxProbe.Tests.Anatomy" --detach --project-path "$P" --caller plugin --skill unity-cli --format json | python -c "import json,sys;print(json.load(sys.stdin)['data']['jobId'])")
+unity job wait "$J" --timeout 900 --project-path "$P" --format json > Logs/tests-cli.json
+# закрыть свой редактор перед пакетным запуском или сборкой
+unity close "$P"
+```
+
+Пакетные команды — выше, в разделе «Команды»; снимки и тесты анатомии пакетно:
+
+```bash
+"$U" -batchmode -quit -projectPath "$P" -executeMethod VoxProbe.Editor.AnatShotsA2.Run -logFile Logs/a2.log
+"$U" -batchmode -projectPath "$P" -runTests -testPlatform EditMode -testFilter "VoxProbe.Tests.AnatomyTests|VoxProbe.Tests.AnatomyVisTests" -testResults Logs/tests.xml -logFile Logs/tests.log
+```
+
+### Причуды
+
+- Сразу после `unity recompile` следующий вызов может получить код 12 (`EDITOR_UNREACHABLE`): идёт перезагрузка домена. Без `status --until-ready` между ними `eval` либо падает, либо может отработать на старом коде.
+- Фильтр `test run` в редакторе — подстрока, `A|B` не работает (в пакетном `-testFilter` работает).
+- Первый открытый редактор 23.11.2026 закрылся сам через ~2 мин после готовности (в журнале штатный выход: сохранение раскладки, «Pipeline Server stopped», без ошибок); причина не найдена. Второй открытый работал стабильно весь замер.
+- Тесты этапа B (`[Ignore]`) фильтр `VoxProbe.Tests.Anatomy` тоже захватывает — они пропускаются.
+
 ## Замер
 
 Windows, кадр телефона 1080×2340 (рисуется в текстуру этого размера, окно 480×1040 показывает её уменьшенной):

@@ -23,6 +23,19 @@ namespace VoxProbe.Editor
         static Vector3 C(float x, float y, float z) => new Vector3(x, y, z) * 0.01f;
         static readonly Vector3 Ctr = new Vector3(0, 1.5f, 1.0f) * 0.01f;
 
+        /// Один снимок целой головы в три четверти — шаг замера «правка → перекомпиляция → снимок» (пакетный режим и CLI).
+        /// Пишет Logs/cli-bench/one.png и one.json (треугольники).
+        public static void One()
+        {
+            var dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Logs", "cli-bench"));
+            var r = new Rig(AnatMesher.StyleDefault);
+            r.Shot(Path.Combine(dir, "one.png"), C(-38, 6, 48), Ctr, 27);
+            var t = r.Tris();
+            File.WriteAllText(Path.Combine(dir, "one.json"), "{ \"all\": " + t.all + ", \"head\": " + t.head + " }\n");
+            r.Dispose();
+            Debug.Log("ANAT_ONE_OK " + t.all);
+        }
+
         class Rig
         {
             public AnatHead a; public List<AnatBody> bodies = new List<AnatBody>();
