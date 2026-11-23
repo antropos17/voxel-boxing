@@ -1,31 +1,36 @@
-# Воксель Бокс
+# Voxel Boxing
 
-Мобильный воксельный бокс от первого лица. Игра — один файл `dist/index.html`, его можно открыть в браузере или выложить на любой статический хостинг (например, GitHub Pages).
+[Русская версия](README.ru.md)
 
-## Быстрый старт
+A mobile first-person voxel boxing game with a destructible opponent. The whole game is one file, `dist/index.html`, built from `src/` with three.js r128. The in-game interface is in Russian.
+
+![Gameplay: an uppercut breaks the opponent's voxel head](docs/screenshots/cover.jpg)
+
+**[Play in the browser](https://antropos17.github.io/voxel-boxing/)**
+
+## Run
 
 ```bash
 npm install
-npx playwright install chromium   # один раз, нужно только для тестов
+npx playwright install chromium   # once, tests only
 npm run build
 npm test
 ```
 
-Поиграть с телефона: `npm run serve`, затем открыть `http://<IP компьютера>:5173` в той же Wi-Fi сети.
+To play on a phone, run `npm run serve` and open `http://<computer IP>:5173` on the same Wi-Fi network.
 
-## Продолжить в Claude Code
+## Layout
 
-```bash
-cd voxel-box
-git init && git add -A && git commit -m "v18"
-claude
-```
+- `src/` – script fragments that `build.js` concatenates into one file
+- `dist/index.html` – the built game
+- `tests/` – Playwright tests (smoke, soak, monkey, gore, timing)
+- `docs/` – architecture, performance and sound notes, current status (`docs/STATUS.md`, in Russian)
+- `Unity/` – a separate Unity experiment with an anatomical voxel head, described in `docs/STATUS.md`
 
-Claude Code сам прочитает `CLAUDE.md`. Подробности — в `docs/ARCHITECTURE.md` и `docs/STATUS.md`.
+## Stack
 
-## Структура
+JavaScript, three.js r128, Node build script, Playwright.
 
-- `src/` — исходники (куски одного скрипта, склеиваются `build.js`)
-- `dist/index.html` — готовая игра
-- `tests/` — тесты на Playwright
-- `docs/` — архитектура и текущее состояние
+## Credits
+
+Sounds are rendered with [earshot](https://github.com/Leonxlnx/earshot) (MIT). Full list of sources and licenses: [CREDITS.md](CREDITS.md) (Russian) and `assets/sounds/CREDITS.md`.
