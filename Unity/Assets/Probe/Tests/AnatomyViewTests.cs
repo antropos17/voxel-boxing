@@ -34,8 +34,8 @@ namespace VoxProbe.Tests
                 }
                 Assert.GreaterOrEqual(expect, 0);
                 Assert.AreEqual(expect, v.a.head.Lookup(hit + d * 0.001f), "удар попал не в ту ячейку кожи");
-                // и удар по ней убирает именно её
-                int removed = v.Hit(hit, d, 0);
+                // и тяжёлый удар (пробой) убирает именно её; лёгкий и средний только повреждают ткань
+                int removed = v.Hit(hit, d, 2);
                 Assert.Greater(removed, 0);
                 Assert.AreEqual(AnatMat.Empty, v.a.head.mat[expect]);
             }

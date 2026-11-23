@@ -23,24 +23,32 @@ namespace VoxProbe
         public double lastMs;                // последняя перестройка (видимость + сетка), мс
         public string lastWhat = "сборка";
         public int lastRemoved;
+        // этап B: повреждения мягких тканей и кровь на решётке головы (AnatDamage); капли в полёте
+        public AnatDamage sim;
+        AnatBloodFx drops;
+        readonly AnatBody headBody; readonly int headK;
+        readonly Material material;
 
         /// Плоскости разрезов: удаляется всё, где dot(n, p) > d (p — см в рамке головы).
         public static readonly float3[] CutN = { float3.zero, new float3(1, 0, 0), new float3(0, 0, 1), new float3(0, 1, 0), new float3(0, 1, 0) };
         public static readonly float[] CutD = { 0, 0.6f, 6.0f, 6.0f, -5.25f };
         public static readonly string[] CutName = { "целая", "сагиттальный", "фронтальный через глазницы", "горизонтальный через мозг", "через челюсти и зубы" };
 
-        public struct Strength { public string name; public float r, depth; public System.Func<byte, bool> keep; }
+        /// Сила удара: E — в единицах веба (джеб ≈ 1, мощный 3,4–4,6) для модели повреждений; тяжёлый ещё пробивает канал r × depth
+        /// (кость тоже — переломов до этапа C нет); в мозге канал идёт без остановки, иначе останавливается на мозге.
+        public struct Strength { public string name; public float E; public bool power, bore; public float r, depth; }
         public static readonly Strength[] Strengths =
         {
-            new Strength { name = "лёгкий",  r = 0.6f, depth = 1.0f, keep = m => AnatMat.Class(m) == AnatMat.ClsBone || AnatMat.Class(m) == AnatMat.ClsHard },
-            new Strength { name = "средний", r = 1.0f, depth = 2.2f, keep = Brain },
-            new Strength { name = "тяжёлый", r = 1.6f, depth = 4.0f, keep = m => false },
+            new Strength { name = "лёгкий",  E = 1.2f, power = false },
+            new Strength { name = "средний", E = 3.0f, power = true },
+            new Strength { name = "тяжёлый", E = 4.4f, power = true, bore = true, r = 1.4f, depth = 3.0f },
         };
         public static bool Brain(byte m) => m == AnatMat.Grey || m == AnatMat.White || m == AnatMat.CerebGrey || m == AnatMat.Stem || m == AnatMat.Csf;
 
         public AnatView(Transform parent, Vector3 center, Material material)
         {
             AnatPalette.Apply();
+            this.material = material;
             a = AnatomyBuilder.Build();
             a.vis.Warm();
             layout = new NativeArray<VertexAttributeDescriptor>(AnatMesher.Layout, Allocator.Persistent);
@@ -50,6 +58,8 @@ namespace VoxProbe
             var gl = new List<AnatGrid>();
             foreach (var g in a.All) { bodies.Add(new AnatBody(g, root, material, id++)); gl.Add(g); pristine.Add(g.mat.ToArray()); dmg.Add(g.mat.ToArray()); }
             grids = gl.ToArray();
+            headK = gl.IndexOf(a.head); headBody = bodies[headK];
+            NewSim();
             var sw = System.Diagnostics.Stopwatch.StartNew();
             foreach (var b in bodies) b.BuildAll(layout);
             lastMs = sw.Elapsed.TotalMilliseconds;
@@ -58,6 +68,50 @@ namespace VoxProbe
         public int Triangles { get { int t = 0; foreach (var b in bodies) t += b.Triangles; return t; } }
         public int Chunks { get { int c = 0; foreach (var b in bodies) c += b.ChunkCount; return c; } }
         public int ChunksDrawn { get { int c = 0; foreach (var b in bodies) for (int i = 0; i < b.ChunkCount; i++) if (b.quads[i] > 0) c++; return c; } }
+
+        void NewSim()
+        {
+            sim?.Dispose();
+            sim = new AnatDamage(a);
+            var dm = dmg[headK];
+            sim.onMat = (i, m) => dm[i] = m;
+            headBody.st = sim.st;
+            drops?.Destroy(); drops = new AnatBloodFx(root, material, layout);
+            Shader.SetGlobalFloat("_AnatTime", 0);
+        }
+
+        /// Время боя: раны кровят, подтёки бегут, капли летят, отёк растёт, синяки меняют цвет; перестройка грязных чанков
+        /// с бюджетом (не больше maxChunks за кадр).
+        public void Tick(float dt, int maxChunks = 12)
+        {
+            sim.grav = Down();
+            sim.Step(dt);
+            Shader.SetGlobalFloat("_AnatTime", sim.time);
+            drops.Update(sim.drops, sim.time);
+            Flush(maxChunks);
+        }
+
+        /// Тяжесть в рамке покоя головы: мировой низ, повёрнутый обратно поворотом черепа (всё выше C1 движется с ним жёстко).
+        /// Кровь на шее стекает по той же оси — у якоря это отступление меньше угла изгиба шеи.
+        public static float3 Down()
+        {
+            if (!AnatSkin.on) return new float3(0, -1, 0);
+            AnatSkin.Skin(new float3(0, 4, 0), out float3x3 M);
+            return math.normalizesafe(math.mul(math.transpose(M), new float3(0, -1, 0)), new float3(0, -1, 0));
+        }
+
+        void Flush(int maxChunks)
+        {
+            for (int i = 0; i < sim.dirty.Length; i++) if (sim.dirty[i]) { sim.dirty[i] = false; headBody.MarkDirty(i); }
+            foreach (var b in bodies) b.SyncVis();
+            for (int guard = 0; guard < 64; guard++)
+            {
+                bool any = false;
+                foreach (var b in bodies) if (b.dirtyCount > 0) { b.Schedule(layout, maxChunks); any = true; }
+                foreach (var b in bodies) b.Complete();
+                if (!any || maxChunks < 1000) break;
+            }
+        }
 
         public float3 ToHead(Vector3 world) => (float3)(world - root.position) * 100f;
         public Vector3 ToWorld(float3 cm) => root.position + (Vector3)(cm * 0.01f);
@@ -71,7 +125,8 @@ namespace VoxProbe
         {
             for (int k = 0; k < grids.Length; k++) System.Array.Copy(pristine[k], dmg[k], dmg[k].Length);
             for (int i = 0; i < shift.Length; i++) shift[i] = 0;
-            cut = 0; Apply("восстановлено");
+            cut = 0;
+            NewSim(); Apply("восстановлено");
         }
 
         void Apply(string what)
@@ -132,50 +187,66 @@ namespace VoxProbe
             return false;
         }
 
-        /// Удар в точку hit (см головы) по направлению dir: убирается капсула вдоль луча радиуса r и глубины depth во всех телах;
-        /// удар останавливается на первой ячейке keep вдоль оси (как Bore в AnatShotsA2: кость или мозг). Видимость — по месту
-        /// (AnatVis.Opened), перестройка только помеченных чанков. Удаления пишутся и в dmg, чтобы пережить смену разреза.
+        /// Удар в точку hit (см головы, поза покоя) по направлению dir: полная картина повреждений (AnatDamage: покраснение, отёк,
+        /// синяк, ссадина, рассечение, слои, размозжение, раны и кровь). Тяжёлый ещё пробивает канал вдоль удара во всех телах:
+        /// до мозга, а если удар пришёлся в мозг — насквозь; в проломе стекает ликвор (открываются борозды).
+        /// Удаления головы пишутся и в dmg (через sim.onMat), чтобы пережить смену разреза.
         public int Hit(float3 hit, float3 dir, int strength)
         {
             var s = Strengths[strength];
             dir = math.normalize(dir);
-            float3 p0 = hit - dir * (s.r * 0.6f), p1 = hit + dir * s.depth;
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            float stop = float.MaxValue;
-            foreach (var g in grids) Scan(g, p0, p1, s.r, (i, q) => { if (s.keep(g.mat[i])) stop = math.min(stop, math.dot(q - p0, dir)); });
-            var headCells = new NativeList<int>(1024, Allocator.TempJob);
+            int before = sim.removed;
+            sim.Hit(hit, dir, s.E, s.power);
             int removed = 0;
-            for (int k = 0; k < grids.Length; k++)
+            if (s.bore)
             {
-                var g = grids[k]; var dm = dmg[k]; bool isHead = g == a.head;
-                int3 mn = int.MaxValue, mx = int.MinValue;
-                Scan(g, p0, p1, s.r, (i, q) =>
-                {
-                    byte m = g.mat[i];
-                    if (m == AnatMat.Empty || s.keep(m) || math.dot(q - p0, dir) >= stop) return;
-                    g.mat[i] = AnatMat.Empty; dm[i] = AnatMat.Empty; removed++;
-                    int3 c = new int3(i % g.dims.x, (i / g.dims.x) % g.dims.y, i / (g.dims.x * g.dims.y));
-                    if (isHead) headCells.Add(i); else { mn = math.min(mn, c); mx = math.max(mx, c); }
-                });
-                if (!isHead && math.all(mn <= mx)) g.Touch(mn, mx);
-            }
-            if (headCells.Length > 0)
-            {
-                a.vis.Opened(headCells.AsArray());
+                byte entry = a.Sample(hit + dir * 0.05f, out _, out _);
+                bool deep = Brain(entry);
+                System.Func<byte, bool> keep = m => !deep && Brain(m);
+                float3 p0 = hit - dir * (s.r * 0.6f), p1 = hit + dir * s.depth;
+                float stop = float.MaxValue;
+                foreach (var g in grids) Scan(g, p0, p1, s.r, (i, q) => { if (keep(g.mat[i])) stop = math.min(stop, math.dot(q - p0, dir)); });
                 var h = a.head;
-                foreach (int i in headCells) h.TouchCell(new int3(i % h.dims.x, (i / h.dims.x) % h.dims.y, i / (h.dims.x * h.dims.y)));
+                for (int k = 0; k < grids.Length; k++)
+                {
+                    var g = grids[k]; var dm = dmg[k]; bool isHead = g == h;
+                    int3 mn = int.MaxValue, mx = int.MinValue;
+                    Scan(g, p0, p1, s.r, (i, q) =>
+                    {
+                        byte m = g.mat[i];
+                        if (m == AnatMat.Empty || m == AnatMat.Covered || keep(m) || math.dot(q - p0, dir) >= stop) return;
+                        int3 c = new int3(i % g.dims.x, (i / g.dims.x) % g.dims.y, i / (g.dims.x * g.dims.y));
+                        if (isHead) sim.Cut(c.x, c.y, c.z);
+                        else { g.mat[i] = AnatMat.Empty; dm[i] = AnatMat.Empty; removed++; mn = math.min(mn, c); mx = math.max(mx, c); }
+                    });
+                    if (!isHead && math.all(mn <= mx)) g.Touch(mn, mx);
+                }
+                // ликвор в проломе стекает: пустеют подоболочечное пространство и борозды до 1 см вокруг канала
+                for (int pass = 0; pass < 6; pass++)
+                    Scan(h, p0, p1 + dir * 1.0f, s.r + 1.0f, (i, q) =>
+                    {
+                        if (h.mat[i] != AnatMat.Csf) return;
+                        int3 c = new int3(i % h.dims.x, (i / h.dims.x) % h.dims.y, i / (h.dims.x * h.dims.y));
+                        if (NearOpen(h, c)) sim.Cut(c.x, c.y, c.z);
+                    });
+                sim.Flush();
             }
-            headCells.Dispose();
-            foreach (var b in bodies) b.SyncVis();
-            for (int guard = 0; guard < 32; guard++)
-            {
-                bool any = false;
-                foreach (var b in bodies) if (b.dirtyCount > 0) { b.Schedule(layout, 64); any = true; }
-                foreach (var b in bodies) b.Complete();
-                if (!any) break;
-            }
+            removed += sim.removed - before;
+            Flush(4096);
             lastMs = sw.Elapsed.TotalMilliseconds; lastWhat = "удар " + s.name; lastRemoved = removed;
             return removed;
+        }
+
+        static bool NearOpen(AnatGrid g, int3 c)
+        {
+            for (int d = 0; d < 6; d++)
+            {
+                int3 n = c + new int3(d == 0 ? 1 : d == 1 ? -1 : 0, d == 2 ? 1 : d == 3 ? -1 : 0, d == 4 ? 1 : d == 5 ? -1 : 0);
+                if (math.any(n < 0) || math.any(n >= g.dims)) continue;
+                if (g.mat[g.Index(n.x, n.y, n.z)] == AnatMat.Empty) return true;
+            }
+            return false;
         }
 
         /// Ячейки решётки g в капсуле [p0, p1] радиуса r (p0, p1 — см головы); f(индекс, центр в см головы).
@@ -202,6 +273,7 @@ namespace VoxProbe
 
         public void Dispose()
         {
+            sim?.Dispose(); sim = null; drops?.Destroy();
             foreach (var b in bodies) b.Destroy();
             bodies.Clear();
             if (root != null) Object.DestroyImmediate(root.gameObject);

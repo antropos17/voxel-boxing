@@ -66,10 +66,12 @@ namespace VoxProbe
         public readonly List<(float t, string mat, byte zone)> exposed = new List<(float, string, byte)>();
         readonly HashSet<int> vessels = new HashSet<int>();
         readonly bool[] macerDone = new bool[AnatZone.Count * 4];
-        readonly List<int>[] lids = { new List<int>(), new List<int>() };
+        public readonly List<int>[] lids = { new List<int>(), new List<int>() };
         readonly int3[] nostril = new int3[2];
         readonly System.Random rng;
         float eyeT;
+        public System.Action<int, byte> onMat;      // ячейка головы сменила материал (просмотр хранит копию для разрезов)
+        void SetMat(int i, byte m) { h.mat[i] = m; onMat?.Invoke(i, m); }
         public bool boneCrush = true;               // учитывать раздавливание о кость (для проверки)
         public float3 lastTearDir; public byte lastTearZone;
         // счёт
@@ -99,11 +101,20 @@ namespace VoxProbe
         }
 
         // ---------- решётка ----------
+        int3 Cell(int i) => new int3(i % h.dims.x, (i / h.dims.x) % h.dims.y, i / (h.dims.x * h.dims.y));
         bool In(int x, int y, int z) => x >= 0 && y >= 0 && z >= 0 && x < h.dims.x && y < h.dims.y && z < h.dims.z;
         byte M(int x, int y, int z) => In(x, y, z) ? h.mat[h.Index(x, y, z)] : AnatMat.Empty;
         static bool Open(byte m) => m == AnatMat.Empty || m == AnatMat.Air;
+        /// Открыта наружу: сосед пуст (снаружи или убран) или это воздух полости, видимый снаружи (AnatVis). Закрытые пазухи и
+        /// носовые ходы не в счёт — иначе удар в лицо рвёт слизистую пазухи раньше кожи над ней.
+        bool OpenAt(int x, int y, int z)
+        {
+            if (!In(x, y, z)) return true;
+            int i = h.Index(x, y, z); byte m = h.mat[i];
+            return m == AnatMat.Empty || (m == AnatMat.Air && (!h.vis.IsCreated || h.vis[i] <= AnatVis.Lim));
+        }
         bool Exposed(int x, int y, int z) =>
-            Open(M(x + 1, y, z)) || Open(M(x - 1, y, z)) || Open(M(x, y + 1, z)) || Open(M(x, y - 1, z)) || Open(M(x, y, z + 1)) || Open(M(x, y, z - 1));
+            OpenAt(x + 1, y, z) || OpenAt(x - 1, y, z) || OpenAt(x, y + 1, z) || OpenAt(x, y - 1, z) || OpenAt(x, y, z + 1) || OpenAt(x, y, z - 1);
         static byte T2(float t) => (byte)math.clamp((int)math.round(t / 2f), 0, 255);
         static byte Add8(int a, float b) => (byte)math.clamp((int)math.round(a + b), 0, 255);
         static byte Wt(byte t0, float w0, byte t1, float w1) => w0 + w1 <= 0 ? t1 : (byte)math.round((t0 * w0 + t1 * w1) / (w0 + w1));
@@ -154,6 +165,7 @@ namespace VoxProbe
                 if (m == AnatMat.Covered) m = a.Sample(q, out _, out _);
                 if (Hard(m)) return k * S;
                 if (m == AnatMat.Cartilage) return k * S * 1.6f;
+                if (m == AnatMat.Air && k <= 8) continue;   // узкая щель (преддверие рта): губа прижимается к зубам за ней
                 if (Open(m) || AnatMat.Class(m) == AnatMat.ClsLiquid) return 3;
             }
             return 3;
@@ -170,12 +182,27 @@ namespace VoxProbe
             var r = new HitInfo();
             dir = math.normalize(dir);
             int3 hc = new int3(-1);
-            for (float t = -5; t < 8; t += 0.05f)
+            // первая ткань вдоль луча — до выхода из решётки (точка удара может лежать далеко перед лицом, яма — глубоко)
+            float th = 0;
+            for (float t = -5; t < 40; t += 0.05f)
             {
                 int i = h.Lookup(p + dir * t); if (i < 0) continue;
-                if (AnatMat.Cull(h.mat[i])) { hc = new int3(i % h.dims.x, (i / h.dims.x) % h.dims.y, i / (h.dims.x * h.dims.y)); break; }
+                if (AnatMat.Cull(h.mat[i])) { hc = Cell(i); th = t; break; }
             }
             if (hc.x < 0) return r;
+            // кулак шире глазной щели и рта: если луч ушёл в щель на другое тело (глаз, зубы), контакт — первая ткань головы
+            // в круге 0,9 см вокруг луча (веко, край глазницы, губа)
+            if (h.mat[h.Index(hc.x, hc.y, hc.z)] == AnatMat.Covered)
+            {
+                float3 u = math.normalize(math.cross(dir, math.abs(dir.y) < 0.9f ? new float3(0, 1, 0) : new float3(1, 0, 0))), w = math.cross(dir, u);
+                bool got = false;
+                for (float t = th - 3; t < th && !got; t += 0.05f)
+                    for (int k = 0; k < 12 && !got; k++)
+                    {
+                        float an = k * math.PI / 6; int j = h.Lookup(p + dir * t + (u * math.cos(an) + w * math.sin(an)) * 0.9f);
+                        if (j >= 0 && AnatMat.Cull(h.mat[j]) && h.mat[j] != AnatMat.Covered) { hc = Cell(j); got = true; }
+                    }
+            }
             hits++;
             float3 n = Normal(hc.x, hc.y, hc.z);
             float3 l = math.normalize(-n * 0.7f + dir * 0.3f);          // ось пятна — внутрь
@@ -237,6 +264,21 @@ namespace VoxProbe
                     float ba = Ep * 15; v.blt = Wt(v.blt, v.blood, now, ba); v.blood = Add8(v.blood, ba); Put(q.x, q.y, q.z, v);
                 }
             }
+            // веки — рыхлая клетчатка: отёк от любого удара в область глазницы (бровь, скула, сам глаз) собирается в них,
+            // сильнее при ударе ближе к глазу (до 4 см от центра шара)
+            float3 hp = h.Local(hc.x, hc.y, hc.z);
+            for (int s = 0; s < 2; s++)
+            {
+                float dc = math.length(hp - new float3(s == 0 ? AnatGeo.EX : -AnatGeo.EX, AnatGeo.EY, AnatGeo.EZ));
+                float f = math.saturate(1 - (dc - 1.6f) / 2.4f); if (f <= 0) continue;
+                int cap = (int)(AnatZone.SwellCap[AnatZone.Eye] / 0.005f); float la = E * f * (power ? 6 : 3);
+                foreach (int i in lids[s])
+                {
+                    if (!Surface(h.mat[i])) continue;
+                    var c3 = Cell(i); var v = Get(c3.x, c3.y, c3.z);
+                    v.rt = Wt(v.rt, v.red + v.swell, now, la); v.swell = (byte)math.min(cap, v.swell + la); Put(c3.x, c3.y, c3.z, v);
+                }
+            }
             foreach (var f in FAIL)
             {
                 int i = h.Index(f.x, f.y, f.z); byte m = h.mat[i]; if (!AnatMat.Cull(m)) continue;
@@ -260,12 +302,16 @@ namespace VoxProbe
 
         public float Eff(byte zone) => trauma[zone] + (traumaAll - trauma[zone]) * 0.3f;
 
+        /// Убрать ячейку снаружи (пробой в просмотре, поиск кусков): с кровью и сосудами, как при разрушении ударом.
+        public void Cut(int x, int y, int z) { if (h.mat[h.Index(x, y, z)] != AnatMat.Empty) Remove(x, y, z); }
+        public void Flush() => SyncVis();
+
         /// Убрать ячейку: открывается следующий слой; соседи в крови; открытый сосуд — источник.
         void Remove(int x, int y, int z)
         {
             int i = h.Index(x, y, z); byte m = h.mat[i], part = h.part[i];
             exposed.Add((time, AnatMat.Table[m].name, h.zone[i]));
-            h.mat[i] = AnatMat.Empty; if (st.Idx(x, y, z, false) >= 0) st.Set(x, y, z, default);
+            SetMat(i, AnatMat.Empty); if (st.Idx(x, y, z, false) >= 0) st.Set(x, y, z, default);
             opened.Add(i);
             removed++;
             Dirty(x, y, z);
@@ -401,9 +447,11 @@ namespace VoxProbe
             {
                 byte m = M(q.x, q.y, q.z); if (!AnatMat.Cull(m)) continue;
                 double r = rng.NextDouble();
-                if (r < amt * (Surface(m) ? 1 : 0.8f)) { Remove(q.x, q.y, q.z); continue; }
+                // кожа в каше не исчезает целиком: отходит только уже надорванная (урон не меньше половины порога), остальная — ссадина
+                bool sk = Surface(m);
+                if (r < amt * (sk ? 1 : 0.8f) && (!sk || Get(q.x, q.y, q.z).dmg >= Thr(m) / 2)) { Remove(q.x, q.y, q.z); continue; }
                 var v = Get(q.x, q.y, q.z);
-                if (Surface(m)) v.abr = 255; else h.mat[h.Index(q.x, q.y, q.z)] = AnatMat.Crushed;
+                if (Surface(m)) v.abr = 255; else SetMat(h.Index(q.x, q.y, q.z), AnatMat.Crushed);
                 v.blt = Wt(v.blt, v.blood, now, 200); v.blood = Add8(v.blood, 200); Put(q.x, q.y, q.z, v);
             }
         }
@@ -467,7 +515,15 @@ namespace VoxProbe
             for (int k = wounds.Count - 1; k >= 0; k--)
             {
                 var w = wounds[k]; w.age += dt; float r = w.rate * math.exp(-w.age / w.tau);
-                if (r < 0.05f || (!AnatMat.Cull(M(w.x, w.y, w.z)) && r < 0.4f)) { wounds.RemoveAt(k); continue; }
+                if (r < 0.05f) { wounds.RemoveAt(k); continue; }
+                byte wm = M(w.x, w.y, w.z);
+                if (!AnatMat.Cull(wm) || wm == AnatMat.Covered || !Exposed(w.x, w.y, w.z))
+                {
+                    // ячейку раны убрали следующим ударом или она ушла вглубь — рана переходит на ближайшую открытую ткань
+                    int3 c = Nearest(h.Local(w.x, w.y, w.z), 3, true);
+                    if (c.x < 0) { wounds.RemoveAt(k); continue; }
+                    w.x = c.x; w.y = c.y; w.z = c.z; w.n = Normal(c.x, c.y, c.z);
+                }
                 if (w.kind == WJet)
                 {
                     // пульс ~100 в минуту: на каждый удар сердца — выброс капель; между ударами — подтекание
@@ -576,7 +632,7 @@ namespace VoxProbe
                     int i = h.Index(q.x, q.y, q.z); if (!Open(h.mat[i])) continue;
                     float3 p = h.Local(q.x, q.y, q.z); float d = math.length(p - gc);
                     if (d < AnatGeo.ER - 0.1f || p.z < AnatGeo.EZ || math.abs(p.x - gc.x) > 1.55f || math.abs(p.y - gc.y) > 0.95f) continue;
-                    h.mat[i] = AnatMat.Skin; h.part[i] = 0; h.zone[i] = AnatZone.Eye; closed = true;
+                    SetMat(i, AnatMat.Skin); h.part[i] = 0; h.zone[i] = AnatZone.Eye; closed = true;
                     Put(q.x, q.y, q.z, new VS { swell = (byte)math.min(255, sw / 0.005f * 0.5f), rt = now, bruise = (byte)br, bt = now, red = (byte)rd });
                     filled++;
                 }

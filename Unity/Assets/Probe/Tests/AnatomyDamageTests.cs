@@ -7,7 +7,6 @@ using UnityEngine;
 namespace VoxProbe.Tests
 {
     /// Мягкие ткани и кровь (этап B, docs/HEAD-SPEC.md, разделы 4 и 7). Каждый тест — на своей свежей голове.
-    [Ignore("этап B не закончен")]
     public class AnatomyDamageTests
     {
         AnatHead a; AnatDamage d;
@@ -31,13 +30,20 @@ namespace VoxProbe.Tests
         [TestCase("скула")]
         public void LayersOpenInOrder(string zone)
         {
-            var ray = AnatChecks.Rays.First(r => r.zone == zone);
-            var stack = Stack(AnatChecks.Trace(a, ray.from, ray.dir));
+            // удар и проверка — по одной линии: внутрь по нормали в точке входа (по ней же построен эталонный стек)
+            var ray0 = AnatChecks.Rays.First(r => r.zone == zone);
+            float3 p0 = ray0.from;
+            for (float t = 0; t < 30; t += 0.01f) { var q = ray0.from + ray0.dir * t; if (AnatGeo.HeadSdf(q.x, q.y, q.z) < 0) { p0 = q; break; } }
+            const float e = 0.05f;
+            float3 n0 = -math.normalize(new float3(AnatGeo.HeadSdf(p0.x + e, p0.y, p0.z) - AnatGeo.HeadSdf(p0.x - e, p0.y, p0.z),
+                AnatGeo.HeadSdf(p0.x, p0.y + e, p0.z) - AnatGeo.HeadSdf(p0.x, p0.y - e, p0.z), AnatGeo.HeadSdf(p0.x, p0.y, p0.z + e) - AnatGeo.HeadSdf(p0.x, p0.y, p0.z - e)));
+            var ray = (from: p0 - n0 * 3, dir: n0);
+            var stack = Stack(AnatChecks.Trace(a, ray.from, ray.dir, alongNormal: false));
             int last = 0, deepest = 0; var seq = new List<string>();
             for (int k = 0; k < 40; k++)
             {
                 d.Hit(ray.from, ray.dir, 3.6f, true); Run(0.5f);
-                var now = AnatChecks.Trace(a, ray.from, ray.dir);
+                var now = AnatChecks.Trace(a, ray.from, ray.dir, alongNormal: false);
                 if (now.Count == 0) continue;
                 int idx = stack.IndexOf(now[0].mat);
                 if (idx < 0) continue;                    // размозжённая ткань и т. п. — не слой исходного стека
@@ -49,9 +55,9 @@ namespace VoxProbe.Tests
             Assert.That(deepest, Is.GreaterThanOrEqualTo(bone), "не дошли до надкостницы: " + string.Join(" → ", seq));
         }
 
-        int HitsToSplit(float3 p, float3 dir, float E, int max = 30)
+        int HitsToSplit(float3 p, float3 dir, float E, int max = 30, bool power = true)
         {
-            for (int k = 1; k <= max; k++) { var r = d.Hit(p, dir, E, true); Run(0.3f); if (r.split > 0) return k; }
+            for (int k = 1; k <= max; k++) { var r = d.Hit(p, dir, E, power); Run(0.3f); if (r.split > 0) return k; }
             return max + 1;
         }
 
@@ -77,7 +83,8 @@ namespace VoxProbe.Tests
             Assert.That(HitsToSplit(Brow, Back, 3.6f), Is.LessThanOrEqualTo(30));
             Assert.That(math.abs(d.lastTearDir.x), Is.GreaterThan(0.85f), "бровь: " + d.lastTearDir);
             Free(); Make();
-            Assert.That(HitsToSplit(new float3(0.4f, -4.9f, 14), Back, 3.6f), Is.LessThanOrEqualTo(30));
+            // рот — серией не мощных ударов: мощные уже с четвёртого снимают губу до зубов (размозжение, травма зоны > 14) раньше, чем она лопнет
+            Assert.That(HitsToSplit(new float3(0.4f, -4.9f, 14), Back, 3.6f, 30, false), Is.LessThanOrEqualTo(30));
             Assert.That(d.lastTearZone, Is.EqualTo(AnatZone.Mouth));
             Assert.That(math.abs(d.lastTearDir.y), Is.GreaterThan(math.abs(d.lastTearDir.x)), "рот: " + d.lastTearDir);
         }
@@ -102,13 +109,16 @@ namespace VoxProbe.Tests
             for (int k = 0; k < 30 && d.wounds.Count == 0; k++) { d.Hit(Brow, Back, 3.6f, true); Run(0.3f); }
             Assert.That(d.wounds.Count, Is.GreaterThan(0));
             var w = d.wounds[0]; float wy = a.head.Local(w.x, w.y, w.z).y;
+            var h = a.head; var b0 = new byte[h.Count];
+            for (int z = 0; z < h.dims.z; z++) for (int y = 0; y < h.dims.y; y++) for (int x = 0; x < h.dims.x; x++) b0[h.Index(x, y, z)] = d.Get(x, y, z).blood;
             Run(8);
-            double below = 0, above = 0; var h = a.head;
+            // кровь, прибавившаяся за 8 с (без пятна от самих ударов)
+            double below = 0, above = 0;
             for (int z = 0; z < h.dims.z; z++) for (int y = 0; y < h.dims.y; y++) for (int x = 0; x < h.dims.x; x++)
             {
-                var v = d.Get(x, y, z); if (v.blood == 0) continue;
+                int add = d.Get(x, y, z).blood - b0[h.Index(x, y, z)]; if (add <= 0) continue;
                 float dy = h.Local(x, y, z).y - wy;
-                if (dy < -1) below += v.blood; else if (dy > 1) above += v.blood;
+                if (dy < -1) below += add; else if (dy > 1) above += add;
             }
             Debug.Log("ANAT_TEST blood below " + below + " above " + above);
             Assert.That(below, Is.GreaterThan(above * 3 + 500));

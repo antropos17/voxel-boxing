@@ -128,9 +128,9 @@ namespace VoxProbe.Tests
                 Assert.AreEqual(m0, m1, "в позе первая ткань другая");
                 Assert.Less(math.distance(h0, h1), 0.25f, "точка удара в позе ушла от точки в покое: " + h0 + " → " + h1);
                 Assert.Greater(math.dot(v.pickDir, -n), 0.98f, "направление удара в покое не совпало");
-                // удар убирает ту же ячейку
+                // тяжёлый удар (пробой) убирает ту же ячейку
                 int c0 = v.a.head.Lookup(h0 - n * 0.05f);
-                Assert.Greater(v.Hit(h1, v.pickDir, 0), 0);
+                Assert.Greater(v.Hit(h1, v.pickDir, 2), 0);
                 Assert.AreEqual(AnatMat.Empty, v.a.head.mat[c0]);
             }
             finally { v.Dispose(); }

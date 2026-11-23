@@ -89,6 +89,7 @@ namespace VoxProbe
             if (fpsAcc >= 0.25f) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
             if (!selfTest) Controls(dt);
             if (!freezeSkin) AnatSkin.Step(dt);
+            v.Tick(dt);
             AnatSkin.SetGlobals(v.root);
             float k = 1 - math.exp(-dt * 14f);
             yaw = math.lerp(yaw, tYaw, k); pitch = math.lerp(pitch, tPitch, k); dist = math.exp(math.lerp(math.log(dist), math.log(tDist), k));
@@ -180,6 +181,11 @@ namespace VoxProbe
             sb.Append('\n').Append("Чанков: ").Append(v.Chunks).Append(" (с сеткой ").Append(v.ChunksDrawn).Append(')');
             sb.Append('\n').Append("Перестройка: ").Append(v.lastWhat).Append(" — ").Append(v.lastMs.ToString("0.0")).Append(" мс");
             if (v.lastRemoved > 0) sb.Append(", убрано ").Append(v.lastRemoved).Append(" вокс.");
+            var s = v.sim;
+            sb.Append('\n').Append("Раны: ").Append(s.wounds.Count).Append('/').Append(AnatDamage.MaxWounds)
+              .Append(" · подтёки: ").Append(s.drips.Count).Append('/').Append(AnatDamage.MaxDrips)
+              .Append(" · капли: ").Append(s.drops.Count).Append('/').Append(AnatDamage.MaxDrops)
+              .Append(" · бой ").Append(s.time.ToString("0")).Append(" с");
             text.text = sb.ToString();
         }
 
@@ -282,6 +288,40 @@ namespace VoxProbe
             strength = 2; View(-30, 50, 0.45f, new float3(-3f, 12f, 2f), true); yield return null; bool h3 = Strike(mid); yield return Shot("hit-heavy-vault");
             View(-30, 50, 0.55f, new float3(-3f, 10f, 2f), true); yield return Shot("hits-overview");
             v.SetCut(1); CutView(1, true); yield return Shot("hits-cut-1");
+            v.SetCut(0);
+            // этап B: время идёт — синяки темнеют, кровь стекает (10 с боя)
+            freezeSkin = true; AnatSkin.Reset();
+            Run(10); View(-30, 10, 0.75f, new float3(-3f, 4f, 4f), true); yield return Shot("b-hits-after-10s");
+            v.Restore();
+            // серия средних ударов в левую бровь и веко — отёк закрывает глаз
+            strength = 1; int eyeHits = 0;
+            for (int k = 0; k < 14 && !v.sim.eyeClosed[0]; k++)
+            {
+                View(10, 6, 0.45f, new float3(3.4f, 2.7f, 7.6f), true); yield return null; Strike(mid); AnatSkin.Reset(); eyeHits++;
+                Run(1.5f);
+            }
+            Run(5);
+            View(0, 0, 0.32f, new float3(1.5f, 1.5f, 7f), true); yield return Shot("b-eye-swollen");
+            log.Append("  \"eyeClosed\": ").Append(v.sim.eyeClosed[0] ? "true" : "false").Append(", \"eyeHits\": ").Append(eyeHits).Append(", \"lidSwellCm\": ").Append(v.sim.LidSwell(0).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)).Append(",\n");
+            v.Restore();
+            // синяк на щеке меняет цвет: 1 с, 5 с, 11 с после двух средних ударов
+            strength = 1;
+            for (int k = 0; k < 2; k++) { View(-40, 0, 0.45f, new float3(-4.5f, -2.5f, 6), true); yield return null; Strike(mid); AnatSkin.Reset(); Run(0.3f); }
+            Run(0.7f); View(-40, 0, 0.35f, new float3(-4.5f, -2.5f, 6), true); yield return Shot("b-bruise-1s");
+            Run(4); yield return Shot("b-bruise-5s");
+            Run(6); yield return Shot("b-bruise-11s");
+            v.Restore();
+            // рассечение брови и кровь вниз по лицу
+            strength = 1;
+            for (int k = 0; k < 10 && v.sim.wounds.Count == 0; k++) { View(-15, 5, 0.45f, new float3(-2.6f, 4.4f, 8f), true); yield return null; Strike(mid); AnatSkin.Reset(); Run(0.3f); }
+            Run(6); View(-20, 0, 0.55f, new float3(-2.6f, 1f, 7f), true); yield return Shot("b-brow-split-blood");
+            log.Append("  \"browWounds\": ").Append(v.sim.wounds.Count).Append(",\n");
+            v.Restore();
+            // пролом свода тяжёлыми ударами: мозг с бороздами
+            strength = 2;
+            for (int k = 0; k < 3; k++) { View(-20, 55, 0.45f, new float3(-2f, 12f, 2f), true); yield return null; Strike(mid); AnatSkin.Reset(); Run(0.2f); }
+            Run(3); View(-20, 55, 0.30f, new float3(-2f, 11f, 2f), true); yield return Shot("b-vault-brain");
+            freezeSkin = false;
             v.Restore(); Default(true); yield return Shot("restored");
             log.Append("  \"hits\": [").Append(h1 ? "true" : "false").Append(", ").Append(h2 ? "true" : "false").Append(", ").Append(h3 ? "true" : "false").Append("],\n");
             log.Append("  \"diffAfterRestore\": ").Append(v.DiffFromPristine()).Append(",\n  \"ok\": true\n}\n");
@@ -289,6 +329,9 @@ namespace VoxProbe
             Debug.Log("ANAT_VIEW_SELFTEST_OK " + dir);
             Application.Quit();
         }
+
+        /// Время боя без кадров: сим идёт шагами 1/30 с, сетки перестраиваются целиком в конце.
+        void Run(float sec) { for (float t = 0; t < sec; t += 1 / 30f) v.Tick(1 / 30f, 64); v.Tick(0, 4096); }
 
         void OnDestroy() { v?.Dispose(); if (bg != null) Destroy(bg); }
     }
