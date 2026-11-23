@@ -49,10 +49,12 @@ namespace VoxProbe
             public float dscale;             // ячеек на 0,1 мм
             public int style;                // опыты со ступеньками: 1 — без затенения углов, 2 — нормаль поля, 4 — сдвиг угла по полю
             public NativeArray<float4> lf;   // поле угла: градиент (xyz) и значение (w); w < 0 — не считано
+            public float4 grid;              // начало решётки (см) и шаг — для тени щетины
+            public int3 corg;                // начало чанка в ячейках
         }
 
-        public const int StyleNoAO = 1, StyleFieldNormal = 2, StyleFieldPos = 4;
-        public const int StyleDefault = StyleNoAO | StyleFieldNormal;   // вид поверхности по умолчанию (выбран по опытам этапа A2)
+        public const int StyleNoAO = 1, StyleFieldNormal = 2, StyleFieldPos = 4, StyleStubble = 8;
+        public const int StyleDefault = StyleNoAO | StyleFieldNormal | StyleStubble;   // вид поверхности по умолчанию (выбран по опытам этапа A2)
         static readonly float[] Gw = { 0.2494f, 0.8574f, 0.8574f, 0.2494f };   // exp(−t²/(2·0,9²)), t = ±1,5; ±0,5
         static readonly float[] Gd = { 0.4619f, 0.5293f, -0.5293f, -0.4619f };  // −t/σ²·w(t)
 
@@ -68,9 +70,10 @@ namespace VoxProbe
         /// То же с состояниями вокселей (sv.on): цвет углов и смещение ячеек; dscale — ячеек на 0,1 мм.
         /// vv.on — видимость (AnatVis): невидимая открытая ячейка сплошная, у головы на границе с видимой — тень полости.
         /// Роговица и водянистая влага прозрачны всегда.
-        public static int Build(NativeArray<byte> mat, int3 dims, int3 org, int mode, ref NativeList<AVert> verts, in StateView sv, float dscale, in VisView vv, int style)
+        public static int Build(NativeArray<byte> mat, int3 dims, int3 org, int mode, ref NativeList<AVert> verts, in StateView sv, float dscale, in VisView vv, int style, float4 grid = default)
         {
             var c = new Ctx(); c.style = mode == ModeRender ? style : 0;
+            c.grid = grid; c.corg = org; if (grid.w <= 0) c.style &= ~StyleStubble;
             c.occ = new NativeArray<byte>(P * P * P, Allocator.Temp, NativeArrayOptions.ClearMemory);
             c.dm = new NativeArray<byte>(P * P * P, Allocator.Temp, NativeArrayOptions.ClearMemory);
             c.dscale = dscale;
@@ -141,15 +144,17 @@ namespace VoxProbe
             if ((c.style & (StyleFieldNormal | StyleFieldPos)) != 0) { c.lf = new NativeArray<float4>(L * L * L, Allocator.Temp); for (int i = 0; i < c.lf.Length; i++) c.lf[i] = -1; }
 
             var keys = new NativeArray<int>(CS * CS, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            int3 ext = math.clamp(dims - org, 0, CS);   // обход только по ячейкам решётки: у малых тел (зубы) чанк меньше 32³
             for (int dir = 0; dir < 6; dir++)
             {
                 int A = dir >> 1; bool pos = (dir & 1) == 0;
                 int3 n = Dir(dir), ea = AxA(A), eb = AxB(A);
-                for (int d = 0; d < CS; d++)
+                int nd = ext[A], na = math.csum(ext * ea), nbb = math.csum(ext * eb);
+                for (int d = 0; d < nd; d++)
                 {
                     for (int k = 0; k < CS * CS; k++) keys[k] = 0;
-                    for (int b = 0; b < CS; b++)
-                    for (int a = 0; a < CS; a++)
+                    for (int b = 0; b < nbb; b++)
+                    for (int a = 0; a < na; a++)
                     {
                         int3 cc = (A == 0 ? new int3(d, a, b) : A == 1 ? new int3(a, d, b) : new int3(a, b, d));
                         int pi = PI(cc + 2);
@@ -172,8 +177,8 @@ namespace VoxProbe
                     if (mode == ModeNaive) continue;
                     // жадное объединение одинаковых ключей
                     int pd2 = d + (pos ? 1 : 0);
-                    for (int b = 0; b < CS; b++)
-                    for (int a = 0; a < CS; a++)
+                    for (int b = 0; b < nbb; b++)
+                    for (int a = 0; a < na; a++)
                     {
                         int key = keys[b * CS + a];
                         if (key <= 0) continue;
@@ -340,6 +345,19 @@ namespace VoxProbe
             verts.Add(V(ref c, l3, ao3, wv, fn, smooth));
         }
 
+        /// Тень щетины в канале затенения (когда AO выключено): 126 — без тени; по гладкому полю плотности в углу решётки,
+        /// только на коже, с зерном ±3% по углу. Шейдер: яркость 0,72 + 0,28·ao, при полной плотности ≈ 0,84 (тон «кожи со щетиной»).
+        static int Stubble(ref Ctx c, int3 l, int wv)
+        {
+            if ((c.style & StyleStubble) == 0) return 126;
+            int m = wv >> 3; if (m != AnatMat.Skin && m != AnatMat.Stubble) return 126;
+            float3 p = c.grid.xyz + (float3)(c.corg + l) * c.grid.w;
+            float d = AnatGeo.StubbleDensity(p.x, p.y, p.z);
+            if (d <= 0) return 126;
+            float grain = (AnatGeo.CellHash(c.corg + l) - 0.5f) * 0.06f * d;
+            return (int)math.clamp(126f * (1f - 0.57f * d + grain), 0, 126);
+        }
+
         static AVert V(ref Ctx c, int3 l, int ao, int wv, float3 fn, bool smooth)
         {
             float3 p = l, nr = fn;
@@ -364,10 +382,13 @@ namespace VoxProbe
                 }
                 if (c.st) { CornerState(ref c, l, out col, out float3 disp); p += disp; }
             }
+            // позиция в half: у 32 шаг half — 1/32 ячейки, у 0 — 1/2048; округляем до 1/32, чтобы общая вершина соседних чанков
+            // (32+сдвиг в одном и 0+сдвиг в другом) записалась одинаково — иначе на стыках чанков щели в пиксель
+            p = math.round(p * 32f) / 32f;
             return new AVert
             {
                 x = (half)p.x, y = (half)p.y, z = (half)p.z, w = (half)(float)wv,
-                nx = (sbyte)math.round(nr.x * 127), ny = (sbyte)math.round(nr.y * 127), nz = (sbyte)math.round(nr.z * 127), ao = (sbyte)(((c.style & StyleNoAO) != 0 ? 3 : ao) * 42),
+                nx = (sbyte)math.round(nr.x * 127), ny = (sbyte)math.round(nr.y * 127), nz = (sbyte)math.round(nr.z * 127), ao = (sbyte)((c.style & StyleNoAO) != 0 ? Stubble(ref c, l, wv) : ao * 42),
                 c0 = col.x, c1 = col.y,
             };
         }
@@ -385,6 +406,7 @@ namespace VoxProbe
         public VisView vv;
         public float dscale;
         public int style;
+        public float4 grid;   // начало решётки и шаг (тень щетины), w = 0 — нет
         public Mesh.MeshDataArray meshes;
         [NativeDisableParallelForRestriction] public NativeArray<long> stats;
 
@@ -392,7 +414,7 @@ namespace VoxProbe
         {
             long t0 = ProfilerUnsafeUtility.Timestamp;
             var verts = new NativeList<AVert>(4096, Allocator.Temp);
-            int naive = AnatMesher.Build(mat, dims, origins[i], AnatMesher.ModeRender, ref verts, sv, dscale, vv, style);
+            int naive = AnatMesher.Build(mat, dims, origins[i], AnatMesher.ModeRender, ref verts, sv, dscale, vv, style, grid);
             int nv = verts.Length, nq = nv / 4, ni = nq * 6;
             var md = meshes[i];
             md.SetVertexBufferParams(nv, layout);

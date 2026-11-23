@@ -26,7 +26,7 @@ Shader "VoxProbe/Anatomy"
             float4 _AnatDmg[12];
             float _AnatTime, _BruiseDay;
             float4 _ChunkOrg;   // начало чанка в ячейках тела; w — номер тела
-            float4 _BodyPar;    // x — шаг решётки тела, см
+            float4 _BodyPar;    // x — шаг решётки тела, см; yzw — центр тела в ячейках (у глаза — ось взгляда)
             CBUFFER_START(UnityPerMaterial)
             float _Ambient;
             CBUFFER_END
@@ -72,15 +72,31 @@ Shader "VoxProbe/Anatomy"
                 c += dot(c, c.yzx + 33.33);
                 return frac((c.x + c.y) * c.z);
             }
+            // плавный шум по узлам решётки: разброс цвета без квадратов на сглаженной поверхности
+            float VNoise(float3 p)
+            {
+                float3 i = floor(p), f = frac(p); f = f * f * (3.0 - 2.0 * f);
+                float a = lerp(Hash(i), Hash(i + float3(1, 0, 0)), f.x), b = lerp(Hash(i + float3(0, 1, 0)), Hash(i + float3(1, 1, 0)), f.x);
+                float c = lerp(Hash(i + float3(0, 0, 1)), Hash(i + float3(1, 0, 1)), f.x), d = lerp(Hash(i + float3(0, 1, 1)), Hash(i + float3(1, 1, 1)), f.x);
+                return lerp(lerp(a, b, f.y), lerp(c, d, f.y), f.z);
+            }
 
             half4 frag(Vary i) : SV_Target
             {
                 int mat = (int)(i.md.x + 0.5);
                 int dir = (int)(i.md.y + 0.5);
-                float3 cell = floor(i.os - N6[dir] * 0.5) + _ChunkOrg.xyz + _ChunkOrg.w * 131.0;
                 float4 pal = _AnatPal[mat];
-                float h = Hash(cell);
+                float h = VNoise(i.os + _ChunkOrg.xyz + _ChunkOrg.w * 131.0);
                 float3 col = pal.rgb * (1.0 + pal.a * (h * 2.0 - 1.0) * 0.9);
+                // радужка и зрачок: круги по расстоянию от оси взгляда (ячейка глаза 1 мм), тёмный ободок радужки, радиальные волокна
+                if (mat == 27 || mat == 28)
+                {
+                    float2 d = i.os.xy + _ChunkOrg.xy - _BodyPar.yz;
+                    float r = length(d);
+                    float fib = Hash(float3(floor(atan2(d.y, d.x) * 9.0), 3.0, 5.0));
+                    float3 iris = _AnatPal[27].rgb * (0.85 + 0.3 * fib) * lerp(1.0, 0.55, smoothstep(4.6, 6.0, r));
+                    col = lerp(_AnatPal[28].rgb, iris, smoothstep(2.1, 2.5, r));
+                }
                 float wet = _AnatPar[mat].x;
                 float skin = _AnatPar[mat].y;
                 // покраснение: гаснет за ~25 с

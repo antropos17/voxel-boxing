@@ -17,6 +17,7 @@ namespace VoxProbe
         public string name;
         public NativeArray<byte> mat, part, zone;
         public NativeArray<byte> vis;                 // видимость открытых ячеек (AnatVis), создаётся вместе с AnatVis
+        public bool hasClear;                         // есть прозрачные ткани (глаз): видимость растекается по ним
         public int3 tmn = int.MaxValue, tmx = int.MinValue;   // ячейки, чью сетку надо перестроить из-за видимости (забирает AnatBody)
         public int3 dims;
         public float step;
@@ -44,6 +45,15 @@ namespace VoxProbe
             return Index(c.x, c.y, c.z);
         }
         public void Touch(int3 mn, int3 mx) { tmn = math.min(tmn, mn); tmx = math.max(tmx, mx); }
+        /// Чанки (по AnatMesher.CS), чью сетку надо перестроить из-за смены видимости отдельных ячеек; забирает AnatBody.SyncVis.
+        public readonly System.Collections.Generic.HashSet<int> tch = new System.Collections.Generic.HashSet<int>();
+        /// Ячейка сменила видимость: её чанк и соседний, если до края меньше отступа сетки (2 ячейки + угол).
+        public void TouchCell(int3 c)
+        {
+            int3 nch = (dims + AnatMesher.CS - 1) / AnatMesher.CS;
+            int3 c0 = math.max(c - 3, 0) / AnatMesher.CS, c1 = math.min(c + 3, dims - 1) / AnatMesher.CS;
+            for (int z = c0.z; z <= c1.z; z++) for (int y = c0.y; y <= c1.y; y++) for (int x = c0.x; x <= c1.x; x++) tch.Add(x + nch.x * (y + nch.y * z));
+        }
         public void Dispose() { if (mat.IsCreated) { mat.Dispose(); part.Dispose(); zone.Dispose(); } if (vis.IsCreated) vis.Dispose(); }
     }
 
@@ -204,7 +214,7 @@ namespace VoxProbe
                         float r2 = math.length(p.xy);
                         if (cornea && rc > 0.68f) m = AnatMat.Cornea;
                         else if (!cornea && r > ER - 0.1f) m = AnatMat.Sclera;
-                        else if (p.z > 0.82f && p.z < 0.95f && r2 < 0.62f) m = r2 < 0.2f ? AnatMat.Pupil : AnatMat.Iris;
+                        else if (p.z > 0.82f && p.z < 0.95f && r2 < 0.62f) m = r2 < 0.25f ? AnatMat.Pupil : AnatMat.Iris;   // диски по расстоянию от оси взгляда
                         else if (p.z > 0.82f) m = AnatMat.Aqueous;  // водянистая влага передней камеры
                         else if (AnatGeo.InEll(p.x, p.y, p.z - 0.6f, 0.45f, 0.45f, 0.2f)) m = AnatMat.Lens;
                         else m = AnatMat.Vitreous;
@@ -374,10 +384,13 @@ namespace VoxProbe
                     else { m = AnatMat.Muscle; p = AnatPart.OrbOculi; }
                     return;
                 }
+                // ушная раковина: хрящ — середина пластины не в наружном слое ячеек; порог глубины кожи головы (L.b0) тут не годится —
+                // на изогнутом гребне глубина средней ячейки меньше него, и хрящ пропадал
+                if (EarZone(ax, y, z)) { m = EarSdf(ax, y, z) < -0.05f && depth > 0.12f ? (y < -1.45f ? AnatMat.Fat : AnatMat.Cartilage) : AnatMat.Skin; return; }   // наружный слой ячеек (глубина 0,1) — всегда кожа   // мочка без хряща
                 // наружная кожа
                 if (depth < L.b0)
                 {
-                    m = LipZone(ax, y, z) ? AnatMat.Lip : CellHash(c) < StubbleDensity(x, y, z) * 0.97f ? AnatMat.Stubble : AnatMat.Skin;
+                    m = LipZone(ax, y, z) ? AnatMat.Lip : StubbleDensity(x, y, z) > 0.4f ? AnatMat.Stubble : AnatMat.Skin;   // тон щетины — тенью сетки по плотности
                     return;
                 }
                 // со стороны рта: слизистая, десна, альвеолы, мышцы щеки и губ
@@ -397,7 +410,6 @@ namespace VoxProbe
                 // ухо: хрящ под кожей
                 float ec = EarCanal(ax, y, z);
                 if (ec < 0.2f && depth >= 0.2f) { m = ec < 0 ? AnatMat.Air : AnatMat.Skin; return; }
-                if (EarZone(ax, y, z)) { m = y < -1.45f ? AnatMat.Fat : AnatMat.Cartilage; return; }   // мочка без хряща
                 // сосуды под кожей
                 for (int k = 0; k < vessels.Length; k++)
                 {

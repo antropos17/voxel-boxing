@@ -91,7 +91,7 @@ namespace VoxProbe
         }
 
         /// Ушная раковина — пластина толщиной 6–8 мм (кожа, хрящ, кожа): контур-эллипс в плоскости y–z, задний край отведён
-        /// от головы, у входа в слуховой проход — чаша раковины, по краю завиток толще.
+        /// от головы, у входа в слуховой проход — чаша раковины, по краю завиток толще, внутри гребень противозавитка, спереди козелок.
         public static float EarSdf(float ax, float y, float z)
         {
             float u = y - 0.55f, v = z + 1.05f;
@@ -103,8 +103,16 @@ namespace VoxProbe
             float xm = xs + 0.25f + 1.6f * back * back;
             float bowl = math.saturate(1 - math.length(new float2((u + 0.35f) / 1.25f, (v - 0.2f) / 0.85f)));
             xm -= 0.35f * bowl;
+            // противозавиток — гребень по внутреннему эллипсу над чашей, выступает наружу
+            float oi = SdEll2(v - 0.05f, u - 0.25f, 1.05f, 2.0f);
+            float ridge = math.exp(-oi * oi / 0.05f) * Sstep(-1.4f, -0.8f, u);
+            xm += 0.22f * ridge;   // гребень — изгибом пластины, без утолщения (толщина слоёв кожа–хрящ–кожа та же)
+            // завиток — край толще
             float t = 0.3f + 0.12f * Sstep(-0.55f, -0.05f, o);
-            return math.max(math.abs(ax - xm) - t, o);
+            float plate = math.max(math.abs(ax - xm) - t, o);
+            // козелок — бугорок перед входом в слуховой проход
+            float trag = SdEll(ax - xs - 0.3f, y - 0.2f, z + 0.2f, 0.32f, 0.42f, 0.28f);
+            return math.min(plate, trag);
         }
 
         public static float HeadSdf(float x, float y, float z)

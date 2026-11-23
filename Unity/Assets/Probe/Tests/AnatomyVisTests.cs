@@ -136,5 +136,58 @@ namespace VoxProbe.Tests
             Assert.That(SeenIn(MaxSinus, 0.2f), Is.EqualTo(0), "гайморова пазуха");
             Assert.That(DiffVsFull(), Is.EqualTo(0));
         }
+            /// Радужка и зрачок видны спереди: у каждого глаза есть их грани, обращённые вперёд (+z глаза) к видимой прозрачной камере,
+        /// и луч спереди через центр зрачка проходит только видимые прозрачные ячейки и упирается в непрозрачный зрачок.
+        [Test]
+        public void IrisAndPupilFaceForward()
+        {
+            foreach (var e in new[] { a.eyeL, a.eyeR })
+            {
+                int iris = 0, pupil = 0;
+                for (int z = 0; z < e.dims.z - 1; z++) for (int y = 0; y < e.dims.y; y++) for (int x = 0; x < e.dims.x; x++)
+                {
+                    byte m = e.mat[e.Index(x, y, z)]; if (m != AnatMat.Iris && m != AnatMat.Pupil) continue;
+                    if (!Seen(e, e.Index(x, y, z + 1))) continue;
+                    if (m == AnatMat.Iris) iris++; else pupil++;
+                }
+                Assert.That(iris, Is.GreaterThan(40), e.name + ": граней радужки");
+                Assert.That(pupil, Is.GreaterThan(8), e.name + ": граней зрачка");
+                int3 c = (int3)math.floor((float3.zero - e.org) / e.step);
+                byte hit = 0;
+                for (int z = e.dims.z - 1; z >= 0; z--)
+                {
+                    int i = e.Index(c.x, c.y, z); byte m = e.mat[i];
+                    if (AnatVis.Open(m) || AnatMat.Clear(m)) { if (m != AnatMat.Empty) Assert.That(Seen(e, i), e.name + ": скрыта прозрачная ячейка на луче, z " + z); continue; }
+                    hit = m; break;
+                }
+                Assert.That(hit, Is.EqualTo(AnatMat.Pupil), e.name + ": луч через центр зрачка");
+            }
+        }
+
+        /// Чанки головы, которые надо перестроить после удара: ячейки, сменившие видимость, и сами убранные.
+        int HeadChunksAfter(NativeList<int> cells)
+        {
+            var h = a.head; h.tch.Clear();
+            a.vis.Opened(cells.AsArray());
+            int W = h.dims.x, H = h.dims.y;
+            foreach (int i in cells) h.TouchCell(new int3(i % W, (i / W) % H, i / (W * H)));
+            int n = h.tch.Count; h.tch.Clear(); return n;
+        }
+
+        /// Удар трогает не больше 8 чанков головы (32³ ячеек): видимость помечает чанки ячеек, сменивших видимость, а не их коробку.
+        [Test]
+        public void HitTouchesFewHeadChunks()
+        {
+            var cheek = Bore(new float3(7.2f, -5.0f, 5.0f), new float3(2.0f, -5.0f, 5.6f), 0.7f, m => false);
+            int nc = HeadChunksAfter(cheek); cheek.Dispose();
+            var sinus = Bore(new float3(3.3f, -0.6f, 13f), new float3(2.4f, -0.4f, 2f), 0.6f, Bone);
+            int ns = HeadChunksAfter(sinus); sinus.Dispose();
+            var skull = Bore(new float3(1.2f, 15f, 1.0f), new float3(1.2f, 6.5f, 1.0f), 2.2f, m => m == AnatMat.Grey || m == AnatMat.White || m == AnatMat.Csf);
+            int nk = HeadChunksAfter(skull); skull.Dispose();
+            Debug.Log("ANAT_TEST head chunks: cheek " + nc + ", sinus " + ns + ", skull " + nk);
+            Assert.That(nc, Is.LessThanOrEqualTo(8), "пробой щеки");
+            Assert.That(ns, Is.LessThanOrEqualTo(8), "удар у пазухи");
+            Assert.That(nk, Is.LessThanOrEqualTo(8), "вскрытие свода");
+        }
     }
 }

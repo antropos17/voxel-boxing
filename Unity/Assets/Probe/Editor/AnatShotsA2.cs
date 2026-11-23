@@ -108,7 +108,7 @@ namespace VoxProbe.Editor
                     {
                         var md = Mesh.AllocateWritableMeshData(1);
                         sw.Restart();
-                        new AnatChunkJob { mat = h.mat, origins = org, layout = layout, dims = h.dims, sv = sv, vv = vv, style = hb.style, dscale = 0.05f, meshes = md, stats = st }.Run(1);
+                        new AnatChunkJob { mat = h.mat, origins = org, layout = layout, dims = h.dims, sv = sv, vv = vv, style = hb.style, grid = new float4(h.org, h.step), dscale = 0.05f, meshes = md, stats = st }.Run(1);
                         double ms = sw.Elapsed.TotalMilliseconds; md.Dispose();
                         if (rep > 0) best = math.min(best, ms);
                     }
@@ -122,7 +122,7 @@ namespace VoxProbe.Editor
                 {
                     var md = Mesh.AllocateWritableMeshData(n);
                     sw.Restart();
-                    new AnatChunkJob { mat = h.mat, origins = orgs, layout = layout, dims = h.dims, sv = sv, vv = vv, style = hb.style, dscale = 0.05f, meshes = md, stats = sts }.Schedule(n, 1).Complete();
+                    new AnatChunkJob { mat = h.mat, origins = orgs, layout = layout, dims = h.dims, sv = sv, vv = vv, style = hb.style, grid = new float4(h.org, h.step), dscale = 0.05f, meshes = md, stats = sts }.Schedule(n, 1).Complete();
                     double ms = sw.Elapsed.TotalMilliseconds; md.Dispose();
                     if (rep > 0) par = math.min(par, ms);
                 }
@@ -256,6 +256,14 @@ namespace VoxProbe.Editor
 
             // снимки и пары с этапом A
             r.Views(Out, "shot-");
+            // крупно: глаз спереди и в три четверти, ухо в профиль с обеих сторон, голова в три четверти справа
+            r.Shot(Path.Combine(Out, "close-eye-front.png"), C(-3.2f, 2.4f, 16), C(-3.2f, 2.3f, 6.6f), 14);
+            r.Shot(Path.Combine(Out, "close-eye-3q.png"), C(-12, 3.0f, 15), C(-3.2f, 2.3f, 6.4f), 14);
+            r.Shot(Path.Combine(Out, "close-ear-left.png"), C(-26, 1, -1), C(-7.6f, 0.5f, -1.0f), 22);
+            r.Shot(Path.Combine(Out, "close-ear-right.png"), C(26, 1, -1), C(7.6f, 0.5f, -1.0f), 22);
+            r.Shot(Path.Combine(Out, "close-ear-back.png"), C(-22, 3, -20), C(-7.6f, 0.5f, -1.0f), 24);
+            r.Shot(Path.Combine(Out, "shot-three-quarter-right.png"), C(38, 6, 48), Ctr, 27);
+            r.Shot(Path.Combine(Out, "close-stubble.png"), C(-22, -4, 26), C(-3.5f, -5, 5), 22);
             foreach (var v in new[] { "front", "three-quarter", "profile", "back", "eye", "mouth" })
                 Pair(Path.Combine(Root, "anatomy", "shot-" + v + ".png"), Path.Combine(Out, "shot-" + v + ".png"), Path.Combine(Out, "pair-" + v + ".png"));
 
@@ -277,6 +285,7 @@ namespace VoxProbe.Editor
             r.Cull(false); var ms0 = r.HeadMeshMs(); r.Cull(true);
             sb.Append("  \"headMeshNoCull\": { \"chunkMsMean\": ").Append(F(ms0.mean)).Append(", \"chunkMsMax\": ").Append(F(ms0.max)).Append(", \"oneThreadMs\": ").Append(F(ms0.one)).Append(", \"parallelMs\": ").Append(F(ms0.par)).Append(" },\n");
 
+            a.vis.Warm();
             // удар, не достающий пазухи: мягкие ткани до кости
             Damage("sinusHitNoReach", Bore(a.head, SinusA, SinusB, 0.6f, Bone), r, sb, "shot-sinus-hit", C(16, 0, 40), C(3, -0.5f, 8));
             // пробой щеки в рот
@@ -313,19 +322,31 @@ namespace VoxProbe.Editor
             int dirty = 0; foreach (var b in r.bodies) { b.SyncVis(); dirty += b.dirtyCount; }
             // и сами удалённые ячейки — их чанки
             var h = a.head; var hb = r.bodies[0];
-            foreach (int i in cells) { int x = i % h.dims.x, y = (i / h.dims.x) % h.dims.y, z = i / (h.dims.x * h.dims.y); h.Touch(new int3(x, y, z), new int3(x, y, z)); }
+            foreach (int i in cells) { int x = i % h.dims.x, y = (i / h.dims.x) % h.dims.y, z = i / (h.dims.x * h.dims.y); h.TouchCell(new int3(x, y, z)); }
             hb.SyncVis();
-            dirty = 0; foreach (var b in r.bodies) dirty += b.dirtyCount;
+            dirty = 0; int dirtyHead = hb.dirtyCount, bodiesDirty = 0; foreach (var b in r.bodies) { dirty += b.dirtyCount; if (b != hb && b.dirtyCount > 0) bodiesDirty++; }
+            // замер по частям: сначала голова, потом остальные тела (зубы, челюсть, глаза), каждая часть на рабочих потоках
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            foreach (var b in r.bodies) b.RebuildDirty(r.layout);
-            double meshMs = sw.Elapsed.TotalMilliseconds;
+            for (int guard = 0; guard < 16 && hb.dirtyCount > 0; guard++) { hb.Schedule(r.layout, 64); hb.Complete(); }
+            double headMs = sw.Elapsed.TotalMilliseconds; sw.Restart();
+            for (int guard = 0; guard < 16; guard++)
+            {
+                bool any = false;
+                foreach (var b in r.bodies) if (b.dirtyCount > 0) { b.Schedule(r.layout, 64); any = true; }
+                foreach (var b in r.bodies) b.Complete();
+                if (!any) break;
+            }
+            double bodiesMs = sw.Elapsed.TotalMilliseconds, meshMs = headMs + bodiesMs;
+            var triInc = r.Tris();
             // сверка: тот же результат, что полный пересчёт
             var inc = new List<byte[]>(); foreach (var g in a.All) inc.Add(g.vis.ToArray());
             a.vis.Full(); int k = 0, diff = 0;
             foreach (var g in a.All) { var f = g.vis; var s = inc[k++]; for (int i = 0; i < s.Length; i++) if ((s[i] <= AnatVis.Lim) != (f[i] <= AnatVis.Lim)) diff++; }
             r.Build();
-            sb.Append("  \"").Append(name).Append("\": { \"removed\": ").Append(cells.Length).Append(", \"visFlips\": ").Append(flips).Append(", \"visUpdateMs\": ").Append(F(visMs))
-              .Append(", \"dirtyChunks\": ").Append(dirty).Append(", \"rebuildMs\": ").Append(F(meshMs)).Append(", \"incrementalVsFullDiff\": ").Append(diff).Append(" },\n");
+            var triFull = r.Tris();
+            sb.Append("  \"").Append(name).Append("\": { \"trisIncremental\": ").Append(triInc.all).Append(", \"trisFullRebuild\": ").Append(triFull.all).Append(" },\n");
+            sb.Append("  \"").Append(name + "Hit").Append("\": { \"removed\": ").Append(cells.Length).Append(", \"visFlips\": ").Append(flips).Append(", \"visUpdateMs\": ").Append(F(visMs))
+              .Append(", \"dirtyChunks\": ").Append(dirty).Append(", \"dirtyHeadChunks\": ").Append(dirtyHead).Append(", \"bodiesTouched\": ").Append(bodiesDirty).Append(", \"rebuildMs\": ").Append(F(meshMs)).Append(", \"rebuildHeadMs\": ").Append(F(headMs)).Append(", \"rebuildBodiesMs\": ").Append(F(bodiesMs)).Append(", \"incrementalVsFullDiff\": ").Append(diff).Append(" },\n");
             r.Shot(Path.Combine(Out, shot + ".png"), eye, at, 26);
             cells.Dispose();
         }

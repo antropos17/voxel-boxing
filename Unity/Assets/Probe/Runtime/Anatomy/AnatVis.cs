@@ -27,6 +27,7 @@ namespace VoxProbe
         {
             this.a = a; h = a.head;
             foreach (var g in a.All) if (!g.vis.IsCreated) g.vis = new NativeArray<byte>(g.Count, Allocator.Persistent);
+            foreach (var g in a.All) { g.hasClear = false; for (int i = 0; i < g.Count && !g.hasClear; i++) g.hasClear = AnatMat.Clear(g.mat[i]); }
         }
 
         /// Всё заново: голова и все тела.
@@ -35,9 +36,10 @@ namespace VoxProbe
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var box = new NativeArray<int>(7, Allocator.TempJob);
             var none = new NativeArray<int>(0, Allocator.TempJob);
-            new FloodJob { mat = h.mat, vis = h.vis, opened = none, box = box, dims = h.dims, full = true }.Run();
+            var fl = new NativeList<int>(0, Allocator.TempJob);
+            new FloodJob { mat = h.mat, vis = h.vis, opened = none, box = box, dims = h.dims, full = true, flipped = fl }.Run();
             lastFlips = box[6];
-            none.Dispose(); box.Dispose();
+            none.Dispose(); box.Dispose(); fl.Dispose();
             lastMs = sw.Elapsed.TotalMilliseconds;
             sw.Restart();
             foreach (var g in a.All) if (g != h) BodyVis(g);
@@ -51,26 +53,42 @@ namespace VoxProbe
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var box = new NativeArray<int>(7, Allocator.TempJob);
-            new FloodJob { mat = h.mat, vis = h.vis, opened = cells, box = box, dims = h.dims, full = false }.Run();
+            var fl = new NativeList<int>(1024, Allocator.TempJob);
+            new FloodJob { mat = h.mat, vis = h.vis, opened = cells, box = box, dims = h.dims, full = false, flipped = fl }.Run();
             int flips = box[6];
             if (flips > 0)
             {
                 int3 mn = new int3(box[0], box[1], box[2]), mx = new int3(box[3], box[4], box[5]);
-                h.Touch(mn, mx);
-                float3 lo = h.Local(mn.x, mn.y, mn.z) - h.step, hi = h.Local(mx.x, mx.y, mx.z) + h.step;
+                // перестраиваются чанки самих ячеек, сменивших видимость, а не вся их коробка (полость рта тянется через полголовы)
+                int W = h.dims.x, H = h.dims.y;
+                for (int k = 0; k < fl.Length; k++) { int i = fl[k]; h.TouchCell(new int3(i % W, (i / W) % H, i / (W * H))); }
+                float3 lo = h.Local(mn.x, mn.y, mn.z) - 2 * h.step, hi = h.Local(mx.x, mx.y, mx.z) + 2 * h.step;   // ячейка тела зависит от ячейки головы и её соседей: до 1,5 шага
+                // тела рядом: все джобы разом (пересчёт в коробке → растекание по прозрачным → сравнение со старым), одно ожидание;
+                // перестраиваются только тела, у которых видимость сменилась, и только сменившаяся область
+                var gs = new System.Collections.Generic.List<AnatGrid>();
+                var olds = new System.Collections.Generic.List<NativeArray<byte>>();
+                var boxes = new System.Collections.Generic.List<NativeArray<int>>();
+                var hs = new NativeList<JobHandle>(8, Allocator.Temp);
                 foreach (var g in a.All)
                 {
                     if (g == h || !Overlap(g, lo, hi)) continue;
-                    // перестраивать только тела, у которых видимость действительно сменилась, и только сменившуюся область
                     var old = new NativeArray<byte>(g.vis, Allocator.TempJob);
-                    BodyVis(g);
                     var gb = new NativeArray<int>(7, Allocator.TempJob);
-                    new DiffJob { a = old, b = g.vis, dims = g.dims, box = gb }.Run();
-                    if (gb[6] > 0) g.Touch(new int3(gb[0], gb[1], gb[2]), new int3(gb[3], gb[4], gb[5]));
-                    old.Dispose(); gb.Dispose();
+                    var jh = BodyVisJobFor(g, true, lo, hi).Schedule(g.dims.z, 4);
+                    if (g.hasClear) jh = new ClearSpreadJob { mat = g.mat, vis = g.vis, dims = g.dims }.Schedule(jh);
+                    jh = new DiffJob { a = old, b = g.vis, dims = g.dims, box = gb }.Schedule(jh);
+                    hs.Add(jh); gs.Add(g); olds.Add(old); boxes.Add(gb);
                 }
+                JobHandle.CombineDependencies(hs.AsArray()).Complete();
+                for (int k = 0; k < gs.Count; k++)
+                {
+                    var gb = boxes[k];
+                    if (gb[6] > 0) gs[k].Touch(new int3(gb[0], gb[1], gb[2]), new int3(gb[3], gb[4], gb[5]));
+                    gb.Dispose(); olds[k].Dispose();
+                }
+                hs.Dispose();
             }
-            box.Dispose();
+            box.Dispose(); fl.Dispose();
             lastMs = sw.Elapsed.TotalMilliseconds; lastFlips = flips;
             return flips;
         }
@@ -78,10 +96,12 @@ namespace VoxProbe
         /// Видимость тела по полю головы (Burst, по слоям z).
         void BodyVis(AnatGrid g)
         {
-            new BodyVisJob { hmat = h.mat, hvis = h.vis, hdims = h.dims, horg = h.org, hstep = h.step, vis = g.vis, mat = g.mat, dims = g.dims, org = g.org, step = g.step, pos = g.pos, rot = g.rot }
-                .Schedule(g.dims.z, 1).Complete();
-            new ClearSpreadJob { mat = g.mat, vis = g.vis, dims = g.dims }.Run();
+            BodyVisJobFor(g, false, 0, 0).Schedule(g.dims.z, 1).Complete();
+            if (g.hasClear) new ClearSpreadJob { mat = g.mat, vis = g.vis, dims = g.dims }.Run();
         }
+
+        BodyVisJob BodyVisJobFor(AnatGrid g, bool boxed, float3 lo, float3 hi) =>
+            new BodyVisJob { boxed = boxed, lo = lo, hi = hi, hmat = h.mat, hvis = h.vis, hdims = h.dims, horg = h.org, hstep = h.step, vis = g.vis, mat = g.mat, dims = g.dims, org = g.org, step = g.step, pos = g.pos, rot = g.rot };
 
         /// Коробка ячеек, у которых видимость (≤ Lim) различается в a и b, и их число.
         [BurstCompile(CompileSynchronously = true)]
@@ -146,6 +166,23 @@ namespace VoxProbe
 
         public static bool Open(byte m) => m == AnatMat.Empty || m == AnatMat.Air;
 
+        /// Прогрев: один раз запустить все джобы обновления (в редакторе Burst компилирует джоб при первом запуске — для честного замера).
+        public void Warm()
+        {
+            var save = new System.Collections.Generic.List<byte[]>(); foreach (var g in a.All) save.Add(g.vis.ToArray());
+            int W = h.dims.x, H = h.dims.y, D = h.dims.z, cell = -1;
+            for (int i = 0; i < h.Count && cell < 0; i++) if (h.mat[i] == AnatMat.Empty) cell = i;   // открытая ячейка: ничего не меняется
+            var one = new NativeArray<int>(1, Allocator.TempJob); one[0] = cell;
+            Opened(one); one.Dispose();
+            var eye = a.eyeL; var old = new NativeArray<byte>(eye.vis, Allocator.TempJob); var gb = new NativeArray<int>(7, Allocator.TempJob);
+            var jh = BodyVisJobFor(eye, true, h.org, h.org + (float3)h.dims * h.step).Schedule(eye.dims.z, 4);
+            jh = new ClearSpreadJob { mat = eye.mat, vis = eye.vis, dims = eye.dims }.Schedule(jh);
+            new DiffJob { a = old, b = eye.vis, dims = eye.dims, box = gb }.Schedule(jh).Complete();
+            old.Dispose(); gb.Dispose();
+            int k = 0; foreach (var g in a.All) g.vis.CopyFrom(save[k++]);
+            foreach (var g in a.All) { g.tch.Clear(); g.tmn = int.MaxValue; g.tmx = int.MinValue; }
+        }
+
         /// Поле глубины видимого воздуха головы. full — заново от края решётки; иначе — от opened (ячеек, ставших открытыми):
         /// их значение — минимум соседей плюс шаг; дальше уровни 0..Lim обходятся по очереди (шаги 0 и 1, как у BFS 0-1).
         /// box: мин. и макс. координаты ячеек, ставших видимыми, и их число.
@@ -156,6 +193,7 @@ namespace VoxProbe
             public NativeArray<byte> vis;
             [ReadOnly] public NativeArray<int> opened;
             public NativeArray<int> box;
+            public NativeList<int> flipped;               // ячейки, ставшие видимыми (только при full = false)
             public int3 dims; public bool full;
             int3 lo, hi; int flips;
 
@@ -165,6 +203,7 @@ namespace VoxProbe
                 {
                     int x = i % dims.x, y = (i / dims.x) % dims.y, z = i / (dims.x * dims.y);
                     lo = math.min(lo, new int3(x, y, z)); hi = math.max(hi, new int3(x, y, z)); flips++;
+                    if (!full) flipped.Add(i);
                 }
                 vis[i] = (byte)v;
             }
@@ -242,6 +281,8 @@ namespace VoxProbe
             [ReadOnly] public NativeArray<byte> hmat, hvis, mat;
             [NativeDisableParallelForRestriction] public NativeArray<byte> vis;
             public int3 hdims, dims; public float3 horg, org, pos; public float hstep, step; public float3x3 rot;
+            public bool boxed; public float3 lo, hi;   // boxed — пересчитать только ячейки в коробке [lo, hi] рамки головы
+
             public void Execute(int z)
             {
                 for (int y = 0; y < dims.y; y++)
@@ -251,6 +292,7 @@ namespace VoxProbe
                     byte m = mat[i];
                     if (!(Open(m) || AnatMat.Clear(m))) { vis[i] = Hidden; continue; }
                     float3 p = pos + math.mul(rot, org + (new float3(x, y, z) + 0.5f) * step);
+                    if (boxed && (math.any(p < lo) || math.any(p > hi))) continue;
                     int3 c = (int3)math.floor((p - horg) / hstep);
                     vis[i] = HeadSees(c) ? (byte)0 : Hidden;
                 }
