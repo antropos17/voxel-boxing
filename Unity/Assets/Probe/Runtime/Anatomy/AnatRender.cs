@@ -36,6 +36,7 @@ namespace VoxProbe
         public AnatBody(AnatGrid g, Transform parent, Material material, int bodyId)
         {
             this.g = g; isHead = g.name == "head";
+            if (isHead) style |= AnatMesher.StyleBend;   // голова гнётся в шее (AnatSkin); челюсть, глаза и зубы — жёстко
             bnd = new Bounds(new Vector3(16, 16, 16), Vector3.one * (40 + 2 * 15f / g.step));
             mpb ??= new MaterialPropertyBlock();
             root = new GameObject(g.name).transform;

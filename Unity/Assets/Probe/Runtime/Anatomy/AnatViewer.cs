@@ -236,6 +236,14 @@ namespace VoxProbe
             AnatSkin.pose = math.radians(new float3(0, 0, 30)); yield return Shot("pose-tilt-30");
             AnatSkin.pose = math.radians(new float3(0, 60, 0)); yield return Shot("pose-turn-60");
             View(-35, 6, 0.85f, new float3(0, -3, 0), true); yield return Shot("pose-turn-60-3q");
+            // предельные позы и подбородок снизу-спереди при повороте 60°
+            View(90, 4, 0.85f, new float3(0, -3, 0), true);
+            AnatSkin.pose = math.radians(new float3(45, 0, 0)); yield return Shot("pose-nod-forward-45");
+            View(0, 4, 0.85f, new float3(0, -3, 0), true);
+            AnatSkin.pose = math.radians(new float3(0, 80, 0)); yield return Shot("pose-turn-80");
+            AnatSkin.pose = math.radians(new float3(0, 0, 40)); yield return Shot("pose-tilt-40");
+            AnatSkin.pose = math.radians(new float3(0, 60, 0));
+            View(35, -12, 0.45f, new float3(0, -9, 3), true); yield return Shot("pose-turn-60-chin-below");   // ниже подбородка, но выше среза шеи
             // удар в скулу повёрнутой головы: прицел — изогнутая точка скулы; камера смотрит на неё по её нормали
             float3 cheekRest = new float3(-4.5f, -2.5f, 6), cheekPosed = AnatSkin.Skin(cheekRest, out var cm);
             float3 look = math.mul(cm, math.normalize(new float3(-0.6f, 0, 1)));
@@ -253,6 +261,7 @@ namespace VoxProbe
             for (int i = 0; i < 7; i++) AnatSkin.Step(1 / 60f); yield return Shot("recoil-peak");
             log.Append("  \"recoilPeakDeg\": \"").Append(math.degrees(AnatSkin.recoil).ToString()).Append("\",\n");
             for (int i = 0; i < 84; i++) AnatSkin.Step(1 / 60f); yield return Shot("recoil-settled");
+            log.Append("  \"recoilSettledDeg\": \"").Append(math.degrees(AnatSkin.Total).ToString()).Append("\",\n");
             // цена изгиба: время кадра без вертикальной синхронизации, изгиб выкл/вкл (поза — поворот 60°)
             AnatSkin.Reset(); AnatSkin.pose = math.radians(new float3(0, 60, 0)); Default(true);
             QualitySettings.vSyncCount = 0; Application.targetFrameRate = -1;

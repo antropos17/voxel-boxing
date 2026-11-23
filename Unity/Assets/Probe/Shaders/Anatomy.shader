@@ -27,10 +27,10 @@ Shader "VoxProbe/Anatomy"
             float _AnatTime, _BruiseDay;
             float4 _ChunkOrg;   // начало чанка в ячейках тела; w — номер тела
             float4 _BodyPar;    // x — шаг решётки тела, см; yzw — центр тела в ячейках (у глаза — ось взгляда)
-            // этап A3, изгиб шеи (AnatSkin): мир ↔ см головы, поворот сустава (вектор: ось × угол), (z начала наклона границы, высота, z оси, полуширина),
-            // наклон границ в области головы (вперёд, назад, низ и верх перехода по y)
+            // этап A3, изгиб шеи (AnatSkin): мир ↔ см головы, поворот сустава (вектор: ось × угол), (0, высота, z оси, полуширина)
             float4x4 _AnatW2H, _AnatH2W;
-            float4 _SkinJ[8], _SkinP[8], _SkinS;
+            // _SkinS: (YBot, YRef, z первой точки таблицы, последний индекс), _SkinT — граница жёсткой головы T(z) с шагом 1 см
+            float4 _SkinJ[8], _SkinP[8], _SkinS, _SkinT[7];
             float _SkinOn;
             CBUFFER_START(UnityPerMaterial)
             float _Ambient;
@@ -54,8 +54,13 @@ Shader "VoxProbe/Anatomy"
             void Skin(inout float3 h, inout float3 n)
             {
                 float3 r = h;
-                float ye = r.y + smoothstep(_SkinS.z, _SkinS.w, r.y) * (_SkinS.x * max(0.0, r.z - _SkinP[0].x) + _SkinS.y * max(0.0, _SkinP[0].x - r.z));
-                if (_ChunkOrg.w > 1.5 && _ChunkOrg.w < 98.0) ye = 100.0;   // глаза и зубы — целиком с черепом; челюсть — по весам тканей вокруг (иначе кость выходит из угла челюсти)
+                // то же, что AnatSkin.YEff: выше границы YTop(x, z) — жёсткая голова, ниже высота сжимается к якорю
+                float zf = clamp(r.z - _SkinS.z, 0.0, _SkinS.w); int ti = min((int)zf, (int)_SkinS.w - 1);
+                float t0 = _SkinT[ti >> 2][ti & 3], t1 = _SkinT[(ti + 1) >> 2][(ti + 1) & 3];
+                float ms = (1.0 - smoothstep(2.0, 3.5, abs(r.x))) * smoothstep(-8.0, -6.5, r.z) * (1.0 - smoothstep(0.0, 1.0, r.z));
+                float yt = lerp(lerp(t0, t1, zf - ti), _SkinS.y, ms);
+                float ye = r.y >= yt ? r.y - yt + _SkinS.y : _SkinS.x + (r.y - _SkinS.x) * (_SkinS.y - _SkinS.x) / (yt - _SkinS.x);
+                if (_ChunkOrg.w > 0.5 && _ChunkOrg.w < 98.0) ye = 100.0;   // нижняя челюсть, глаза и зубы — целиком с черепом
                 [unroll] for (int j = 0; j < 8; j++)
                 {
                     float4 P = _SkinP[j];

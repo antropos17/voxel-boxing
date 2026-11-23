@@ -43,6 +43,46 @@ namespace VoxProbe.Tests
         }
 
         [Test]
+        public void HeadAboveC1MovesRigidly()
+        {
+            // всё выше сустава череп–C1 — одно жёсткое тело: свод, затылок, лицо, подбородок, нижняя челюсть, зубы и глаза
+            // (шейдер берёт челюсть, зубы и глаза целиком с черепом — здесь проверяется, что изгиб в C# с ним согласен)
+            var a = AnatomyBuilder.Build();
+            try
+            {
+                var pts = new System.Collections.Generic.List<float3>();
+                int bodies = 0;
+                foreach (var g in a.All)
+                {
+                    bool head = g == a.head; int n0 = pts.Count, st = head ? 2 : 1;
+                    for (int z = 0; z < g.dims.z; z += st) for (int y = 0; y < g.dims.y; y += st) for (int x = 0; x < g.dims.x; x += st)
+                    {
+                        if (!AnatMat.Solid(g.mat[g.Index(x, y, z)])) continue;
+                        float3 p = g.World(g.Local(x, y, z));
+                        // в решётке головы: выше сустава череп–C1 и низ лица над краем нижней челюсти
+                        if (head && !(p.y > AnatSkin.Y[0] + AnatSkin.Blend[0] || (p.z > 2 && p.y > -8 && math.abs(p.x) < 6.5f))) continue;
+                        pts.Add(p);
+                    }
+                    if (!head) { Assert.Greater(pts.Count, n0, "пустое тело " + g.name); bodies++; }
+                }
+                Assert.GreaterOrEqual(bodies, 4, "нет челюсти, глаз или зубов");
+                float3 o = new float3(0, 12, 0);   // свод
+                foreach (var r in new[] { Deg(45, 0, 0), Deg(-40, 0, 0), Deg(0, 80, 0), Deg(0, 0, 40), Deg(30, 60, 25), Deg(-20, -70, -30) })
+                {
+                    float3 qo = AnatSkin.Skin(o, r, out var M0);
+                    float worst = 0; float3 wp = 0;
+                    foreach (var p in pts)
+                    {
+                        float d = math.distance(AnatSkin.Skin(p, r, out _), qo + math.mul(M0, p - o));
+                        if (d > worst) { worst = d; wp = p; }
+                    }
+                    Assert.Less(worst, 0.01f, "поза " + math.degrees(r) + ": точка " + wp + " ушла от жёсткого черепа на " + worst + " см");
+                }
+            }
+            finally { a.Dispose(); }
+        }
+
+        [Test]
         public void UnskinInvertsSkin()
         {
             // у ткани и в 5 мм над кожей обратный изгиб всегда даёт прообраз; внутри тела — ту же точку, кроме складок
@@ -107,6 +147,23 @@ namespace VoxProbe.Tests
             Assert.Greater(math.degrees(peak), -41f, "отлёт сильнее предела");
             for (int i = 0; i < 240; i++) AnatSkin.Step(1 / 60f);
             Assert.Less(math.length(AnatSkin.recoil), math.radians(0.5f), "не успокоилась за 4 с");
+        }
+
+        [Test]
+        public void RecoilReturnsToRestAsInSelfTest()
+        {
+            // как в самопроверке просмотра: пик через 7 кадров, ещё 84 кадра (1,4 с) — поза покоя ±1°
+            AnatSkin.Reset();
+            AnatSkin.Push(new float3(0, 3, 10), new float3(0, 0, -1), 2);
+            for (int i = 0; i < 7; i++) AnatSkin.Step(1 / 60f);
+            Assert.Less(math.degrees(AnatSkin.recoil.x), -10f, "на пике отлёта нет");
+            for (int i = 0; i < 84; i++) AnatSkin.Step(1 / 60f);
+            Assert.Less(math.degrees(math.length(AnatSkin.Total)), 1f, "после затухания не покой");
+            // один длинный шаг считается целиком, а не обрезается (раньше Step(1,4) давал 0,1 с и голова оставалась у пика)
+            AnatSkin.Reset();
+            AnatSkin.Push(new float3(0, 3, 10), new float3(0, 0, -1), 2);
+            AnatSkin.Step(0.12f); AnatSkin.Step(1.4f);
+            Assert.Less(math.degrees(math.length(AnatSkin.Total)), 1f, "Step(1,4) не дошёл до покоя");
         }
     }
 }

@@ -54,6 +54,9 @@ namespace VoxProbe
         }
 
         public const int StyleNoAO = 1, StyleFieldNormal = 2, StyleFieldPos = 4, StyleStubble = 8;
+        /// В зоне изгиба шеи (AnatBend.InBend) грани не склеиваются: шейдер гнёт вершины нелинейно, длинное ребро осталось бы прямым,
+        /// а вершины соседних граней на нём ушли бы по дуге — Т-стыки дают щели.
+        public const int StyleBend = 16;
         public const int StyleDefault = StyleNoAO | StyleFieldNormal | StyleStubble;   // вид поверхности по умолчанию (выбран по опытам этапа A2)
         static readonly float[] Gw = { 0.2494f, 0.8574f, 0.8574f, 0.2494f };   // exp(−t²/(2·0,9²)), t = ±1,5; ±0,5
         static readonly float[] Gd = { 0.4619f, 0.5293f, -0.5293f, -0.4619f };  // −t/σ²·w(t)
@@ -275,6 +278,7 @@ namespace VoxProbe
             if (!math.all(g * (1 - math.abs(n)) == 0)) return false;
             if (c.st) { CornerState(ref c, l, out uint2 col, out float3 disp); if (col.x != 0 || col.y != 0 || math.any(disp != 0)) return false; }
             if ((c.style & StyleFieldPos) != 0 && math.abs(Field(ref c, l).w - 0.5f) > 1e-4f) return false;
+            if ((c.style & StyleBend) != 0 && AnatBend.InBend(c.grid.xyz + (float3)(c.corg + l) * c.grid.w)) return false;
             return true;
         }
 
