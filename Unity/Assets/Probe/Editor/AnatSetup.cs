@@ -37,9 +37,13 @@ namespace VoxProbe.Editor
         public static void BuildWindows() => Build(BuildTarget.StandaloneWindows64, "Builds/AnatWin/VoxelAnat.exe");
         public static void BuildAndroid() => Build(BuildTarget.Android, "Builds/AnatAndroid/VoxelAnat.apk");
 
-        static void Build(BuildTarget target, string path)
+        /// Те же сборки без Setup(): сцена Anatomy.unity не перезаписывается (для замера и просмотра на телефоне).
+        public static void BuildWindowsKeepScene() => Build(BuildTarget.StandaloneWindows64, "Builds/AnatWin/VoxelAnat.exe", false);
+        public static void BuildAndroidKeepScene() => Build(BuildTarget.Android, "Builds/AnatAndroid/VoxelAnat.apk", false);
+
+        static void Build(BuildTarget target, string path, bool setup = true)
         {
-            Setup();
+            if (setup) Setup();
             EditorUserBuildSettings.buildAppBundle = false;
             var r = BuildPipeline.BuildPlayer(new BuildPlayerOptions { scenes = new[] { ScenePath }, locationPathName = path, target = target, options = BuildOptions.None });
             Debug.Log("ANAT_BUILD " + r.summary.result + " " + r.summary.totalSize + " bytes " + r.summary.totalTime + " -> " + path);

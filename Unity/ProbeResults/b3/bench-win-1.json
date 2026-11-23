@@ -1,0 +1,17 @@
+{
+  "stages": [
+    {"stage": "1-jaw", "hits": 13, "miss": 0, "done": true, "tris": 147880, "pieces": 1, "pieceTris": 6476, "made": 1, "trimmed": 0, "bodiesOff": 1},
+    {"stage": "2-face", "hits": 14, "miss": 0, "done": true, "tris": 149586, "pieces": 6, "pieceTris": 10928, "made": 6, "trimmed": 0, "bodiesOff": 6},
+    {"stage": "3-vault", "hits": 1, "miss": 0, "done": true, "tris": 157846, "pieces": 6, "pieceTris": 10928, "made": 6, "trimmed": 0, "bodiesOff": 6},
+    {"stage": "4-half", "hits": 20, "miss": 0, "done": true, "tris": 156224, "pieces": 12, "pieceTris": 18124, "made": 12, "trimmed": 0, "bodiesOff": 7},
+    {"stage": "5-stump", "hits": 30, "miss": 0, "done": true, "tris": 51928, "pieces": 24, "pieceTris": 75212, "made": 28, "trimmed": 4, "bodiesOff": 8}
+  ],
+  "platform": "WindowsPlayer", "seed": 77, "cpu": "Intel(R) Core(TM) Ultra 9 185H", "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU", "res": "540x1170",
+  "hits": 78, "trisIntact": 131858, "trisStump": 51928, "pieceTrisStump": 75212,
+  "hitMsMax": 44.947, "hitMsMedian": 24.905,
+  "worstFrameMsEditorStyle": 56.255, "medianFrameMsEditorStyle": 32.07, "tickMsMax": 19.872, "tickMsMedian": 7.188,
+  "wallFrameMsMax": 59.712, "wallFrameMsMedian": 11.313, "wallFrames": 234,
+  "islandMsMax": 10.241, "pieceMsMax": 0.276, "piecesPeak": 24, "islandRequests": 78, "islandFull": 60,
+  "buildMs": 365.856, "runSeconds": 5.954, "gcCollections": 18,
+  "memMB": { "monoStart": 6.688, "monoEnd": 8.211, "totalStart": 167.974, "totalEnd": 173.932, "monoBeforeView": 2.262, "totalBeforeView": 79.103, "gcHeapEnd": 8.215 }
+}

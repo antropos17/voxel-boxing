@@ -30,6 +30,10 @@ namespace VoxProbe
         readonly StringBuilder sb = new StringBuilder(512);
         GUIContent text = new GUIContent(""); GUIStyle style; Texture2D bg;
         float fpsAcc; int fpsN; float fps; float hudT;
+        // счётчик: худший кадр за последние 2–4 с (два окна по 2 с), время последнего удара; без выделений
+        float winMax, prevWinMax, winT; double hitMs; readonly System.Diagnostics.Stopwatch hitSw = new System.Diagnostics.Stopwatch();
+        // касание: один палец — вращать, касание без сдвига — удар, два пальца — масштаб и сдвиг, тап двумя — сила, тап тремя — восстановить
+        int tPrevN, tMaxN; bool tMoved; float tStart; Vector2 tStartPos, tLast, tMid; float tLastDist;
         bool freezeSkin; int pushN;   // самопроверка держит позу и отлёт неподвижными; номер толчка пробелом
         // толчки пробелом по кругу: (точка удара, направление) в см головы — в лицо, в левую и правую скулу, апперкот
         static readonly (float3 at, float3 dir)[] Pushes =
@@ -41,7 +45,7 @@ namespace VoxProbe
         void Awake()
         {
             Application.targetFrameRate = 120; QualitySettings.vSyncCount = 1;
-            if (!Application.isEditor) Screen.SetResolution(540, 1170, FullScreenMode.Windowed);
+            if (!Application.isEditor && !Application.isMobilePlatform) Screen.SetResolution(540, 1170, FullScreenMode.Windowed);
         }
 
         void Start()
@@ -87,7 +91,9 @@ namespace VoxProbe
             float dt = Time.unscaledDeltaTime;
             fpsAcc += dt; fpsN++;
             if (fpsAcc >= 0.25f) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
-            if (!selfTest) Controls(dt);
+            float fms = dt * 1000f; if (fms > winMax) winMax = fms;
+            winT += dt; if (winT >= 2f) { winT = 0; prevWinMax = winMax; winMax = 0; }
+            if (!selfTest) { Touches(dt); Controls(dt); }
             if (!freezeSkin) AnatSkin.Step(dt);
             v.Tick(dt);
             AnatSkin.SetGlobals(v.root);
@@ -152,6 +158,46 @@ namespace VoxProbe
             if (inside && wheel != 0) tDist = math.clamp(tDist * math.exp(-math.sign(wheel) * math.min(math.abs(wheel), 360f) / 120f * 0.15f), MinDist, MaxDist);
         }
 
+        /// Касание (телефон): орбита, масштаб щипком, сдвиг двумя пальцами, тап — удар, тап двумя — сила, тап тремя — восстановить.
+        void Touches(float dt)
+        {
+            var ts = Touchscreen.current; if (ts == null) return;
+            var tt = ts.touches; int n = 0; Vector2 p0 = default, p1 = default;
+            for (int i = 0; i < tt.Count; i++)
+            {
+                if (!tt[i].isInProgress) continue;
+                if (n == 0) p0 = tt[i].position.ReadValue(); else if (n == 1) p1 = tt[i].position.ReadValue();
+                n++;
+            }
+            float slop = Screen.height * 0.015f;
+            if (n == 0)
+            {
+                if (tPrevN > 0 && !tMoved && Time.unscaledTime - tStart < 0.35f)
+                {
+                    if (tMaxN == 1) Strike(tStartPos);
+                    else if (tMaxN == 2) { strength = (strength + 1) % 3; Rebuild(); }
+                    else if (tMaxN >= 3) { v.Restore(); AnatSkin.Reset(); Rebuild(); }
+                }
+                tPrevN = 0; tMaxN = 0; tMoved = false; return;
+            }
+            if (tPrevN == 0) { tStart = Time.unscaledTime; tStartPos = p0; tMaxN = 0; tMoved = false; }
+            if (n > tMaxN) tMaxN = n;
+            Vector2 mid = n >= 2 ? (p0 + p1) * 0.5f : p0; float dd = n >= 2 ? (p0 - p1).magnitude : 0;
+            if (n == tPrevN)   // пока число пальцев то же — двигаем камеру по смещению
+            {
+                if ((mid - tStartPos).magnitude > slop) tMoved = true;
+                if (n == 1 && tMoved) { Vector2 d = p0 - tLast; tYaw += d.x * 0.25f; tPitch = math.clamp(tPitch - d.y * 0.25f, -85f, 85f); }
+                else if (n >= 2)
+                {
+                    if (tLastDist > 1f && dd > 1f) tDist = math.clamp(tDist * tLastDist / dd, MinDist, MaxDist);
+                    float sc = 2 * tDist * math.tan(math.radians(cam.fieldOfView * 0.5f)) / Screen.height; Vector2 dm = mid - tMid;
+                    tPivot -= cam.transform.right * dm.x * sc + cam.transform.up * dm.y * sc;
+                    if (Mathf.Abs(dd - tLastDist) > slop * 0.3f || dm.magnitude > slop * 0.3f) tMoved = true;
+                }
+            }
+            tLast = p0; tMid = mid; tLastDist = dd; tPrevN = n;
+        }
+
         /// Удар по лучу из камеры через точку экрана.
         float3 lastPick;
         bool Strike(Vector2 screen)
@@ -159,7 +205,7 @@ namespace VoxProbe
             var ray = cam.ScreenPointToRay(new Vector3(screen.x, screen.y, 0));
             if (!v.Pick(ray, out var hit, out _, out _)) { v.lastWhat = "мимо"; Rebuild(); return false; }
             AnatSkin.Push(hit, v.pickDir, strength);
-            v.Hit(hit, v.pickDir, strength);
+            hitSw.Restart(); v.Hit(hit, v.pickDir, strength); hitMs = hitSw.Elapsed.TotalMilliseconds;
             lastPick = hit;
             Rebuild();
             return true;
@@ -169,15 +215,20 @@ namespace VoxProbe
         {
             if (v == null) return;
             sb.Clear();
-            sb.Append("ЛКМ — вращать · колесо — ближе/дальше\nСКМ или Shift+ЛКМ — сдвиг · F, двойной клик — вид\n");
-            sb.Append("ПКМ или Ctrl+ЛКМ — удар · Q/W/E — сила · R — восстановить\n");
-            sb.Append("1–4 — разрезы, 0 — целая · [ ] — плоскость · H — скрыть · Esc — выход\n");
-            sb.Append("↑↓ — кивок · ←→ — поворот · Shift+←→ — наклон · пробел — толчок\n");
+            sb.Append("Кадров/с: ").Append(fps.ToString("0")).Append(" · худший кадр: ").Append(Mathf.Max(winMax, prevWinMax).ToString("0")).Append(" мс · удар: ").Append(hitMs.ToString("0")).Append(" мс\n");
+            if (Application.isMobilePlatform) sb.Append("палец — вращать · тап — удар · щипок — масштаб\n2 пальца — сдвиг · тап двумя — сила · тап тремя — восстановить\n");
+            else
+            {
+                sb.Append("ЛКМ — вращать · колесо — ближе/дальше\nСКМ или Shift+ЛКМ — сдвиг · F, двойной клик — вид\n");
+                sb.Append("ПКМ или Ctrl+ЛКМ — удар · Q/W/E — сила · R — восстановить\n");
+                sb.Append("1–4 — разрезы, 0 — целая · [ ] — плоскость · H — скрыть · Esc — выход\n");
+                sb.Append("↑↓ — кивок · ←→ — поворот · Shift+←→ — наклон · пробел — толчок\n");
+            }
             sb.Append("Сила: ").Append(AnatView.Strengths[strength].name).Append(" · разрез: ").Append(AnatView.CutName[v.cut]);
             if (v.cut > 0) sb.Append(" (").Append(v.shift[v.cut] >= 0 ? "+" : "").Append(v.shift[v.cut].ToString("0.0")).Append(" см)");
             float3 pd = math.degrees(AnatSkin.Total);
             sb.Append('\n').Append("Поза: кивок ").Append(pd.x.ToString("0")).Append("°, поворот ").Append(pd.y.ToString("0")).Append("°, наклон ").Append(pd.z.ToString("0")).Append('°');
-            sb.Append('\n').Append("Кадров/с: ").Append(fps.ToString("0")).Append(" · треугольников: ").Append(v.Triangles.ToString("N0"));
+            sb.Append('\n').Append("Треугольников: ").Append(v.Triangles.ToString("N0"));
             sb.Append('\n').Append("Чанков: ").Append(v.Chunks).Append(" (с сеткой ").Append(v.ChunksDrawn).Append(')');
             sb.Append('\n').Append("Перестройка: ").Append(v.lastWhat).Append(" — ").Append(v.lastMs.ToString("0.0")).Append(" мс");
             if (v.lastRemoved > 0) sb.Append(", убрано ").Append(v.lastRemoved).Append(" вокс.");

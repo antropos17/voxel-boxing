@@ -34,7 +34,13 @@ namespace VoxProbe
         {
             var args = System.Environment.GetCommandLineArgs();
             int vi = System.Array.IndexOf(args, "-anatView"), si = System.Array.IndexOf(args, "-anatViewSelfTest");
-            if (vi >= 0 || si >= 0)
+            if (System.Array.IndexOf(args, "-anatBench") >= 0)
+            {
+                enabled = false;
+                gameObject.AddComponent<AnatBenchRunner>().anatMaterial = anatMaterial;
+                return;
+            }
+            if (vi >= 0 || si >= 0 || Application.isMobilePlatform)   // на телефоне аргументов нет: сразу просмотр с касанием
             {
                 viewMode = true; enabled = false;
                 var w = gameObject.AddComponent<AnatViewer>();

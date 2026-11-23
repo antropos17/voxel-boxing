@@ -7,6 +7,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
+using static VoxProbe.AnatBench;
 
 namespace VoxProbe.Editor
 {
@@ -33,64 +34,6 @@ namespace VoxProbe.Editor
             t.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0); t.Apply();
             File.WriteAllBytes(Path.Combine(OutDir, name + ".png"), t.EncodeToPNG());
             Object.DestroyImmediate(t); RenderTexture.active = null;
-        }
-
-        public struct Stage { public string name; public System.Func<float3, bool> where; public int max; public System.Func<AnatView, bool> done; }
-
-        /// Твёрдых ячеек головы в области (каждая вторая по осям — для условий стадий).
-        public static int Count(AnatView v, System.Func<float3, bool> where)
-        {
-            var h = v.a.head; int n = 0;
-            for (int z = 0; z < h.dims.z; z += 2) for (int y = 0; y < h.dims.y; y += 2) for (int x = 0; x < h.dims.x; x += 2)
-            { byte m = h.mat[h.Index(x, y, z)]; if (AnatMat.Cull(m) && where(h.Local(x, y, z))) n++; }
-            return n;
-        }
-
-        /// Открытого мозга (кора и белое вещество с пустым соседом) в своде.
-        public static int BrainOpen(AnatView v)
-        {
-            var h = v.a.head; int n = 0;
-            for (int z = 1; z < h.dims.z - 1; z++) for (int y = 1; y < h.dims.y - 1; y++) for (int x = 1; x < h.dims.x - 1; x++)
-            {
-                int i = h.Index(x, y, z); float3 lp = h.Local(x, y, z); if (!AnatDamage.Brainy(h.mat[i]) || lp.y < 7 || lp.z > 2 || lp.z < -5) continue;
-                if (h.mat[i + 1] == 0 || h.mat[i - 1] == 0 || h.mat[i + h.dims.x] == 0 || h.mat[i - h.dims.x] == 0 || h.mat[i + h.dims.x * h.dims.y] == 0 || h.mat[i - h.dims.x * h.dims.y] == 0) n++;
-            }
-            return n;
-        }
-
-        public static Stage[] Stages(AnatView v)
-        {
-            int face0 = Count(v, Face), left0 = Count(v, Left), top0 = Count(v, Above), mand0 = Solid(v.a.mand);
-            return new[]
-            {
-                new Stage { name = "1-jaw", max = 40, where = p => p.y < -3.5f && p.y > -10 && p.z > 1, done = w => Solid(w.a.mand) < mand0 * 0.15f },
-                new Stage { name = "2-face", max = 80, where = Face, done = w => Count(w, Face) < face0 * 0.12f },
-                new Stage { name = "3-vault", max = 40, where = p => p.y > 7.5f && math.abs(p.x) < 4 && p.z > -5 && p.z < 2, done = w => BrainOpen(w) > 600 },
-                new Stage { name = "4-half", max = 120, where = Left, done = w => Count(w, Left) < left0 * 0.1f },
-                new Stage { name = "5-stump", max = 300, where = Above, done = w => Count(w, Above) < top0 * 0.003f },
-            };
-        }
-        static int Solid(AnatGrid g) { int n = 0; for (int i = 0; i < g.Count; i++) if (AnatMat.Solid(g.mat[i])) n++; return n; }
-        public static bool Face(float3 p) => p.z > 4.5f && math.abs(p.x) < 5.5f && p.y > -6 && p.y < 6;
-        public static bool Left(float3 p) => p.x > 0.6f && p.y > AnatDamage.StumpY + 1.5f;
-        public static bool Above(float3 p) => p.y > AnatDamage.StumpY + 1.5f;
-
-        /// Тяжёлый удар по случайной открытой ячейке головы в области where: луч снаружи вдоль направления от центра головы.
-        public static bool Strike(AnatView v, System.Func<float3, bool> where, ref Unity.Mathematics.Random rnd, int str = 2)
-        {
-            var h = v.a.head;
-            for (int t = 0; t < 4000; t++)
-            {
-                int3 c = rnd.NextInt3(1, h.dims - 1); int i = h.Index(c.x, c.y, c.z); byte m = h.mat[i];
-                if (!AnatMat.Cull(m) || m == AnatMat.Covered) continue;
-                float3 p = h.Local(c.x, c.y, c.z); if (!where(p) || AnatDamage.Protected(p)) continue;
-                if (!(h.mat[i + 1] == 0 || h.mat[i - 1] == 0 || h.mat[i + h.dims.x] == 0 || h.mat[i - h.dims.x] == 0 || h.mat[i + h.dims.x * h.dims.y] == 0 || h.mat[i - h.dims.x * h.dims.y] == 0)) continue;
-                float3 o = math.normalizesafe(p - new float3(0, 1, 0), new float3(0, 0, 1));
-                var ray = new Ray(v.ToWorld(p + o * 25), -(Vector3)o);
-                if (!v.Pick(ray, out var hp, out _, out _)) continue;
-                v.Hit(hp, v.pickDir, str); return true;
-            }
-            return false;
         }
 
         /// Только свод: тяжёлые удары в темя до вскрытия и снимки мозга в проломе крупно.

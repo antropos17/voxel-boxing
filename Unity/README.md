@@ -122,6 +122,18 @@ start "" "Unity/Builds/AnatWin/VoxelAnat.exe" -anatView
 
 Как устроено: `Runtime/Anatomy/AnatView.cs` — ядро без ввода (разрез — настоящее снятие половины ячеек во всех телах и полный пересчёт видимости и сеток; удар — капсула вдоль луча, как `Bore` в `AnatShotsA2`, видимость по месту через `AnatVis.Opened`, перестраиваются только помеченные чанки). `AnatViewer.cs` — камера, ввод (Input System), подсказка (IMGUI, строка пересобирается 4 раза в секунду), самопроверка. Запускается из `AnatRunner` по флагу. Оторванные куски не падают: их поиска в анатомической голове пока нет, удар только убирает ячейки. Синяков, отёка и крови в просмотре нет (этап B).
 
+### Сборка анатомической головы и автозамер (этап B)
+
+```bash
+# закрыть свой редактор (unity close "$P"), затем:
+"$U" -batchmode -quit -projectPath "$P" -buildTarget Win64 -executeMethod VoxProbe.Editor.AnatSetup.BuildWindowsKeepScene -logFile Logs/win.log      # Builds/AnatWin/VoxelAnat.exe
+"$U" -batchmode -quit -projectPath "$P" -buildTarget Android -executeMethod VoxProbe.Editor.AnatSetup.BuildAndroidKeepScene -logFile Logs/android.log # Builds/AnatAndroid/VoxelAnat.apk
+# автозамер разрушения до культи (seed 77), результат в JSON
+Unity/Builds/AnatWin/VoxelAnat.exe -anatBench -screen-width 540 -screen-height 1170 -screen-fullscreen 0 -anatBenchOut "$(pwd -W)/Unity/ProbeResults/b3/bench-win-1.json"
+```
+
+`…KeepScene` не вызывают `Setup()` и не пересохраняют `Anatomy.unity` (старые `BuildWindows` / `BuildAndroid` вызывают). Аргументы автозамера: `-anatBenchOut файл`, `-anatBenchSeed N`, `-anatBenchNoQuit`; без `-anatBenchOut` файл идёт в `persistentDataPath`. На телефоне сборка сразу открывает просмотр: палец — вращать, тап — удар, щипок — масштаб, два пальца — сдвиг, тап двумя — сила, тап тремя — восстановить; первая строка подсказки — кадры/с, худший кадр, время удара. Результаты и памятка: `ANATOMY-B.md`, «Часть 3, сборка и замер».
+
 ## Замер
 
 Windows, кадр телефона 1080×2340 (рисуется в текстуру этого размера, окно 480×1040 показывает её уменьшенной):
