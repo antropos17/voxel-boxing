@@ -248,5 +248,78 @@ namespace VoxProbe.Tests
             }
             finally { v.Dispose(); }
         }
+
+        /// Часть 3: журнал событий ограничен — сверх MaxEvents записи не добавляются, только счёт потерянных.
+        [Test]
+        public void EventsCapped()
+        {
+            var v = new AnatView(null, new Vector3(0, 1.6f, 0), null);
+            try
+            {
+                var d = v.sim; int before = d.events.Count;
+                for (int k = 0; k < 1000; k++) if (d.CanLog()) d.events.Add("x");
+                Assert.AreEqual(AnatDamage.MaxEvents, d.events.Count);
+                Assert.AreEqual(1000 - (AnatDamage.MaxEvents - before), d.eventsLost);
+                var r = new System.Random(5);
+                for (int k = 0; k < 10; k++) v.Hit(new float3((float)(r.NextDouble() * 8 - 4), (float)(r.NextDouble() * 10 - 2), 14), new float3(0, 0, -1), 2);
+                Assert.AreEqual(AnatDamage.MaxEvents, d.events.Count, "удары не дописывают сверх предела");
+            }
+            finally { v.Dispose(); }
+        }
+
+        /// Часть 3: мелкий кусок держит блок состояний по своему размеру, а не чанк 32³; состояния переносятся на свои места.
+        [Test]
+        public void SmallPieceStateIsSmall()
+        {
+            var v = new AnatView(null, new Vector3(0, 1.6f, 0), null);
+            var ps = new AnatPieces(null, null);
+            var cells = new Unity.Collections.NativeList<int>(128, Unity.Collections.Allocator.Persistent);
+            try
+            {
+                var h = v.a.head;
+                for (int i = 0; i < h.Count && cells.Length < 100; i++) if (h.mat[i] == AnatMat.Skin) cells.Add(i);
+                for (int k = 0; k < cells.Length; k++) { int i = cells[k]; v.sim.st.Set(i % h.dims.x, (i / h.dims.x) % h.dims.y, i / (h.dims.x * h.dims.y), new VS { blood = (byte)(10 + k) }); }
+                var p = ps.Make(h, v.sim.st, cells.AsArray(), 0, cells.Length, 0, "t");
+                Assert.AreEqual(cells.Length, p.cells);
+                Assert.Less(p.st.Bytes, AnatState.CV * 12 / 8, "блок состояний мелкого куска");
+                for (int k = 0; k < cells.Length; k++)
+                {
+                    int i = cells[k]; int3 l = new int3(i % h.dims.x, (i / h.dims.x) % h.dims.y, i / (h.dims.x * h.dims.y)) - p.lo + 1;
+                    Assert.AreEqual(10 + k, p.st.Get(l.x, l.y, l.z).blood, "состояние ячейки " + k);
+                }
+                Debug.Log("ANAT_TEST small piece: dims " + p.g.dims + " state bytes " + p.st.Bytes);
+            }
+            finally { ps.Clear(); cells.Dispose(); v.Dispose(); }
+        }
+
+        /// Часть 3: одинаковые удары и кадры дают одинаковый итог (поиск кусков разбирается в назначенном кадре, а не
+        /// когда джоб успел): те же убранные ячейки, куски и их размеры, та же решётка головы.
+        [Test]
+        public void SameHitsSameResult()
+        {
+            string Run()
+            {
+                var v = new AnatView(null, new Vector3(0, 1.6f, 0), null);
+                try
+                {
+                    var r = new System.Random(21); var h = v.a.head;
+                    for (int k = 0; k < 30; k++)
+                    {
+                        var p = new float3((float)(r.NextDouble() * 12 - 6), (float)(r.NextDouble() * 16 - 4), 14);
+                        v.Hit(p, math.normalize(new float3((float)(r.NextDouble() - 0.5), (float)(r.NextDouble() - 0.5), -2)), 2);
+                        for (int s = 0; s < 3; s++) v.Tick(1 / 30f, 12);
+                    }
+                    long hash = 17; for (int i = 0; i < h.Count; i++) hash = hash * 31 + h.mat[i];
+                    var sb = new System.Text.StringBuilder();
+                    sb.Append("removed ").Append(v.sim.removed).Append(" made ").Append(v.pieces.made).Append(" crumbs ").Append(v.crumbs).Append(" off ").Append(v.detachedBodies).Append(" hash ").Append(hash).Append(" pieces");
+                    foreach (var p in v.pieces.list) sb.Append(' ').Append(p.cells);
+                    return sb.ToString();
+                }
+                finally { v.Dispose(); }
+            }
+            string a = Run(), b = Run();
+            Debug.Log("ANAT_TEST same: " + a);
+            Assert.AreEqual(a, b);
+        }
     }
 }

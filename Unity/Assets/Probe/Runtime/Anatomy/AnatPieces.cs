@@ -18,6 +18,7 @@ namespace VoxProbe
         public quaternion q = quaternion.identity;
         public float age, still; public bool asleep, ready; public int cells; public string what; public int id;
         public float3 ext;                 // полуразмер решётки, см
+        public int3 lo; public float3 sum;  // сборка по частям: угол рамки в ячейках источника, сумма центров ячеек
     }
 
     public class AnatPieces
@@ -26,36 +27,55 @@ namespace VoxProbe
         public const float Floor = -26f;   // пол, см рамки головы (низ шеи на −20)
         public readonly List<AnatPiece> list = new List<AnatPiece>();
         readonly Transform root; readonly Material material;
+        readonly AnatSpare spare;          // объекты и сетки чанков убранных кусков: новый кусок берёт их, а не создаёт
         public int made, trimmed, crumbs, peak; int nextId = 100;
         public int Cells { get { int c = 0; foreach (var p in list) c += p.cells; return c; } }
 
-        public AnatPieces(Transform root, Material material) { this.root = root; this.material = material; }
+        public AnatPieces(Transform root, Material material) { this.root = root; this.material = material; if (root != null) spare = new AnatSpare(root); }
 
         /// Новый кусок из ячеек src (индексы решётки src). Позиция — как у головы в текущей позе (жёстко с черепом у точки центра).
         public AnatPiece Make(AnatGrid src, AnatState srcSt, NativeArray<int> cells, int from, int count, float3 vel, string what)
         {
-            int3 mn = int.MaxValue, mx = int.MinValue; float3 sum = 0;
+            int3 mn = int.MaxValue, mx = int.MinValue;
             for (int k = 0; k < count; k++)
             {
                 int i = cells[from + k]; int3 c = Cell(src, i);
                 mn = math.min(mn, c); mx = math.max(mx, c);
             }
+            var p = Begin(src, mn, mx);
+            Fill(p, src, srcSt, cells, from, count);
+            return End(p, src, vel, what);
+        }
+
+        /// Кусок по частям (большой остров разбирается по кадрам): Begin — решётка по рамке ячеек [mn, mx] источника,
+        /// Fill — перенести часть ячеек (с частями, зонами и состояниями), End — тело с сеткой и физика (null — ячеек нет).
+        public AnatPiece Begin(AnatGrid src, int3 mn, int3 mx)
+        {
             int3 dims = mx - mn + 3;
             var g = new AnatGrid("piece", dims, src.step, src.org + (float3)(mn - 1) * src.step);
-            var st = new AnatState(g, 1);
-            int n = 0;
+            return new AnatPiece { g = g, st = new AnatState(g, 1), lo = mn };
+        }
+
+        public void Fill(AnatPiece p, AnatGrid src, AnatState srcSt, NativeArray<int> cells, int from, int count)
+        {
+            var g = p.g; var st = p.st;
             for (int k = 0; k < count; k++)
             {
                 int i = cells[from + k]; byte m = src.mat[i];
                 if (m == AnatMat.Empty || m == AnatMat.Air || m == AnatMat.Covered) continue;
-                int3 c = Cell(src, i), l = c - mn + 1; int j = g.Index(l.x, l.y, l.z);
+                int3 c = Cell(src, i), l = c - p.lo + 1; int j = g.Index(l.x, l.y, l.z);
                 g.mat[j] = m; g.part[j] = src.part[i]; g.zone[j] = src.zone[i];
                 if (srcSt != null) { var v = srcSt.Get(c.x, c.y, c.z); if (!v.Zero) st.Set(l.x, l.y, l.z, v); }
-                sum += g.Local(l.x, l.y, l.z); n++;
+                p.sum += g.Local(l.x, l.y, l.z); p.cells++;
             }
-            if (n == 0) { st.Dispose(); g.Dispose(); return null; }
-            var p = new AnatPiece { g = g, st = st, cells = n, what = what, id = nextId++, v = vel, ext = (float3)dims * g.step * 0.5f };
-            p.com = sum / n;
+        }
+
+        public AnatPiece End(AnatPiece p, AnatGrid src, float3 vel, string what)
+        {
+            if (p.cells == 0) { Drop(p); return null; }
+            var g = p.g;
+            p.what = what; p.id = nextId++; p.v = vel; p.ext = (float3)g.dims * g.step * 0.5f;
+            p.com = p.sum / p.cells;
             // в позе: кусок стартует там, где его видно (поворот черепа у центра масс)
             float3 rest = math.mul(src.rot, p.com) + src.pos;
             if (AnatSkin.on) { float3 posed = AnatSkin.Skin(rest, out float3x3 M); p.x = posed; p.q = new quaternion(M); }
@@ -64,13 +84,16 @@ namespace VoxProbe
             p.w = rnd.NextFloat3(-6, 6) / math.max(1, math.length(p.ext) * 0.5f);
             if (root != null)
             {
-                p.body = new AnatBody(g, root, material, p.id) { cull = false, st = st };
+                p.body = new AnatBody(g, root, material, p.id, spare) { cull = false, st = p.st };
                 Place(p);
             }
             list.Add(p); made++;
             Trim(); peak = math.max(peak, list.Count);
             return p;
         }
+
+        /// Бросить недостроенный кусок (Begin без End).
+        public void Drop(AnatPiece p) { p.st.Dispose(); p.g.Dispose(); }
 
         static int3 Cell(AnatGrid g, int i) => new int3(i % g.dims.x, (i / g.dims.x) % g.dims.y, i / (g.dims.x * g.dims.y));
 

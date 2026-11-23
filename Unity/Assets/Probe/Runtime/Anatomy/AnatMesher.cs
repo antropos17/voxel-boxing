@@ -131,7 +131,7 @@ namespace VoxProbe
                             int gx = org.x + px - 2; if (gx < 0 || gx >= W) continue;
                             int s = sv.slot[gx / CS + sv.nch.x * (gy / CS + sv.nch.y * (gz / CS))];
                             if (s < 0) continue;
-                            c.ps[px + P * (py + P * pz)] = sv.pool[s + (gx % CS) + CS * ((gy % CS) + CS * (gz % CS))];
+                            c.ps[px + P * (py + P * pz)] = sv.pool[s + (gx % CS) + sv.bs.x * ((gy % CS) + sv.bs.y * (gz % CS))];
                         }
                     }
                 }

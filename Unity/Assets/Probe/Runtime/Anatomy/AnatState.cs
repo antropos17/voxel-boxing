@@ -20,6 +20,8 @@ namespace VoxProbe
         public const int CS = AnatMesher.CS, CV = CS * CS * CS;
         public readonly AnatGrid g;
         public readonly int3 nch;
+        public readonly int3 bs;          // блок состояний чанка: CS по осям, где решётка не уже чанка, иначе размер решётки (мелкий кусок — маленький блок)
+        public readonly int BV;           // ячеек в блоке
         public NativeArray<int> slot;     // номер чанка → начало в pool или −1
         public NativeList<VS> pool;
         public int Chunks { get; private set; }
@@ -29,13 +31,14 @@ namespace VoxProbe
         {
             this.g = g;
             nch = (g.dims + CS - 1) / CS;
+            bs = math.min(g.dims, CS); BV = bs.x * bs.y * bs.z;
             slot = new NativeArray<int>(nch.x * nch.y * nch.z, Allocator.Persistent);
             for (int i = 0; i < slot.Length; i++) slot[i] = -1;
-            pool = new NativeList<VS>(CV * reserveChunks, Allocator.Persistent);
+            pool = new NativeList<VS>(BV * reserveChunks, Allocator.Persistent);
         }
 
         int Chunk(int x, int y, int z) => (x / CS) + nch.x * ((y / CS) + nch.y * (z / CS));
-        static int Local(int x, int y, int z) => (x % CS) + CS * ((y % CS) + CS * (z % CS));
+        int Local(int x, int y, int z) => (x % CS) + bs.x * ((y % CS) + bs.y * (z % CS));
 
         /// Индекс в pool или −1 (если create — заводит чанк).
         public int Idx(int x, int y, int z, bool create)
@@ -44,7 +47,7 @@ namespace VoxProbe
             if (s < 0)
             {
                 if (!create) return -1;
-                s = pool.Length; pool.Resize(s + CV, NativeArrayOptions.ClearMemory); slot[c] = s; Chunks++;
+                s = pool.Length; pool.Resize(s + BV, NativeArrayOptions.ClearMemory); slot[c] = s; Chunks++;
             }
             return s + Local(x, y, z);
         }
@@ -60,7 +63,7 @@ namespace VoxProbe
     {
         [ReadOnly] public NativeArray<VS> pool;
         [ReadOnly] public NativeArray<int> slot;
-        public int3 nch;
+        public int3 nch, bs;              // bs — блок состояний чанка (AnatState.bs)
         public bool on;
     }
 }

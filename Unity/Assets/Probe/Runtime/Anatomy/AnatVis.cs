@@ -49,9 +49,10 @@ namespace VoxProbe
 
         /// Ячейки головы стали пустыми (удалена ткань): видимость обновляется от них. Ячейки, сменившие видимость,
         /// и тела рядом помечаются для перестройки сетки (AnatGrid.Touch). Возвращает число сменивших видимость ячеек.
+        readonly System.Diagnostics.Stopwatch openClock = new System.Diagnostics.Stopwatch();
         public int Opened(NativeArray<int> cells)
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = openClock; sw.Restart();
             var box = new NativeArray<int>(7, Allocator.TempJob);
             var fl = new NativeList<int>(1024, Allocator.TempJob);
             new FloodJob { mat = h.mat, vis = h.vis, opened = cells, box = box, dims = h.dims, full = false, flipped = fl }.Run();

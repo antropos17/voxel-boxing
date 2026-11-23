@@ -27,19 +27,21 @@ namespace VoxProbe
         static MaterialPropertyBlock mpb;
         static readonly int ChunkOrgId = Shader.PropertyToID("_ChunkOrg"), BodyParId = Shader.PropertyToID("_BodyPar");
         // перестройка части чанков (джобами)
-        JobHandle job; Mesh.MeshDataArray jobData; NativeArray<int3> jobOrg; NativeArray<long> jobSt; int[] jobIdx; bool inFlight;
+        JobHandle job; Mesh.MeshDataArray jobData; NativeArray<int3> jobOrg; NativeArray<long> jobSt; readonly int[] jobIdx; int jobN; bool inFlight;
+        readonly Mesh[][] jobMeshes;               // массивы сеток по числу чанков в партии (заводятся один раз, без выделений в кадре)
+        readonly AnatSpare spare;                  // у куска: откуда брать и куда возвращать объекты чанков
         public int rebuilt; public double rebuildMs;
 
         public int ChunkCount => nch.x * nch.y * nch.z;
         public int3 ChunkCoord(int i) => new int3(i % nch.x, (i / nch.x) % nch.y, i / (nch.x * nch.y));
 
-        public AnatBody(AnatGrid g, Transform parent, Material material, int bodyId)
+        public AnatBody(AnatGrid g, Transform parent, Material material, int bodyId, AnatSpare spare = null)
         {
-            this.g = g; isHead = g.name == "head";
+            this.g = g; isHead = g.name == "head"; this.spare = spare;
             if (isHead) style |= AnatMesher.StyleBend;   // голова гнётся в шее (AnatSkin); челюсть, глаза и зубы — жёстко
             bnd = new Bounds(new Vector3(16, 16, 16), Vector3.one * (40 + 2 * 15f / g.step));
             mpb ??= new MaterialPropertyBlock();
-            root = new GameObject(g.name).transform;
+            root = spare != null && spare.roots.Count > 0 ? spare.roots.Pop() : new GameObject(g.name).transform;
             root.SetParent(parent, false);
             root.localPosition = (Vector3)(g.World(g.org) * 0.01f);
             root.localRotation = new quaternion(g.rot);
@@ -47,19 +49,26 @@ namespace VoxProbe
             nch = (g.dims + AnatMesher.CS - 1) / AnatMesher.CS;
             int n = ChunkCount;
             rs = new MeshRenderer[n]; meshes = new Mesh[n]; quads = new int[n]; naive = new int[n]; dirty = new bool[n];
+            jobIdx = new int[n]; jobMeshes = new Mesh[n + 1][];
             for (int i = 0; i < n; i++)
             {
-                var go = new GameObject("c" + i);
+                var go = spare != null && spare.chunks.Count > 0 ? spare.chunks.Pop() : null;
+                MeshRenderer r;
+                if (go != null) { meshes[i] = go.GetComponent<MeshFilter>().sharedMesh; r = rs[i] = go.GetComponent<MeshRenderer>(); }
+                else
+                {
+                    go = new GameObject("c" + i);
+                    meshes[i] = new Mesh { name = g.name + i };
+                    meshes[i].MarkDynamic();
+                    go.AddComponent<MeshFilter>().sharedMesh = meshes[i];
+                    r = rs[i] = go.AddComponent<MeshRenderer>();
+                    r.shadowCastingMode = ShadowCastingMode.Off; r.receiveShadows = false;
+                    r.lightProbeUsage = LightProbeUsage.Off; r.reflectionProbeUsage = ReflectionProbeUsage.Off;
+                }
                 go.transform.SetParent(root, false);
                 int3 c = ChunkCoord(i) * AnatMesher.CS;
                 go.transform.localPosition = (Vector3)(float3)c;
-                meshes[i] = new Mesh { name = g.name + i };
-                meshes[i].MarkDynamic();
-                go.AddComponent<MeshFilter>().sharedMesh = meshes[i];
-                var r = rs[i] = go.AddComponent<MeshRenderer>();
                 r.sharedMaterial = material;
-                r.shadowCastingMode = ShadowCastingMode.Off; r.receiveShadows = false;
-                r.lightProbeUsage = LightProbeUsage.Off; r.reflectionProbeUsage = ReflectionProbeUsage.Off;
                 mpb.SetVector(ChunkOrgId, new Vector4(c.x, c.y, c.z, bodyId));
                 float3 ec = -g.org / g.step;   // центр тела (глаз — ось взгляда) в ячейках: шейдер рисует радужку и зрачок кругами
                 mpb.SetVector(BodyParId, new Vector4(g.step, ec.x, ec.y, ec.z));
@@ -72,9 +81,9 @@ namespace VoxProbe
 
         StateView View()
         {
-            if (st != null) return new StateView { pool = st.pool.AsArray(), slot = st.slot, nch = st.nch, on = true };
+            if (st != null) return new StateView { pool = st.pool.AsArray(), slot = st.slot, nch = st.nch, bs = st.bs, on = true };
             if (!nopool.IsCreated) { nopool = new NativeArray<VS>(1, Allocator.Persistent); noslot = new NativeArray<int>(1, Allocator.Persistent); }
-            return new StateView { pool = nopool, slot = noslot, nch = 1, on = false };
+            return new StateView { pool = nopool, slot = noslot, nch = 1, bs = 1, on = false };
         }
 
         public void MarkDirty(int chunk) { if (!dirty[chunk]) { dirty[chunk] = true; dirtyCount++; } }
@@ -96,9 +105,9 @@ namespace VoxProbe
         public void Schedule(NativeArray<VertexAttributeDescriptor> layout, int max)
         {
             if (inFlight || dirtyCount == 0) return;
-            var list = new System.Collections.Generic.List<int>();
-            for (int i = 0; i < dirty.Length && list.Count < max; i++) if (dirty[i]) { list.Add(i); dirty[i] = false; dirtyCount--; }
-            int n = list.Count; jobIdx = list.ToArray();
+            int n = 0;
+            for (int i = 0; i < dirty.Length && n < max; i++) if (dirty[i]) { jobIdx[n++] = i; dirty[i] = false; dirtyCount--; }
+            jobN = n;
             jobOrg = new NativeArray<int3>(n, Allocator.TempJob); jobSt = new NativeArray<long>(n * 4, Allocator.TempJob);
             for (int k = 0; k < n; k++) jobOrg[k] = ChunkCoord(jobIdx[k]) * AnatMesher.CS;
             jobData = Mesh.AllocateWritableMeshData(n);
@@ -110,7 +119,7 @@ namespace VoxProbe
         {
             if (!inFlight) return;
             job.Complete(); inFlight = false;
-            var ms = new Mesh[jobIdx.Length];
+            var ms = jobMeshes[jobN] ??= new Mesh[jobN];
             for (int k = 0; k < ms.Length; k++) ms[k] = meshes[jobIdx[k]];
             Mesh.ApplyAndDisposeWritableMeshData(jobData, ms, MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices);
             double sum = 0, freq = System.Diagnostics.Stopwatch.Frequency;
@@ -156,9 +165,26 @@ namespace VoxProbe
         {
             if (inFlight) Complete();
             if (nopool.IsCreated) { nopool.Dispose(); noslot.Dispose(); }
+            if (spare != null && root != null)
+            {
+                // кусок: объекты чанков с сетками и корень — в запас (во время игры без создания и DestroyImmediate)
+                for (int i = 0; i < rs.Length; i++) { rs[i].enabled = false; rs[i].transform.SetParent(spare.hold, false); spare.chunks.Push(rs[i].gameObject); }
+                root.SetParent(spare.hold, false); spare.roots.Push(root);
+                return;
+            }
             foreach (var m in meshes) if (m != null) Object.DestroyImmediate(m);
             if (root != null) Object.DestroyImmediate(root.gameObject);
         }
+    }
+
+    /// Запас объектов для тел кусков: объекты чанков (MeshFilter + MeshRenderer + своя сетка) и корни. Лежат под неактивным hold
+    /// (удаляются вместе с корнем просмотра). Размер ограничен пиком одновременно живых кусков (AnatPieces.MaxPieces).
+    public class AnatSpare
+    {
+        public readonly Transform hold;
+        public readonly System.Collections.Generic.Stack<GameObject> chunks = new System.Collections.Generic.Stack<GameObject>();
+        public readonly System.Collections.Generic.Stack<Transform> roots = new System.Collections.Generic.Stack<Transform>();
+        public AnatSpare(Transform parent) { hold = new GameObject("spare").transform; hold.SetParent(parent, false); hold.gameObject.SetActive(false); }
     }
 
     public static class AnatPalette

@@ -63,6 +63,11 @@ namespace VoxProbe
         public readonly List<Drop> drops = new List<Drop>();
         public readonly bool[] eyeClosed = new bool[2];
         public readonly List<string> events = new List<string>();
+        public const int MaxEvents = 128;           // предел журнала: дальше строки не собираются, только счёт eventsLost
+        public int eventsLost;
+        /// Можно ли записать событие (проверять до склейки строки).
+        public bool CanLog() { if (events.Count < MaxEvents) return true; eventsLost++; return false; }
+        readonly System.Diagnostics.Stopwatch hitClock = new System.Diagnostics.Stopwatch(), stepClock = new System.Diagnostics.Stopwatch();
         public readonly List<(float t, string mat, byte zone)> exposed = new List<(float, string, byte)>();
         readonly HashSet<int> vessels = new HashSet<int>();
         readonly bool[] macerDone = new bool[AnatZone.Count * 4];
@@ -193,7 +198,7 @@ namespace VoxProbe
         /// Удар в точку p (см, рамка головы) по направлению dir, сила E в единицах веба (джеб ≈ 1, мощный 3,4–4,6).
         public HitInfo Hit(float3 p, float3 dir, float E, bool power)
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = hitClock; sw.Restart();
             var r = new HitInfo();
             dir = math.normalize(dir);
             int3 hc = new int3(-1);
@@ -358,7 +363,7 @@ namespace VoxProbe
                 case AnatPart.NasalMucosaV: AddWound(x, y, z, 4, WNose, 50, "кровь из носа: " + nm); break;
                 default: AddWound(x, y, z, 4, WVein, 50, "вена: " + nm); break;
             }
-            events.Add(F1(time) + " с: вскрыт сосуд — " + nm);
+            if (CanLog()) events.Add(F1(time) + " с: вскрыт сосуд — " + nm);
         }
 
         /// Разрыв кожи линией: у брови и скулы — вдоль костного края (горизонтально), иначе поперёк волокон мышцы под кожей
@@ -414,7 +419,7 @@ namespace VoxProbe
                     Put(xx, yy, zz, v);
                 }
             }
-            events.Add(F1(time) + " с: рассечение — " + AnatZone.Names[zone] + ", " + (line.Count) + " ячеек кожи, направление (" + F1(t.x) + ", " + F1(t.y) + ", " + F1(t.z) + ")");
+            if (CanLog()) events.Add(F1(time) + " с: рассечение — " + AnatZone.Names[zone] + ", " + (line.Count) + " ячеек кожи, направление (" + F1(t.x) + ", " + F1(t.y) + ", " + F1(t.z) + ")");
             return rem;
         }
 
@@ -445,7 +450,7 @@ namespace VoxProbe
             return did;
         }
 
-        void Once(byte zone, int k, string what) { if (macerDone[zone * 4 + k]) return; macerDone[zone * 4 + k] = true; events.Add(F1(time) + " с: " + AnatZone.Names[zone] + " — " + what); }
+        void Once(byte zone, int k, string what) { if (macerDone[zone * 4 + k]) return; macerDone[zone * 4 + k] = true; if (CanLog()) events.Add(F1(time) + " с: " + AnatZone.Names[zone] + " — " + what); }
 
         IEnumerable<int3> Ball(float3 c, float R)
         {
@@ -527,7 +532,7 @@ namespace VoxProbe
 
         public void Step(float dt)
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = stepClock; sw.Restart();
             time += dt;
             for (int k = wounds.Count - 1; k >= 0; k--)
             {
@@ -653,7 +658,7 @@ namespace VoxProbe
                     Put(q.x, q.y, q.z, new VS { swell = (byte)math.min(255, sw / 0.005f * 0.5f), rt = now, bruise = (byte)br, bt = now, red = (byte)rd });
                     filled++;
                 }
-                events.Add(F1(time) + " с: " + (s == 0 ? "левый" : "правый") + " глаз закрыт отёком века (средний отёк " + F1(sw * 10) + " мм, " + filled + " ячеек)");
+                if (CanLog()) events.Add(F1(time) + " с: " + (s == 0 ? "левый" : "правый") + " глаз закрыт отёком века (средний отёк " + F1(sw * 10) + " мм, " + filled + " ячеек)");
             }
         }
 
@@ -723,7 +728,7 @@ namespace VoxProbe
                 bool under = rad < R && al > 0 && (m == AnatMat.Dura || m == AnatMat.Csf);
                 if (ring || under) { Remove(x, y, z); cut++; }
             }
-            events.Add(F1(time) + " с: перелом — " + AnatZone.Names[zone] + ", отломок ~" + F1(Rf * 2) + " см, трещина " + cut + " ячеек");
+            if (CanLog()) events.Add(F1(time) + " с: перелом — " + AnatZone.Names[zone] + ", отломок ~" + F1(Rf * 2) + " см, трещина " + cut + " ячеек");
         }
 
         /// Оболочка и ликвор в шаре: оболочка рвётся, ликвор вытекает — открываются извилины коры с бороздами.
@@ -768,7 +773,7 @@ namespace VoxProbe
                 float3 d = h.Local(x, y, z) - c; if (math.lengthsq(d) > R * R * 1.6f || rng.NextDouble() > 0.33 || !Exposed(x, y, z)) continue;
                 var v = Get(x, y, z); float ba = 40 + 60 * (float)rng.NextDouble(); v.blt = Wt(v.blt, v.blood, now, ba); v.blood = Add8(v.blood, ba); Put(x, y, z, v);
             }
-            events.Add(F1(time) + " с: разрыв — шар " + F1(R) + " см, " + cut + " ячеек");
+            if (CanLog()) events.Add(F1(time) + " с: разрыв — шар " + F1(R) + " см, " + cut + " ячеек");
         }
     }
 }
