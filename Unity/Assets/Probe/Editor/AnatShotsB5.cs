@@ -48,8 +48,10 @@ namespace VoxProbe.Editor
             Grab(name);
         }
 
+        static bool noShots;
         static void Grab(string name)
         {
+            if (noShots) return;
             Shader.SetGlobalFloat("_AnatTime", v.sim.time);
             cam.Render();
             RenderTexture.active = rt;
@@ -159,8 +161,10 @@ namespace VoxProbe.Editor
             return sb.ToString();
         }
 
-        public static void Run(string tag)
+        /// wide = false — без доработки синяка и крови (AnatDamage.Wide), для замера «до» тем же кодом; shots = false — только числа.
+        public static void Run(string tag, bool wide = true, bool shots = true)
         {
+            AnatDamage.Wide = wide; noShots = !shots;
             dir = Path.Combine("Shots/anatomy-b5", tag); Directory.CreateDirectory(dir);
             var sb = new StringBuilder("{\n");
             Scene();
@@ -170,14 +174,14 @@ namespace VoxProbe.Editor
             v = new AnatView(null, new Vector3(0, 1.6f, 0), AnatShots.EnsureMaterial());
             sb.Append("  \"stages\": [\n");
             var stages = Stages(v); var rnd = new Unity.Mathematics.Random(77);
-            int hitsAll = 0, fr0 = 0;
+            int hitsAll = 0, fr0 = 0; var clk = new System.Diagnostics.Stopwatch(); var hitMs = new List<double>(); var tickMs = new List<double>();
             foreach (var st in stages)
             {
                 int k = 0;
                 for (; k < st.max && !st.done(v); k++)
                 {
-                    if (Strike(v, st.where, ref rnd)) hitsAll++;
-                    for (int f = 0; f < 3; f++) v.Tick(1 / 30f, 12);
+                    clk.Restart(); if (Strike(v, st.where, ref rnd)) hitsAll++; hitMs.Add(clk.Elapsed.TotalMilliseconds);
+                    for (int f = 0; f < 3; f++) { clk.Restart(); v.Tick(1 / 30f, 12); tickMs.Add(clk.Elapsed.TotalMilliseconds); }
                 }
                 v.Settle(); for (int f = 0; f < 60; f++) v.Tick(1 / 30f, 64); v.Settle();
                 sb.Append("    {\"stage\": \"").Append(st.name).Append("\", \"hits\": ").Append(k).Append(", \"tris\": ").Append(v.Triangles)
@@ -192,6 +196,9 @@ namespace VoxProbe.Editor
                 if (st.name == "5-stump") { Shot(st.name + "-top", -15, 70, 0.4f, new float3(0, -10.5f, 0)); Shot(st.name + "-close", -25, 55, 0.25f, new float3(0, -10.5f, -1)); }
             }
             sb.Length -= 2; sb.Append("\n  ],\n");
+            hitMs.Sort(); tickMs.Sort();
+            sb.Append("  \"hitMs\": {\"median\": ").Append(F(hitMs[hitMs.Count / 2])).Append(", \"worst\": ").Append(F(hitMs[hitMs.Count - 1]))
+              .Append("}, \"tickMs\": {\"median\": ").Append(F(tickMs[tickMs.Count / 2])).Append(", \"worst\": ").Append(F(tickMs[tickMs.Count - 1])).Append("}, \"spreadCells\": ").Append(v.sim.spreadCells).Append(",\n");
             sb.Append("  \"hits\": ").Append(hitsAll).Append(", \"stumpTris\": ").Append(v.Triangles).Append(", \"pieceTris\": ").Append(v.PieceTriangles).Append(",\n");
             sb.Append("  \"fractureList\": [");
             foreach (var f in v.sim.fractures) sb.Append("[").Append(F(f.x)).Append(", ").Append(F(f.y)).Append(", ").Append(F(f.z)).Append("], ");
@@ -199,6 +206,7 @@ namespace VoxProbe.Editor
             sb.Append("]\n}\n");
             File.WriteAllText(Path.Combine(dir, "b5.json"), sb.ToString());
             v.Dispose(); v = null; rt.Release(); rtBig.Release();
+            AnatDamage.Wide = true; noShots = false;
             Debug.Log("ANAT_B5_OK " + tag);
         }
     }

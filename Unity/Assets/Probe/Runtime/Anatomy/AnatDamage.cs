@@ -196,6 +196,15 @@ namespace VoxProbe
         // ---------- удар ----------
         static readonly List<(int i, int x, int y, int z, float p)> PL = new List<(int, int, int, int, float)>();
         static readonly List<int3> FAIL = new List<int3>();
+        // часть 5, доработка: синяк шире пятна — квадрат расстояния до оси пятна у ячеек PL и кольцо кожи вокруг пятна
+        static readonly List<float> PR = new List<float>();
+        static readonly List<(int x, int y, int z, float r2)> RING = new List<(int, int, int, float)>();
+        /// Предел ячеек, которые кровь смачивает растеканием вбок за бой (MaxSpread); счётчик — spreadCells.
+        public const int MaxSpread = 12000;
+        public int spreadCells;
+        /// Выключатель доработки (синяк шире пятна и растекание крови) — для замера «до / после» в одном коде; по умолчанию включено.
+        public static bool Wide = true;
+        static float H3(int x, int y, int z) { uint q = (uint)(x * 73856093 ^ y * 19349663 ^ z * 83492791); q ^= q >> 13; q *= 0x5bd1e995; q ^= q >> 15; return (q & 0xFFFF) / 65536f; }
 
         /// Удар в точку p (см, рамка головы) по направлению dir, сила E в единицах веба (джеб ≈ 1, мощный 3,4–4,6).
         public HitInfo Hit(float3 p, float3 dir, float E, bool power)
@@ -231,7 +240,7 @@ namespace VoxProbe
             float3 l = math.normalize(-n * 0.7f + dir * 0.3f);          // ось пятна — внутрь
             float Rc = (power ? 2.4f : 1.7f) / S, R2 = Rc * Rc * 2.1f, hs = 1.4f / S;
             int R = (int)math.ceil(Rc * 1.5f + 2);
-            PL.Clear(); FAIL.Clear();
+            PL.Clear(); FAIL.Clear(); PR.Clear(); RING.Clear(); float Ro2 = Rc * Rc * 2.9f;
             float best = 0; byte zone = h.zone[h.Index(hc.x, hc.y, hc.z)];
             for (int dz = -R; dz <= R; dz++) for (int dy = -R; dy <= R; dy++) for (int dx = -R; dx <= R; dx++)
             {
@@ -239,10 +248,11 @@ namespace VoxProbe
                 int i = h.Index(x, y, z); byte m = h.mat[i];
                 if (!AnatMat.Cull(m) || m == AnatMat.Covered) continue;
                 float al = -(dx * l.x + dy * l.y + dz * l.z); if (al < -hs) continue;
-                float px = dx + al * l.x, py = dy + al * l.y, pz = dz + al * l.z, pr2 = px * px + py * py + pz * pz; if (pr2 > R2) continue;
+                float px = dx + al * l.x, py = dy + al * l.y, pz = dz + al * l.z, pr2 = px * px + py * py + pz * pz;
+                if (pr2 > R2) { if (pr2 <= Ro2 && al < hs && Surface(m) && Exposed(x, y, z)) RING.Add((x, y, z, pr2)); continue; }
                 if (!Exposed(x, y, z)) continue;
-                float pp = math.exp(-pr2 / (Rc * Rc) * 1.4f) * math.min(1.5f, 1 + al / hs); if (pp < 0.04f) continue;
-                PL.Add((i, x, y, z, pp));
+                float pp = math.exp(-pr2 / (Rc * Rc) * 1.4f) * math.min(1.5f, 1 + al / hs); if (pp < 0.04f) { if (Surface(m)) RING.Add((x, y, z, pr2)); continue; }
+                PL.Add((i, x, y, z, pp)); PR.Add(pr2);
                 if (pp > best && h.zone[i] != 0) { best = pp; zone = h.zone[i]; }
             }
             AnatProf.Lap(AnatProf.Spot);
@@ -286,6 +296,22 @@ namespace VoxProbe
                 else if (AnatMat.Class(m) == AnatMat.ClsBone)
                 {
                     float ba = Ep * 15; v.blt = Wt(v.blt, v.blood, now, ba); v.blood = Add8(v.blood, ba); Put(q.x, q.y, q.z, v);
+                }
+            }
+            // часть 5, доработка: синяк шире пятна удара — плоский профиль до ~1,7 Rc с затуханием к краю (кожа, волосы)
+            if (Wide)
+            {
+                float eb = E * (power ? 1 : 0.5f) * 11f, r0 = Rc * 0.9f, r1 = Rc * 1.7f;
+                for (int k = 0; k < PL.Count; k++)
+                {
+                    var q = PL[k]; if (!Surface(h.mat[q.i])) continue;
+                    float a = eb * (1 - math.smoothstep(r0, r1, math.sqrt(PR[k]))); if (a < 0.5f) continue;
+                    var v = Get(q.x, q.y, q.z); v.bt = Wt(v.bt, v.bruise, now, a); v.bruise = Add8(v.bruise, a); Put(q.x, q.y, q.z, v);
+                }
+                foreach (var q in RING)
+                {
+                    float a = eb * (1 - math.smoothstep(r0, r1, math.sqrt(q.r2))) * (0.7f + 0.3f * H3(q.x, q.y, q.z)); if (a < 0.5f) continue;
+                    var v = Get(q.x, q.y, q.z); v.bt = Wt(v.bt, v.bruise, now, a); v.bruise = Add8(v.bruise, a); Put(q.x, q.y, q.z, v);
                 }
             }
             AnatProf.Lap(AnatProf.Apply);
@@ -612,6 +638,7 @@ namespace VoxProbe
         {
             byte m0 = M(d.x, d.y, d.z); if (!AnatMat.Cull(m0) || m0 == AnatMat.Covered) return false;
             var v = Get(d.x, d.y, d.z); float ba = 20 + d.vol * 3; v.blt = Wt(v.blt, v.blood, now, ba); v.blood = Add8(v.blood, ba); Put(d.x, d.y, d.z, v);
+            if (Wide && spreadCells < MaxSpread) Spread(d, ba, now);
             if (--d.vol <= 0) return false;
             float best = 0.12f; int3 bc = new int3(-1);
             for (int c = -1; c <= 1; c++) for (int b = -1; b <= 1; b++) for (int a2 = -1; a2 <= 1; a2++)
@@ -630,6 +657,25 @@ namespace VoxProbe
             }
             d.px = d.x; d.py = d.y; d.pz = d.z; d.x = bc.x; d.y = bc.y; d.z = bc.z;
             return true;
+        }
+
+        /// Часть 5, доработка: кровь подтёка расходится вбок и вниз по открытой поверхности (радиус 1–3 ячейки по объёму потока),
+        /// неровно — пропуски и вес по хешу координат (rng не трогается). Предел — MaxSpread новых ячеек за бой.
+        void Spread(Drip d, float ba, byte now)
+        {
+            int rw = d.vol > 18 ? 3 : d.vol > 6 ? 2 : 1;
+            for (int c = -rw; c <= rw; c++) for (int b = -rw; b <= rw; b++) for (int a2 = -rw; a2 <= rw; a2++)
+            {
+                if (a2 == 0 && b == 0 && c == 0) continue;
+                int xx = d.x + a2, yy = d.y + b, zz = d.z + c; if (!In(xx, yy, zz)) continue;
+                float len = math.sqrt(a2 * a2 + b * b + c * c), up = (a2 * grav.x + b * grav.y + c * grav.z) / len;
+                if (up < -0.35f) continue;   // вверх по стене кровь не идёт
+                float hh = H3(xx, yy, zz); if (hh < 0.15f) continue;
+                byte m = M(xx, yy, zz); if (!AnatMat.Cull(m) || m == AnatMat.Covered || !Exposed(xx, yy, zz)) continue;
+                float w = (1 - len / (rw + 1.5f)) * (0.5f + 0.5f * hh) * (up > 0.3f ? 1.1f : 0.85f);
+                var u = Get(xx, yy, zz); if (u.blood == 0) { if (spreadCells >= MaxSpread) return; spreadCells++; }
+                u.blt = Wt(u.blt, u.blood, now, ba * w); u.blood = Add8(u.blood, ba * w); Put(xx, yy, zz, u);
+            }
         }
 
         // ---------- глаз ----------

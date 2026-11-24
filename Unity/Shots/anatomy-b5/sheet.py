@@ -26,6 +26,16 @@ for tag in ("before", "after"):
     src = os.path.join(D, tag)
     if not os.path.isdir(src): continue
     grid([tile(os.path.join(src, n + ".png"), 360, tag + " " + n) for n in SHEET], 5).save(os.path.join(D, "sheet-" + tag + ".png"))
+# python sheet.py after after2 — пары синяка и крови «ccfc8d3 / доработка» и общий кадр боя
+if len(sys.argv) == 3:
+    a, b = sys.argv[1], sys.argv[2]
+    for name in ("1-bruise-swell", "2-blood"):
+        ims = []
+        for n in PAIRS[name]: ims += [tile(os.path.join(D, a, n + ".png"), 450, "ccfc8d3 " + n), tile(os.path.join(D, b, n + ".png"), 450, "доработка " + n)]
+        grid(ims, 2).save(os.path.join(D, "pair-" + name + ".png"))
+    ims = [tile(os.path.join(D, t, n + ".png"), 450, l + " " + n) for t, l in ((a, "ccfc8d3"), (b, "доработка")) for n in ("f15-front", "f40-3q", "f70-front")]
+    grid(ims, 3).save(os.path.join(D, "fight-distance.png"))
+    sys.exit()
 if os.path.isdir(os.path.join(D, "after")):
     for name, shots in PAIRS.items():
         ims = []
