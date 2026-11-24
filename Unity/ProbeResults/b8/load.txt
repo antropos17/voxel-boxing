@@ -1,0 +1,24 @@
+b8-1 01:22:24 args='' load_before=41 load_after=62
+b8-2 01:22:32 args='' load_before=56 load_after=53
+b8-3 01:22:40 args='' load_before=40 load_after=59
+b8-async60-1 01:22:48 args='-anatBenchVsync -anatBenchAsyncMesh' load_before=65 load_after=46
+b8-async60-2 01:22:56 args='-anatBenchVsync -anatBenchAsyncMesh' load_before=57 load_after=43
+b8-async60-3 01:23:04 args='-anatBenchVsync -anatBenchAsyncMesh' load_before=57 load_after=46
+pair-off-1 01:24:31 args=' -anatBenchNoBranches' load_before=62 load_after=74
+pair-on-1 01:24:42 args=' ' load_before=74 load_after=65
+pair-off-2 01:24:51 args=' -anatBenchNoBranches' load_before=74 load_after=60
+pair-on-2 01:25:00 args=' ' load_before=67 load_after=69
+pair-off-3 01:25:09 args=' -anatBenchNoBranches' load_before=54 load_after=68
+pair-on-3 01:25:17 args=' ' load_before=62 load_after=56
+pair-async60-off-1 01:25:26 args='-anatBenchVsync -anatBenchAsyncMesh -anatBenchNoBranches' load_before=51 load_after=65
+pair-async60-on-1 01:25:34 args='-anatBenchVsync -anatBenchAsyncMesh ' load_before=44 load_after=62
+pair-async60-off-2 01:25:42 args='-anatBenchVsync -anatBenchAsyncMesh -anatBenchNoBranches' load_before=54 load_after=52
+pair-async60-on-2 01:25:51 args='-anatBenchVsync -anatBenchAsyncMesh ' load_before=55 load_after=68
+pair-async60-off-3 01:25:59 args='-anatBenchVsync -anatBenchAsyncMesh -anatBenchNoBranches' load_before=63 load_after=74
+pair-async60-on-3 01:26:07 args='-anatBenchVsync -anatBenchAsyncMesh ' load_before=46 load_after=55
+fin-1 01:26:36 args='' load_before=71 load_after=73
+fin-2 01:26:45 args='' load_before=76 load_after=57
+fin-3 01:26:55 args='' load_before=68 load_after=74
+fin-async60-1 01:27:06 args='-anatBenchVsync -anatBenchAsyncMesh' load_before=68 load_after=83
+fin-async60-2 01:27:17 args='-anatBenchVsync -anatBenchAsyncMesh' load_before=85 load_after=56
+fin-async60-3 01:27:27 args='-anatBenchVsync -anatBenchAsyncMesh' load_before=85 load_after=7

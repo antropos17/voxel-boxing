@@ -105,6 +105,7 @@ namespace VoxProbe
                 if (args[i] == "-anatBenchOut" && i + 1 < args.Length) outPath = args[++i];
                 else if (args[i] == "-anatBenchSeed" && i + 1 < args.Length) seed = uint.Parse(args[++i]);
                 else if (args[i] == "-anatBenchNoQuit") quit = false;
+                else if (args[i] == "-anatBenchNoBranches") AnatDamage.Branches = false;   // часть 8: без веток подтёков и пятен у ран — замер их цены той же сборкой
                 else if (args[i] == "-anatBenchAsyncMesh") asyncMesh = true;   // часть 4: сетки на рабочих потоках между кадрами (AnatView.asyncMesh)
                 else if (args[i] == "-anatBenchVsync") { QualitySettings.vSyncCount = 1; Application.targetFrameRate = 60; vsync = true; }   // часть 6: 60 кадров/с с вертикальной синхронизацией
             }

@@ -101,6 +101,7 @@ namespace VoxProbe.Editor
             Shot("f15-front", 0, 5, 0.85f, new float3(0, -2, 0));
             Shot("f15-3q", -40, 10, 0.85f, new float3(0, -2, 0));
             Shot("f15-bruise", -35, 5, 0.36f, new float3(-3.2f, -1f, 6));
+            if (extra) { Shot("f15-side", -70, 5, 0.85f, new float3(0, -2, 0)); Shot("f15-swell", -80, 0, 0.4f, new float3(-3.2f, -0.5f, 3)); }   // часть 8: отёк сбоку
             // ещё средние: бровь и нос (рассечение и кровь)
             float3[] cut = { new float3(-2.6f, 4.0f, 0), new float3(-2.6f, 4.0f, 0), new float3(0.0f, 0.8f, 0), new float3(-2.0f, 4.2f, 0) };
             t = 16;
@@ -109,10 +110,12 @@ namespace VoxProbe.Editor
             Shot("f40-front", 0, 5, 0.85f, new float3(0, -2, 0));
             Shot("f40-3q", -40, 10, 0.85f, new float3(0, -2, 0));
             Shot("f40-blood", -20, 0, 0.36f, new float3(-1.5f, 0, 6));
+            if (extra) { Shot("f40-side", -70, 5, 0.85f, new float3(0, -2, 0)); Shot("f40-swell", -80, 0, 0.4f, new float3(-3.2f, -0.5f, 3)); }
             Ticks(70);
             Shot("f70-front", 0, 5, 0.85f, new float3(0, -2, 0));
             Shot("f70-3q", -40, 10, 0.85f, new float3(0, -2, 0));
             Shot("f70-bruise", -35, 5, 0.36f, new float3(-3.2f, -1f, 6));
+            if (extra) { Shot("f70-side", -70, 5, 0.85f, new float3(0, -2, 0)); Shot("f70-swell", -80, 0, 0.4f, new float3(-3.2f, -0.5f, 3)); Shot("f70-blood", -20, 0, 0.36f, new float3(-1.5f, -1, 6)); }
             sb.Append("  \"fight\": {\"tris\": ").Append(v.Triangles).Append(", \"wounds\": ").Append(v.sim.wounds.Count).Append(", \"drips\": ").Append(v.sim.drips.Count)
               .Append(", \"frameMs\": ").Append(FrameMs()).Append("},\n");
             v.Dispose(); v = null;
@@ -161,11 +164,52 @@ namespace VoxProbe.Editor
             return sb.ToString();
         }
 
-        /// wide = false — без доработки синяка и крови (AnatDamage.Wide), для замера «до» тем же кодом; shots = false — только числа.
-        public static void Run(string tag, bool wide = true, bool shots = true)
+        /// Часть 8: время кадра полного и упрощённого (ANAT_LITE) шейдера поочерёдно на одной сцене — как CompareShaders: целая голова, затем
+        /// бой (6 средних ударов в скулу и 4 в бровь и нос, 40 с) и конец каждой стадии seed 77; 8 раундов по 20 кадров 1080×2340 на вариант. Медианы, мс.
+        public static string CompareLite()
         {
-            AnatDamage.Wide = wide; noShots = !shots;
-            dir = Path.Combine("Shots/anatomy-b5", tag); Directory.CreateDirectory(dir);
+            var sb = new StringBuilder("{\n");
+            Scene();
+            void Measure(string name)
+            {
+                Aim(-30, 10, 0.55f, new float3(0, -2, 0));
+                var a = new List<double>(); var b = new List<double>();
+                for (int r = 0; r < 8; r++) for (int o = 0; o < 2; o++) { bool lite = (o == 0) == (r % 2 == 0); AnatPalette.SetLite(lite); (lite ? b : a).AddRange(Frames(20)); }
+                a.Sort(); b.Sort();
+                sb.Append("  \"").Append(name).Append("\": {\"full\": ").Append(F(a[a.Count / 2])).Append(", \"lite\": ").Append(F(b[b.Count / 2]))
+                  .Append(", \"fullP90\": ").Append(F(a[a.Count * 9 / 10])).Append(", \"liteP90\": ").Append(F(b[b.Count * 9 / 10])).Append("},\n");
+            }
+            Measure("0-intact");
+            float t = 0.5f;
+            foreach (var p in new[] { new float3(-3.6f, -0.2f, 0), new float3(-3.0f, -2.2f, 0), new float3(-4.0f, 0.3f, 0), new float3(-3.4f, -4.6f, 0), new float3(-2.2f, 6.6f, 0), new float3(-3.3f, -1.0f, 0) })
+            { Ticks(t); v.Hit(new float3(p.x, p.y, 16), new float3(0.15f, 0, -1), 1); t += 2; }
+            t = 16;
+            foreach (var p in new[] { new float3(-2.6f, 4.0f, 0), new float3(-2.6f, 4.0f, 0), new float3(0.0f, 0.8f, 0), new float3(-2.0f, 4.2f, 0) })
+            { Ticks(t); v.Hit(new float3(p.x, p.y, 16), new float3(0.1f, -0.1f, -1), 1); t += 1.5f; }
+            Ticks(40); Shader.SetGlobalFloat("_AnatTime", v.sim.time);
+            Measure("f40-fight");
+            v.Dispose(); v = new AnatView(null, new Vector3(0, 1.6f, 0), AnatShots.EnsureMaterial());
+            var stages = Stages(v); var rnd = new Unity.Mathematics.Random(77);
+            foreach (var st in stages)
+            {
+                for (int k = 0; k < st.max && !st.done(v); k++) { Strike(v, st.where, ref rnd); for (int f = 0; f < 3; f++) v.Tick(1 / 30f, 12); }
+                v.Settle(); for (int f = 0; f < 60; f++) v.Tick(1 / 30f, 64); v.Settle(); Shader.SetGlobalFloat("_AnatTime", v.sim.time);
+                Measure(st.name);
+            }
+            AnatPalette.SetLite(false);
+            sb.Length -= 2; sb.Append("\n}\n");
+            v.Dispose(); v = null; rt.Release(); rtBig.Release();
+            return sb.ToString();
+        }
+
+        static bool extra;
+        /// wide = false — без доработки синяка и крови (AnatDamage.Wide), для замера «до» тем же кодом; shots = false — только числа.
+        /// Часть 8: root — папка снимков (по умолчанию части 5), more — добавочные кадры отёка сбоку и крови на 70 с.
+        /// lite — упрощённый шейдер (ANAT_LITE) на всех снимках.
+        public static void Run(string tag, bool wide = true, bool shots = true, string root = "Shots/anatomy-b5", bool more = false, bool lite = false)
+        {
+            AnatDamage.Wide = wide; noShots = !shots; extra = more; AnatPalette.Lite = lite;
+            dir = Path.Combine(root, tag); Directory.CreateDirectory(dir);
             var sb = new StringBuilder("{\n");
             Scene();
             sb.Append("  \"intactFrameMs\": ").Append(FrameMs()).Append(",\n");
@@ -206,7 +250,7 @@ namespace VoxProbe.Editor
             sb.Append("]\n}\n");
             File.WriteAllText(Path.Combine(dir, "b5.json"), sb.ToString());
             v.Dispose(); v = null; rt.Release(); rtBig.Release();
-            AnatDamage.Wide = true; noShots = false;
+            AnatDamage.Wide = true; noShots = false; AnatPalette.SetLite(false);
             Debug.Log("ANAT_B5_OK " + tag);
         }
     }

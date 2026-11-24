@@ -1,0 +1,9 @@
+{
+  "0-intact": {"full": 3.1, "lite": 2.8, "fullP90": 4.54, "liteP90": 3.9},
+  "f40-fight": {"full": 2.87, "lite": 2.58, "fullP90": 3.66, "liteP90": 3.27},
+  "1-jaw": {"full": 3.11, "lite": 2.87, "fullP90": 4.15, "liteP90": 4.26},
+  "2-face": {"full": 3.41, "lite": 2.93, "fullP90": 4.46, "liteP90": 4.12},
+  "3-vault": {"full": 3.73, "lite": 2.81, "fullP90": 4.62, "liteP90": 3.53},
+  "4-half": {"full": 4.05, "lite": 2.91, "fullP90": 6.72, "liteP90": 3.6},
+  "5-stump": {"full": 3.97, "lite": 3.46, "fullP90": 4.99, "liteP90": 4.87}
+}

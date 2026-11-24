@@ -27,6 +27,9 @@ namespace VoxProbe
         NativeArray<VS> nopool; NativeArray<int> noslot;
         static MaterialPropertyBlock mpb;
         static readonly int ChunkOrgId = Shader.PropertyToID("_ChunkOrg"), BodyParId = Shader.PropertyToID("_BodyPar");
+        // часть 8: номер части ячейки для шейдера (мышцы на срезе) — 3D-текстура R8 тела, если в нём есть мышцы; у кусков нет
+        static readonly int PartTexId = Shader.PropertyToID("_AnatPartTex"), BodyDimId = Shader.PropertyToID("_BodyDim");
+        Texture3D partTex;
         // перестройка части чанков (джобами)
         JobHandle job; Mesh.MeshDataArray jobData; NativeArray<int3> jobOrg; NativeArray<long> jobSt, jobPh; readonly int[] jobIdx; int jobN; bool inFlight;
         readonly Mesh[][] jobMeshes;               // массивы сеток по числу чанков в партии (заводятся один раз, без выделений в кадре)
@@ -57,6 +60,7 @@ namespace VoxProbe
             jobIdx = new int[n]; jobMeshes = new Mesh[n + 1][];
             prevOk = new bool[n]; dfull = new bool[n]; dmn = new int3[n]; dmx = new int3[n];
             for (int i = 0; i < n; i++) { dfull[i] = true; dmn[i] = int.MaxValue; dmx[i] = int.MinValue; }
+            if (spare == null) partTex = PartTexture(g);
             for (int i = 0; i < n; i++)
             {
                 var go = spare != null && spare.chunks.Count > 0 ? spare.chunks.Pop() : null;
@@ -79,11 +83,23 @@ namespace VoxProbe
                 mpb.SetVector(ChunkOrgId, new Vector4(c.x, c.y, c.z, bodyId));
                 float3 ec = -g.org / g.step;   // центр тела (глаз — ось взгляда) в ячейках: шейдер рисует радужку и зрачок кругами
                 mpb.SetVector(BodyParId, new Vector4(g.step, ec.x, ec.y, ec.z));
+                mpb.SetVector(BodyDimId, new Vector4(g.dims.x, g.dims.y, g.dims.z, partTex != null ? 1 : 0));
+                if (partTex != null) mpb.SetTexture(PartTexId, partTex);
                 r.SetPropertyBlock(mpb);
                 r.enabled = false;
                 dirty[i] = true;
             }
             dirtyCount = n;
+        }
+
+        /// Часть 8: номера частей решётки в 3D-текстуру (точечная выборка, без копии в памяти процессора) — только если в теле есть мышцы.
+        static Texture3D PartTexture(AnatGrid g)
+        {
+            bool any = false; for (int i = 0; i < g.part.Length && !any; i++) any = AnatPart.IsMuscle(g.part[i]);
+            if (!any) return null;
+            var t = new Texture3D(g.dims.x, g.dims.y, g.dims.z, TextureFormat.R8, false) { name = g.name + "-part", filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            t.SetPixelData(g.part, 0); t.Apply(false, true);
+            return t;
         }
 
         StateView View()
@@ -206,6 +222,7 @@ namespace VoxProbe
             if (inFlight) Complete();
             if (nopool.IsCreated) { nopool.Dispose(); noslot.Dispose(); }
             if (prevV.IsCreated) { for (int i = 0; i < prevV.Length; i++) prevV[i].Dispose(); prevV.Dispose(); prevSeg.Dispose(); prevNav.Dispose(); prevSt.Dispose(); }
+            if (partTex != null) { Object.DestroyImmediate(partTex); partTex = null; }
             if (spare != null && root != null)
             {
                 // кусок: объекты чанков с сетками и корень — в запас (во время игры без создания и DestroyImmediate)
@@ -253,6 +270,23 @@ namespace VoxProbe
             Shader.SetGlobalVectorArray("_AnatPal", pal);
             Shader.SetGlobalVectorArray("_AnatCut", cut);
             Shader.SetGlobalVectorArray("_AnatPar", par);
+            Shader.SetGlobalVectorArray("_AnatFib", Fib());
+            Shader.SetGlobalVectorArray("_AnatFibC", new[] { new Vector4(AnatGeo.EX, AnatGeo.EY, AnatGeo.EZ, 0), new Vector4(0, -5.25f, 8.6f, 0) });
+            SetLite(Lite);
+        }
+
+        /// Часть 8: упрощённый шейдер головы (ключевое слово ANAT_LITE) — по умолчанию на телефоне; -anatLite / -anatFull в командной строке.
+        public static bool Lite = Application.isMobilePlatform;
+        public static void SetLite(bool on) { Lite = on; if (on) Shader.EnableKeyword("ANAT_LITE"); else Shader.DisableKeyword("ANAT_LITE"); }
+
+        /// Часть 8: волокна мышц для шейдера (номер части − 32) — те же, что AnatGeo.Fiber (срезы AnatSlice, направление разрыва):
+        /// w = 0 — постоянное направление xyz (для x ≥ 0, шейдер зеркалит), 1 — круговые вокруг глаза, 2 — вокруг рта, 3 — веером к точке xyz.
+        static Vector4[] Fib()
+        {
+            var f = new Vector4[32];
+            for (int i = 0; i < 32; i++) { var d = AnatGeo.Fiber(32 + i, new float3(1, 0, 0)); f[i] = new Vector4(d.x, d.y, d.z, 0); }
+            f[AnatPart.OrbOculi - 32].w = 1; f[AnatPart.OrbOris - 32].w = 2; f[AnatPart.Temporalis - 32] = new Vector4(4.5f, -1.4f, 2.4f, 3);
+            return f;
         }
     }
 }

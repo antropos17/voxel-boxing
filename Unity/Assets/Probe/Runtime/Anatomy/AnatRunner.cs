@@ -34,6 +34,9 @@ namespace VoxProbe
         {
             var args = System.Environment.GetCommandLineArgs();
             int vi = System.Array.IndexOf(args, "-anatView"), si = System.Array.IndexOf(args, "-anatViewSelfTest");
+            // часть 8: упрощённый шейдер головы — по умолчанию на телефоне; на ПК включается -anatLite, на телефоне выключается -anatFull
+            if (System.Array.IndexOf(args, "-anatLite") >= 0) AnatPalette.Lite = true;
+            if (System.Array.IndexOf(args, "-anatFull") >= 0) AnatPalette.Lite = false;
             if (System.Array.IndexOf(args, "-anatBench") >= 0)
             {
                 enabled = false;

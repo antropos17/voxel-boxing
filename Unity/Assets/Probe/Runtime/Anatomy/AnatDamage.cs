@@ -44,9 +44,10 @@ namespace VoxProbe
         static bool Soft(byte m) => AnatMat.Class(m) == AnatMat.ClsSoft && m != AnatMat.Sclera && m != AnatMat.Cornea && m != AnatMat.Iris && m != AnatMat.Pupil
             && m != AnatMat.Lens && m != AnatMat.Grey && m != AnatMat.White && m != AnatMat.CerebGrey && m != AnatMat.Stem && m != AnatMat.Dura && m != AnatMat.VenSinus;
 
-        public class Wound { public int x, y, z; public float rate, age, acc, tau, beat; public byte kind; public float3 n; public string src; }
+        public class Wound { public int x, y, z, np; public float rate, age, acc, tau, beat; public byte kind; public float3 n; public string src; }   // np — часть 8: сколько раз росло пятно вокруг раны
         public const byte WSkin = 0, WJet = 1, WVein = 2, WNose = 3;
-        public class Drip { public int x, y, z, px = -1, py = -1, pz = -1; public float vol, t, age; }
+        /// kid — часть 8: ветка подтёка (Branch): случайные числа не берёт (разброс — хеш), каплей не отрывается, свой предел MaxKids.
+        public class Drip { public int x, y, z, px = -1, py = -1, pz = -1, seed; public float vol, t, age; public bool kid; }
         public struct Drop { public float3 p, v; public float vol; }
 
         public struct HitInfo { public byte zone, entryMat; public int cells, removed, split; public float eff, ms; public bool macer; }
@@ -232,8 +233,15 @@ namespace VoxProbe
         static readonly List<float> PR = new List<float>();
         static readonly List<(int x, int y, int z, float r2)> RING = new List<(int, int, int, float)>();
         /// Предел ячеек, которые кровь смачивает растеканием вбок за бой (MaxSpread); счётчик — spreadCells.
-        public const int MaxSpread = 12000;
+        /// Часть 8: предел поднят с 12 000 — растекание делят подтёки, их ветки и пятна вокруг ран.
+        public const int MaxSpread = 24000;
         public int spreadCells;
+        /// Часть 8: ветки подтёков — не больше MaxKids одновременно (kids), всего за бой не больше MaxKidsAll (kidSeq); пятно вокруг раны —
+        /// радиус до PoolR ячеек, растёт PoolN раз на рану.
+        public const int MaxKids = 40, MaxKidsAll = 3000, PoolN = 16; public const float PoolR = 7f;
+        public int kids, kidSeq, poolCells;
+        /// Выключатель веток и пятен части 8 — для замера «до / после» в одном коде; по умолчанию включено.
+        public static bool Branches = true;
         /// Выключатель доработки (синяк шире пятна и растекание крови) — для замера «до / после» в одном коде; по умолчанию включено.
         public static bool Wide = true;
         static float H3(int x, int y, int z) { uint q = (uint)(x * 73856093 ^ y * 19349663 ^ z * 83492791); q ^= q >> 13; q *= 0x5bd1e995; q ^= q >> 15; return (q & 0xFFFF) / 65536f; }
@@ -618,7 +626,7 @@ namespace VoxProbe
 
         void StartDrip(int3 c, float vol)
         {
-            if (drips.Count >= MaxDrips || c.x < 0) return;
+            if (drips.Count - kids >= MaxDrips || c.x < 0) return;   // часть 8: ветки (kid) в предел подтёков не входят — порядок rng прежний
             drips.Add(new Drip { x = c.x, y = c.y, z = c.z, vol = vol, t = (float)rng.NextDouble() });
             peakDrips = math.max(peakDrips, drips.Count);
         }
@@ -657,7 +665,7 @@ namespace VoxProbe
                     w.acc += r * 0.3f * dt;
                 }
                 else w.acc += r * dt;
-                while (w.acc >= 1) { w.acc -= 1; StartDrip(new int3(w.x, w.y, w.z), 16 + rng.Next(30)); }
+                while (w.acc >= 1) { w.acc -= 1; StartDrip(new int3(w.x, w.y, w.z), 16 + rng.Next(30)); if (Wide && Branches && w.np < PoolN) Pool(w); }
             }
             byte now = T2(time);
             for (int k = drips.Count - 1; k >= 0; k--)
@@ -665,7 +673,7 @@ namespace VoxProbe
                 var d = drips[k]; d.age += dt; d.t += dt * 28 * math.exp(-d.age / 45f);     // ~5,6 см/с, густеет за минуту
                 bool alive = true;
                 while (d.t >= 1 && alive) { d.t -= 1; alive = StepDrip(d, now); }
-                if (!alive || d.age > 90) drips.RemoveAt(k);
+                if (!alive || d.age > 90) { if (d.kid) kids--; drips.RemoveAt(k); }
             }
             for (int k = drops.Count - 1; k >= 0; k--)
             {
@@ -696,21 +704,26 @@ namespace VoxProbe
             var v = Get(d.x, d.y, d.z); float ba = 20 + d.vol * 3; v.blt = Wt(v.blt, v.blood, now, ba); v.blood = Add8(v.blood, ba); Put(d.x, d.y, d.z, v);
             if (Wide && spreadCells < MaxSpread) Spread(d, ba, now);
             if (--d.vol <= 0) return false;
-            float best = 0.12f; int3 bc = new int3(-1);
+            float best = 0.12f, best2 = 0.12f; int3 bc = new int3(-1), bc2 = new int3(-1);
             for (int c = -1; c <= 1; c++) for (int b = -1; b <= 1; b++) for (int a2 = -1; a2 <= 1; a2++)
             {
                 if (a2 == 0 && b == 0 && c == 0) continue;
                 int xx = d.x + a2, yy = d.y + b, zz = d.z + c; if (xx == d.px && yy == d.py && zz == d.pz) continue;
                 byte m = M(xx, yy, zz); if (!AnatMat.Cull(m) || m == AnatMat.Covered || !Exposed(xx, yy, zz)) continue;
-                float sc = (a2 * grav.x + b * grav.y + c * grav.z) / math.sqrt(a2 * a2 + b * b + c * c) + (float)rng.NextDouble() * 0.32f;
-                if (sc > best) { best = sc; bc = new int3(xx, yy, zz); }
+                float sc = (a2 * grav.x + b * grav.y + c * grav.z) / math.sqrt(a2 * a2 + b * b + c * c);
+                // часть 8: у ветки разброс и извилистость — хешем координат (rng не трогается), у основного подтёка — как раньше
+                if (d.kid) sc += H3(xx * 3 + d.seed, yy * 5, zz * 7) * 0.32f + (H3(xx + d.seed * 7, yy, zz) - 0.5f) * 0.35f;
+                else sc += (float)rng.NextDouble() * 0.32f;
+                if (sc > best) { best2 = best; bc2 = bc; best = sc; bc = new int3(xx, yy, zz); }
+                else if (sc > best2) { best2 = sc; bc2 = new int3(xx, yy, zz); }
             }
             if (bc.x < 0)
             {
-                // отрывается каплей (подбородок, кончик носа)
-                if (drops.Count < MaxDrops) { drops.Add(new Drop { p = h.Local(d.x, d.y, d.z) + grav * 0.25f, v = grav * 15, vol = d.vol * 0.5f }); peakDrops = math.max(peakDrops, drops.Count); }
+                // отрывается каплей (подбородок, кончик носа); ветка просто кончается (капля при падении взяла бы rng)
+                if (!d.kid && drops.Count < MaxDrops) { drops.Add(new Drop { p = h.Local(d.x, d.y, d.z) + grav * 0.25f, v = grav * 15, vol = d.vol * 0.5f }); peakDrops = math.max(peakDrops, drops.Count); }
                 return false;
             }
+            if (Wide && Branches) Branch(d, bc, bc2, best2);
             d.px = d.x; d.py = d.y; d.pz = d.z; d.x = bc.x; d.y = bc.y; d.z = bc.z;
             return true;
         }
@@ -731,6 +744,35 @@ namespace VoxProbe
                 float w = (1 - len / (rw + 1.5f)) * (0.5f + 0.5f * hh) * (up > 0.3f ? 1.1f : 0.85f);
                 var u = Get(xx, yy, zz); if (u.blood == 0) { if (spreadCells >= MaxSpread) return; spreadCells++; }
                 u.blt = Wt(u.blt, u.blood, now, ba * w); u.blood = Add8(u.blood, ba * w); Put(xx, yy, zz, u);
+            }
+        }
+
+        /// Часть 8: подтёк ветвится — во второе по уклону место (не рядом с первым) уходит ветка с 0,6 объёма (до 24), по хешу
+        /// ~20 % шагов. Объём основного подтёка не убывает: число его шагов и вызовов rng прежнее, сценарий ударов не меняется.
+        void Branch(Drip d, int3 bc, int3 bc2, float best2)
+        {
+            if (bc2.x < 0 || best2 < 0.15f || d.vol < 5 || kids >= MaxKids || kidSeq >= MaxKidsAll) return;
+            if (math.lengthsq(bc2 - bc) < 2 || H3(d.x * 7 + kidSeq, d.y * 3, d.z) >= 0.2f) return;
+            kids++; kidSeq++;
+            drips.Add(new Drip { x = bc2.x, y = bc2.y, z = bc2.z, px = d.x, py = d.y, pz = d.z, vol = math.min(24, d.vol * 0.6f), t = H3(bc2.x, kidSeq, bc2.z), kid = true, seed = kidSeq * 131 });
+        }
+
+        /// Часть 8: пятно крови вокруг раны — при каждом новом подтёке раны (до PoolN раз) радиус растёт до PoolR ячеек; край неровный (хеш),
+        /// вверх слабее. Новые ячейки с кровью — в общем пределе MaxSpread.
+        void Pool(Wound w)
+        {
+            w.np++;
+            float rp = math.min(PoolR, 2f + 0.4f * w.np); int R = (int)math.ceil(rp); byte now = T2(time);
+            for (int c = -R; c <= R; c++) for (int b = -R; b <= R; b++) for (int a2 = -R; a2 <= R; a2++)
+            {
+                int xx = w.x + a2, yy = w.y + b, zz = w.z + c; if (!In(xx, yy, zz)) continue;
+                float len = math.sqrt(a2 * a2 + b * b + c * c), hh = H3(xx, yy, zz + 17);
+                if (len * (0.75f + 0.5f * hh) > rp) continue;
+                byte m = M(xx, yy, zz); if (!AnatMat.Cull(m) || m == AnatMat.Covered || !Exposed(xx, yy, zz)) continue;
+                float up = len > 0 ? (a2 * grav.x + b * grav.y + c * grav.z) / len : 0;
+                float a = 45f * (1 - len / (rp + 1)) * (up < -0.4f ? 0.5f : 1f) * (0.6f + 0.4f * hh);
+                var u = Get(xx, yy, zz); if (u.blood == 0) { if (spreadCells >= MaxSpread) return; spreadCells++; poolCells++; }
+                u.blt = Wt(u.blt, u.blood, now, a); u.blood = Add8(u.blood, a); Put(xx, yy, zz, u);
             }
         }
 
