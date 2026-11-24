@@ -129,7 +129,7 @@ namespace VoxProbe
                 ms[k].bounds = bnd;
                 quads[i] = (int)jobSt[k * 4 + 1]; naive[i] = (int)jobSt[k * 4];
                 rs[i].enabled = quads[i] > 0;
-                sum += (jobSt[k * 4 + 3] - jobSt[k * 4 + 2]) * 1000.0 / freq;
+                double cm = (jobSt[k * 4 + 3] - jobSt[k * 4 + 2]) * 1000.0 / freq; sum += cm; if (cm > AnatProf.chunkMax) AnatProf.chunkMax = cm;
             }
             rebuilt += ms.Length; rebuildMs += sum;
             jobOrg.Dispose(); jobSt.Dispose();

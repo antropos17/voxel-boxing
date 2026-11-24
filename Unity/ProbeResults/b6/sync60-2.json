@@ -1,0 +1,64 @@
+{
+  "stages": [
+    {"stage": "1-jaw", "hits": 13, "miss": 0, "done": true, "tris": 147880, "pieces": 1, "pieceTris": 6476, "made": 1, "trimmed": 0, "bodiesOff": 1},
+    {"stage": "2-face", "hits": 14, "miss": 0, "done": true, "tris": 149586, "pieces": 6, "pieceTris": 10928, "made": 6, "trimmed": 0, "bodiesOff": 6},
+    {"stage": "3-vault", "hits": 1, "miss": 0, "done": true, "tris": 157850, "pieces": 6, "pieceTris": 10928, "made": 6, "trimmed": 0, "bodiesOff": 6},
+    {"stage": "4-half", "hits": 20, "miss": 0, "done": true, "tris": 156238, "pieces": 12, "pieceTris": 18124, "made": 12, "trimmed": 0, "bodiesOff": 7},
+    {"stage": "5-stump", "hits": 30, "miss": 0, "done": true, "tris": 51928, "pieces": 24, "pieceTris": 75212, "made": 28, "trimmed": 4, "bodiesOff": 8}
+  ],
+  "platform": "WindowsPlayer", "seed": 77, "asyncMesh": false, "refMismatch": -1, "vsync": true, "cpu": "Intel(R) Core(TM) Ultra 9 185H", "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU", "res": "540x1170",
+  "hits": 78, "trisIntact": 131858, "trisStump": 51928, "pieceTrisStump": 75212,
+  "hitMsMax": 21.202, "hitMsMedian": 7.763,
+  "worstFrameMsEditorStyle": 27.935, "medianFrameMsEditorStyle": 13.523, "tickMsMax": 24.722, "tickMsMedian": 5.514,
+  "wallFrameMsMax": 304.133, "wallFrameMsMedian": 12.5, "wallFrames": 234,
+  "islandMsMax": 19.069, "pieceMsMax": 0.194, "piecesPeak": 24, "islandRequests": 78, "islandFull": 60,
+  "buildMs": 293.034, "runSeconds": 3.955, "gcCollections": 17,
+  "memMB": { "monoStart": 6.727, "monoEnd": 7.961, "totalStart": 184.991, "totalEnd": 166.735, "monoBeforeView": 2.734, "totalBeforeView": 80.896, "gcHeapEnd": 7.969 },
+  "hitParts": {
+    "pick": { "max": 0.903, "median": 0.073, "sum": 8.165 },
+    "locate": { "max": 0.076, "median": 0.013, "sum": 1.03 },
+    "spot": { "max": 1.281, "median": 0.619, "sum": 52.501 },
+    "apply": { "max": 6.006, "median": 0.297, "sum": 31.99 },
+    "lids": { "max": 0.024, "median": 0.001, "sum": 0.111 },
+    "fail": { "max": 0.03, "median": 0.001, "sum": 0.153 },
+    "smear": { "max": 4.821, "median": 0.29, "sum": 53.344 },
+    "macer": { "max": 3.653, "median": 1.227, "sum": 108.061 },
+    "break": { "max": 4.431, "median": 0.004, "sum": 68.831 },
+    "rip": { "max": 4.509, "median": 1.517, "sum": 125.169 },
+    "dmgVis": { "max": 3.741, "median": 1.264, "sum": 108.116 },
+    "boreStop": { "max": 1.059, "median": 0.245, "sum": 22.929 },
+    "boreCut": { "max": 1.306, "median": 0.235, "sum": 28.182 },
+    "boreCsf": { "max": 1.335, "median": 0.496, "sum": 44.232 },
+    "boreVis": { "max": 1.495, "median": 0.063, "sum": 23.235 },
+    "rest": { "max": 0.914, "median": 0.215, "sum": 21.969 },
+    "restVis": { "max": 0.001, "median": 0, "sum": 0.015 },
+    "mesh": { "max": 0.065, "median": 0.014, "sum": 1.215 },
+    "meshWaitInHit": { "max": 0, "median": 0 }, "meshApplyInHit": { "max": 0, "median": 0 }
+  },
+  "tickParts": {
+    "step": { "max": 0.224, "median": 0.083 },
+    "drops": { "max": 0.795, "median": 0.031 },
+    "detach": { "max": 0.017, "median": 0.001 },
+    "islWait": { "max": 0.001, "median": 0 },
+    "islStep": { "max": 3.493, "median": 0 },
+    "request": { "max": 0.173, "median": 0 },
+    "pieces": { "max": 0.174, "median": 0.025 },
+    "flush": { "max": 8.741, "median": 5.191 },
+    "meshWait": { "max": 8.619, "median": 5.093 }, "meshApply": { "max": 0.082, "median": 0.061 }, "chunkMax": { "max": 8.499, "median": 5.005 }
+  },
+  "meshProf": { "chunks": 4282, "fillMs": 977.728, "stateMs": 1756.32, "initMs": 770.159, "facesMs": 6132.707, "emitMs": 4516.272, "writeMs": 149.991, "corners": 8526841, "grads": 1463283, "fields": 8509167, "states": 8498392, "verts": 32412028 },
+  "worstFrames": [
+    { "hit": 41, "ms": 27.933, "hitMs": 21.202, "step": 0.224, "pieces": 0.055, "flush": 6.414 },
+    { "hit": 54, "ms": 27.229, "hitMs": 19.73, "step": 0.156, "pieces": 0.106, "flush": 7.189 },
+    { "hit": 22, "ms": 23.102, "hitMs": 16.874, "step": 0.097, "drops": 0.052, "flush": 6.066 },
+    { "hit": 53, "ms": 22.392, "hitMs": 15.175, "step": 0.167, "pieces": 0.104, "flush": 6.909 },
+    { "hit": 27, "ms": 22.277, "hitMs": 18.937, "step": 0.137, "pieces": 0.056, "flush": 3.107 }
+  ],
+  "worstHits": [
+    { "hit": 41, "ms": 21.202, "removes": 3319, "takes": 5746, "pick": 0.184, "spot": 1.01, "apply": 0.303, "smear": 3.026, "macer": 2.012, "break": 4.413, "rip": 3.425, "dmgVis": 3.455, "boreStop": 0.577, "boreCut": 0.668, "boreCsf": 1.031, "boreVis": 0.631, "rest": 0.401 },
+    { "hit": 54, "ms": 19.73, "removes": 3669, "takes": 11056, "spot": 1.178, "apply": 0.731, "smear": 0.599, "macer": 3.653, "break": 3.252, "rip": 4.222, "dmgVis": 3.347, "boreStop": 0.313, "boreCut": 0.268, "boreCsf": 1.086, "boreVis": 0.58, "rest": 0.408 },
+    { "hit": 27, "ms": 18.937, "removes": 4571, "takes": 9484, "pick": 0.281, "spot": 0.979, "apply": 0.983, "macer": 2.988, "break": 4.431, "rip": 4.117, "dmgVis": 3.163, "boreStop": 0.227, "boreCut": 0.185, "boreCsf": 1.014, "boreVis": 0.129, "rest": 0.392 },
+    { "hit": 29, "ms": 17.003, "removes": 4630, "takes": 8951, "pick": 0.095, "spot": 0.586, "apply": 6.006, "macer": 1.582, "break": 2.911, "rip": 2.376, "dmgVis": 1.913, "boreStop": 0.148, "boreCut": 0.124, "boreCsf": 0.901, "boreVis": 0.115, "rest": 0.212 },
+    { "hit": 22, "ms": 16.874, "removes": 2641, "takes": 7314, "pick": 0.054, "spot": 0.76, "apply": 0.446, "smear": 2.447, "macer": 2.366, "break": 2.152, "rip": 3.151, "dmgVis": 3.305, "boreStop": 0.288, "boreCut": 0.229, "boreCsf": 0.446, "boreVis": 0.74, "rest": 0.444 }
+  ]
+}

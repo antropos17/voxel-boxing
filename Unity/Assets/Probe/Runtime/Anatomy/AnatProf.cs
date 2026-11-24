@@ -11,6 +11,7 @@ namespace VoxProbe
         public static readonly double[] t = new double[N];
         public static int removes, takes;
         public static double meshWait, meshApply;   // AnatBody.Complete: ожидание джоба сеток и применение (копится, сбрасывает Begin)
+        public static double chunkMax;               // часть 6: самый долгий чанк (время джоба) с последнего сброса
         static readonly System.Diagnostics.Stopwatch clk = System.Diagnostics.Stopwatch.StartNew();
         public static double Now() => clk.Elapsed.TotalMilliseconds;
         static readonly System.Diagnostics.Stopwatch sw = new System.Diagnostics.Stopwatch();

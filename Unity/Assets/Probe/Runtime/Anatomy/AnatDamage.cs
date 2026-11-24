@@ -88,7 +88,8 @@ namespace VoxProbe
         /// и спинным мозгом, гортань, пищевод, сонные артерии, яремные вены, мышцы, кожа).
         public const float StumpY = -10.4f;
         public static float StumpAt(float x, float z) => StumpY + 0.35f * math.sin(x * 1.7f + z * 0.9f) + 0.25f * math.sin(z * 2.3f - x * 0.6f);
-        public static bool Protected(float3 p) => p.y < StumpAt(p.x, p.z);
+        /// Часть 6: край культи — StumpY ± 0,6 (|0,35·sin| + |0,25·sin| ≤ 0,6); дальше 0,61 от StumpY ответ без синусов, тот же.
+        public static bool Protected(float3 p) => p.y >= StumpY + 0.61f ? false : p.y < StumpY - 0.61f || p.y < StumpAt(p.x, p.z);
         public static bool Brainy(byte m) => m == AnatMat.Grey || m == AnatMat.White || m == AnatMat.CerebGrey || m == AnatMat.Stem;
         public Unity.Collections.NativeList<int> cutLog;   // убранные ячейки с прошлого запроса поиска кусков (забирает AnatView)
         public struct Eject { public float3 c, dir; public float r; }
@@ -779,6 +780,7 @@ namespace VoxProbe
                 int i = h.Index(x, y, z); byte m = h.mat[i]; if (!AnatMat.Cull(m) || m == AnatMat.Covered || Brainy(m)) continue;
                 // часть 4: дешёвый отсев по геометрии до Protected и тригонометрии (кольцо и отломок не шире Rf·1,21 + 0,17)
                 float3 p = h.Local(x, y, z); float3 q = p - B; float al = math.dot(q, l); if (al < -2.6f || al > 3.5f) continue;
+                bool soft = m == AnatMat.Dura || m == AnatMat.Csf; if (al >= 1.6f && !soft) continue;   // часть 6: кольцо — только при al < 1,6, ниже отломка — только оболочка и ликвор
                 float3 rv = q - l * al; float rad = math.length(rv); if (rad > Rf * 1.25f + 0.2f || Protected(p)) continue;
                 float ang = math.atan2(math.dot(rv, w), math.dot(rv, u));
                 float R = Rf * (1 + 0.14f * math.sin(ang * 3 + ph) + 0.07f * math.sin(ang * 7 + ph2));
@@ -814,8 +816,12 @@ namespace VoxProbe
                 int i = h.Index(x, y, z); byte m = h.mat[i]; if (!AnatMat.Cull(m)) continue;
                 // часть 4: дешёвый отсев до Protected и синусов (неровный шар не шире R·1,28)
                 float3 p = h.Local(x, y, z); float3 d = p - c; float r = math.length(d); if (r > R * 1.3f || Protected(p)) continue;
-                float Rn = R * (1 + 0.18f * math.sin(d.x * 2.1f + ph) * math.sin(d.y * 1.7f - ph) + 0.1f * math.sin(d.z * 3.3f + ph * 2));
-                if (r > Rn) continue;
+                // часть 6: неровный шар не уже R·0,72 (0,18 + 0,1) — ближе R·0,71 ячейка внутри без синусов
+                if (r >= R * 0.71f)
+                {
+                    float Rn = R * (1 + 0.18f * math.sin(d.x * 2.1f + ph) * math.sin(d.y * 1.7f - ph) + 0.1f * math.sin(d.z * 3.3f + ph * 2));
+                    if (r > Rn) continue;
+                }
                 // разрыв убирает без пропитки соседей кровью: иначе срез (культя) сплошь красный и слоёв не видно;
                 // кровь — пятнами на краю и из вскрытых сосудов
                 byte part = h.part[i];

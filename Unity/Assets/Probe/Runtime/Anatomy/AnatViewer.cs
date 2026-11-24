@@ -54,6 +54,7 @@ namespace VoxProbe
             cam.clearFlags = CameraClearFlags.SolidColor; cam.backgroundColor = new Color(0.12f, 0.13f, 0.15f);
             cam.nearClipPlane = 0.005f; cam.farClipPlane = 10; cam.fieldOfView = 30;
             v = new AnatView(null, Center, anatMaterial);
+            v.asyncMesh = true;   // часть 6: сетки удара считаются, пока кадр рисуется (вертикальная синхронизация) — кадр удара короче на время сеток, сетка видна кадром позже
             AnatSkin.Reset(); AnatSkin.on = true; AnatSkin.SetGlobals(v.root);
             Default(true);
             Rebuild();
