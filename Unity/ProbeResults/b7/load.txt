@@ -27,3 +27,33 @@ after-3 10:57:28 build=AnatWin args='' load_before=21,8 load_after=24,4
 after-async60-1 10:57:55 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=20 load_after=23,9
 after-async60-2 10:58:22 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=22,2 load_after=23,6
 after-async60-3 10:58:49 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=23,8 load_after=19,5
+v8-1 12:49:12 build=AnatWin args='' load_before=47 load_after=35,3
+v8-2 12:49:41 build=AnatWin args='' load_before=32,7 load_after=67,5
+v8-3 12:50:11 build=AnatWin args='' load_before=60 load_after=60,2
+verify-p8 12:57:32 build=AnatWin args='-anatBenchVerify' load_before=15,9 load_after=12,2
+p8-1 12:58:05 build=AnatWin args='' load_before=13 load_after=7,5
+p8-2 12:58:32 build=AnatWin args='' load_before=14,4 load_after=27,5
+p8-3 12:58:59 build=AnatWin args='' load_before=25,3 load_after=13,5
+p8pre-1 12:59:34 build=AnatWin-b7before args='' load_before=15,5 load_after=12,2
+p8pair-1 13:00:00 build=AnatWin args='' load_before=13,2 load_after=13,2
+p8pre-2 13:00:28 build=AnatWin-b7before args='' load_before=12,1 load_after=15,9
+p8pair-2 13:00:54 build=AnatWin args='' load_before=30,9 load_after=14,7
+p8pre-3 13:01:21 build=AnatWin-b7before args='' load_before=37,1 load_after=27,9
+p8pair-3 13:01:49 build=AnatWin args='' load_before=33,5 load_after=38,5
+verify-p9 13:04:34 build=AnatWin args='-anatBenchVerify' load_before=30,6 load_after=24,5
+verify-p10 13:07:10 build=AnatWin args='-anatBenchVerify' load_before=25,1 load_after=24,8
+p10pre-1 13:07:38 build=AnatWin-b7before args='' load_before=28,3 load_after=24,7
+p10-1 13:08:05 build=AnatWin args='' load_before=27,9 load_after=26,9
+p10pre-2 13:08:32 build=AnatWin-b7before args='' load_before=26,4 load_after=23
+p10-2 13:08:59 build=AnatWin args='' load_before=22 load_after=26
+p10pre-3 13:09:26 build=AnatWin-b7before args='' load_before=25,7 load_after=20,9
+p10-3 13:09:54 build=AnatWin args='' load_before=27 load_after=26
+fin-pre-1 13:13:23 build=AnatWin-b7before args='' load_before=42,1 load_after=43,6
+fin-1 13:13:51 build=AnatWin args='' load_before=42,4 load_after=29,6
+fin-pre-2 13:14:19 build=AnatWin-b7before args='' load_before=36,8 load_after=19,5
+fin-2 13:14:46 build=AnatWin args='' load_before=19,6 load_after=21
+fin-pre-3 13:15:12 build=AnatWin-b7before args='' load_before=12,3 load_after=14,5
+fin-3 13:15:39 build=AnatWin args='' load_before=13,1 load_after=20,4
+fin-async60-1 13:16:06 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=11,4 load_after=30,5
+fin-async60-2 13:16:32 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=11,9 load_after=12,1
+fin-async60-3 13:16:59 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=13,7 load_after=13,5

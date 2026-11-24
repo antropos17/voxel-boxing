@@ -36,6 +36,14 @@ namespace VoxProbe
     public static unsafe class AnatMesher
     {
         public const int CS = 32, P = CS + 4, L = CS + 1;
+        /// Часть 7: прошлая сетка чанка по слоям (направление·32 + слой) — для перестройки только изменённой части. Слой зависит от ячеек
+        /// не дальше 3 по своей оси (поле 4×4×4 у углов, состояние и тень углов, тень полости у соседей), берётся запас PrevM = 4.
+        public const int SegN = 6 * CS, PrevM = 4;
+        public unsafe struct PrevMesh
+        {
+            public UnsafeList<AVert>* v; public int* seg, nav; public byte* st;   // хранилище чанка: вершины, начала слоёв (SegN + 1), счёт граней на начало слоя, был ли c.st
+            public bool reuse; public int3 rmn, rmx;                              // прошлое можно брать для слоёв вне [rmn − PrevM, rmx + PrevM] (ячейки чанка)
+        }
         public const int PhN = 6;   // часть 7: профиль чанка — заполнение, состояния, кэши, грани (тики), вершин в чанке, гладких вершин построено
         public const int ModeRender = 0, ModeNaive = 1, ModeGreedyAO = 2;
         public const float K = 0.7f;
@@ -98,8 +106,9 @@ namespace VoxProbe
         /// То же с состояниями вокселей (sv.on): цвет углов и смещение ячеек; dscale — ячеек на 0,1 мм.
         /// vv.on — видимость (AnatVis): невидимая открытая ячейка сплошная, у головы на границе с видимой — тень полости.
         /// Роговица и водянистая влага прозрачны всегда.
-        public static int Build(NativeArray<byte> mat, int3 dims, int3 org, int mode, ref NativeList<AVert> verts, in StateView sv, float dscale, in VisView vv, int style, float4 grid = default, NativeArray<long> ph = default, int phAt = 0)
+        public static int Build(NativeArray<byte> mat, int3 dims, int3 org, int mode, ref NativeList<AVert> verts, in StateView sv, float dscale, in VisView vv, int style, float4 grid = default, NativeArray<long> ph = default, int phAt = 0, PrevMesh pv = default)
         {
+            bool keep = pv.v != null && mode == ModeRender;
             long pt0 = ProfilerUnsafeUtility.Timestamp;
             var c = new Ctx(); c.style = mode == ModeRender ? style : 0;
             c.grid = grid; c.corg = org; if (grid.w <= 0) c.style &= ~StyleStubble;
@@ -138,7 +147,7 @@ namespace VoxProbe
             }
             int naive = 0;
             long pt1 = ProfilerUnsafeUtility.Timestamp;
-            if (!any) { c.occ.Dispose(); c.dm.Dispose(); c.rm.Dispose(); System.Threading.Interlocked.Add(ref AnatMeshProf.Prof.Data.fill, pt1 - pt0); if (ph.IsCreated) { ph[phAt] = pt1 - pt0; for (int q = 1; q < PhN; q++) ph[phAt + q] = 0; } return 0; }
+            if (!any) { if (keep) { pv.v->Clear(); for (int q = 0; q <= SegN; q++) pv.seg[q] = pv.nav[q] = 0; *pv.st = 255; } c.occ.Dispose(); c.dm.Dispose(); c.rm.Dispose(); System.Threading.Interlocked.Add(ref AnatMeshProf.Prof.Data.fill, pt1 - pt0); if (ph.IsCreated) { ph[phAt] = pt1 - pt0; for (int q = 1; q < PhN; q++) ph[phAt + q] = 0; } return 0; }
 
             // состояния: только если у чанка или соседей (в пределах отступа) они заведены
             if (sv.on && mode == ModeRender)
@@ -215,14 +224,26 @@ namespace VoxProbe
             }
             long pt3 = ProfilerUnsafeUtility.Timestamp;
             int3 ext = math.clamp(dims - org, 0, CS);   // обход только по ячейкам решётки: у малых тел (зубы) чанк меньше 32³
+            // часть 7: слои вне коробки изменений — копией прошлой сетки (тот же построитель дал бы те же вершины в том же порядке)
+            bool reuse = keep && pv.reuse && *pv.st == (byte)(c.st ? 1 : 0);
+            int* nseg = stackalloc int[SegN + 1]; int* nnav = stackalloc int[SegN + 1];
             for (int dir = 0; dir < 6; dir++)
             {
                 int A = dir >> 1; bool pos = (dir & 1) == 0;
                 int3 n = Dir(dir), ea = AxA(A), eb = AxB(A);
                 int nd = ext[A], na = math.csum(ext * ea), nbb = math.csum(ext * eb);
+                for (int d = nd; d < CS; d++) { nseg[dir * CS + d] = -1; }
                 for (int d = 0; d < nd; d++)
                 {
                     c.gen++;
+                    int sI = dir * CS + d; nseg[sI] = verts.Length; nnav[sI] = naive;
+                    if (reuse && (d + PrevM < pv.rmn[A] || d - PrevM > pv.rmx[A]))
+                    {
+                        int a0 = pv.seg[sI], a1 = pv.seg[sI + 1];
+                        if (a1 > a0) verts.AddRange(pv.v->Ptr + a0, a1 - a0);
+                        naive += pv.nav[sI + 1] - pv.nav[sI];
+                        continue;
+                    }
                     if (mode == ModeGreedyAO) for (int k = 0; k < CS * CS; k++) keys[k] = 0;   // там есть отрицательные ключи; в остальных режимах объединение само обнуляет все положительные
                     int eo = dir * CS * CS;
                     for (int b = 0; b < nbb; b++)
@@ -275,6 +296,13 @@ namespace VoxProbe
                             Lat(A, pd2, a, b), Lat(A, pd2, a, b + h), Lat(A, pd2, a + w, b + h), Lat(A, pd2, a + w, b), false);
                     }
                 }
+            }
+            if (keep)
+            {
+                nseg[SegN] = verts.Length; nnav[SegN] = naive;
+                for (int q = SegN - 1; q >= 0; q--) if (nseg[q] < 0) { nseg[q] = nseg[q + 1]; nnav[q] = nnav[q + 1]; }   // пустые слои (за краем решётки)
+                pv.v->Clear(); pv.v->AddRange(verts.GetUnsafeReadOnlyPtr(), verts.Length);
+                UnsafeUtility.MemCpy(pv.seg, nseg, (SegN + 1) * 4); UnsafeUtility.MemCpy(pv.nav, nnav, (SegN + 1) * 4); *pv.st = (byte)(c.st ? 1 : 0);
             }
             long pt4 = ProfilerUnsafeUtility.Timestamp;
             ref var prd = ref AnatMeshProf.Prof.Data;
@@ -533,7 +561,7 @@ namespace VoxProbe
     /// Сетки чанков анатомического тела в Mesh.MeshData. stats[i] = (открытые грани, прямоугольники, тики начала, тики конца).
     /// Часть 7: ph (если задан) — тики стадий построителя по чанку: заполнение, состояния, кэши, грани.
     [BurstCompile(CompileSynchronously = true)]
-    public struct AnatChunkJob : IJobParallelFor
+    public unsafe struct AnatChunkJob : IJobParallelFor
     {
         [ReadOnly] public NativeArray<byte> mat;
         [ReadOnly] public NativeArray<int3> origins;
@@ -547,12 +575,21 @@ namespace VoxProbe
         public Mesh.MeshDataArray meshes;
         [NativeDisableParallelForRestriction] public NativeArray<long> stats;
         [NativeDisableParallelForRestriction, Unity.Collections.LowLevel.Unsafe.NativeDisableContainerSafetyRestriction] public NativeArray<long> ph;
+        // часть 7: хранилище прошлых сеток тела (по чанкам, см. AnatMesher.PrevMesh); null — без него
+        [NativeDisableUnsafePtrRestriction] public UnsafeList<AVert>* pv; [NativeDisableUnsafePtrRestriction] public int* pseg, pnav; [NativeDisableUnsafePtrRestriction] public byte* pst;
+        [ReadOnly] public NativeArray<int> chunk; [ReadOnly] public NativeArray<int4> rmn, rmx;   // номер чанка; коробка изменений (rmn.w — можно брать прошлое)
 
         public void Execute(int i)
         {
             long t0 = ProfilerUnsafeUtility.Timestamp;
             var verts = new NativeList<AVert>(4096, Allocator.Temp);
-            int naive = AnatMesher.Build(mat, dims, origins[i], AnatMesher.ModeRender, ref verts, sv, dscale, vv, style, grid, ph, i * AnatMesher.PhN);
+            var pm = default(AnatMesher.PrevMesh);
+            if (pv != null)
+            {
+                int ci = chunk[i]; pm.v = pv + ci; pm.seg = pseg + ci * (AnatMesher.SegN + 1); pm.nav = pnav + ci * (AnatMesher.SegN + 1); pm.st = pst + ci;
+                pm.reuse = rmn[i].w != 0; pm.rmn = rmn[i].xyz; pm.rmx = rmx[i].xyz;
+            }
+            int naive = AnatMesher.Build(mat, dims, origins[i], AnatMesher.ModeRender, ref verts, sv, dscale, vv, style, grid, ph, i * AnatMesher.PhN, pm);
             long tw = ProfilerUnsafeUtility.Timestamp;
             int nv = verts.Length, nq = nv / 4;
             var md = meshes[i];

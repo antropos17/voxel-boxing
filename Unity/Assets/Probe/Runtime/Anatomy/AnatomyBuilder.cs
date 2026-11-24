@@ -47,12 +47,15 @@ namespace VoxProbe
         public void Touch(int3 mn, int3 mx) { tmn = math.min(tmn, mn); tmx = math.max(tmx, mx); }
         /// Чанки (по AnatMesher.CS), чью сетку надо перестроить из-за смены видимости отдельных ячеек; забирает AnatBody.SyncVis.
         public readonly System.Collections.Generic.HashSet<int> tch = new System.Collections.Generic.HashSet<int>();
+        /// Часть 7: коробка ячеек, сменивших видимость, по чанку из tch (для перестройки только изменённой части чанка).
+        public readonly System.Collections.Generic.Dictionary<int, (int3, int3)> tbox = new System.Collections.Generic.Dictionary<int, (int3, int3)>();
+        public void TouchBox(int q, int3 mn, int3 mx) { tch.Add(q); tbox[q] = tbox.TryGetValue(q, out var b) ? (math.min(b.Item1, mn), math.max(b.Item2, mx)) : (mn, mx); }
         /// Ячейка сменила видимость: её чанк и соседний, если до края меньше отступа сетки (2 ячейки + угол).
         public void TouchCell(int3 c)
         {
             int3 nch = (dims + AnatMesher.CS - 1) / AnatMesher.CS;
             int3 c0 = math.max(c - 3, 0) / AnatMesher.CS, c1 = math.min(c + 3, dims - 1) / AnatMesher.CS;
-            for (int z = c0.z; z <= c1.z; z++) for (int y = c0.y; y <= c1.y; y++) for (int x = c0.x; x <= c1.x; x++) tch.Add(x + nch.x * (y + nch.y * z));
+            for (int z = c0.z; z <= c1.z; z++) for (int y = c0.y; y <= c1.y; y++) for (int x = c0.x; x <= c1.x; x++) TouchBox(x + nch.x * (y + nch.y * z), c, c);
         }
         public void Dispose() { if (mat.IsCreated) { mat.Dispose(); part.Dispose(); zone.Dispose(); } if (vis.IsCreated) vis.Dispose(); }
     }

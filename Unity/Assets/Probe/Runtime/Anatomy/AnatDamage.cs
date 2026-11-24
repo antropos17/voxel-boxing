@@ -55,6 +55,7 @@ namespace VoxProbe
         public readonly AnatGrid h;
         public readonly AnatState st;
         public readonly bool[] dirty;     // чанки головы, которые надо перестроить
+        public readonly int3[] dmn, dmx;  // часть 7: коробка изменённых ячеек грязного чанка (заводится при первой пометке)
         public float time;
         public float3 grav = new float3(0, -1, 0);   // тяжесть в рамке головы
         public readonly float[] trauma = new float[AnatZone.Count];
@@ -118,7 +119,7 @@ namespace VoxProbe
             mflags = AnatScan.Flags(Surface, Soft);
             opened = new Unity.Collections.NativeList<int>(256, Unity.Collections.Allocator.Persistent);
             cutLog = new Unity.Collections.NativeList<int>(1024, Unity.Collections.Allocator.Persistent);
-            dirty = new bool[st.nch.x * st.nch.y * st.nch.z];
+            dirty = new bool[st.nch.x * st.nch.y * st.nch.z]; dmn = new int3[dirty.Length]; dmx = new int3[dirty.Length];
             // веки: кожа зоны «глаз» в оболочке вокруг шара спереди
             for (int z = 0; z < h.dims.z; z++) for (int y = 0; y < h.dims.y; y++) for (int x = 0; x < h.dims.x; x++)
             {
@@ -158,7 +159,12 @@ namespace VoxProbe
             int cs = AnatState.CS;
             int x0 = math.max(0, x - 3) / cs, x1 = math.min(h.dims.x - 1, x + 3) / cs, y0 = math.max(0, y - 3) / cs, y1 = math.min(h.dims.y - 1, y + 3) / cs,
                 z0 = math.max(0, z - 3) / cs, z1 = math.min(h.dims.z - 1, z + 3) / cs;
-            for (int cz = z0; cz <= z1; cz++) for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) dirty[cx + st.nch.x * (cy + st.nch.y * cz)] = true;
+            int3 p = new int3(x, y, z);
+            for (int cz = z0; cz <= z1; cz++) for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++)
+            {
+                int k = cx + st.nch.x * (cy + st.nch.y * cz);
+                if (!dirty[k]) { dirty[k] = true; dmn[k] = p; dmx[k] = p; } else { dmn[k] = math.min(dmn[k], p); dmx[k] = math.max(dmx[k], p); }
+            }
         }
 
         public VS Get(int x, int y, int z) => st.Get(x, y, z);

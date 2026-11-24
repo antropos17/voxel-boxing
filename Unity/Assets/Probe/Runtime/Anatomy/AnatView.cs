@@ -351,7 +351,7 @@ namespace VoxProbe
         void Flush(int maxChunks)
         {
             MeshDone();
-            for (int i = 0; i < sim.dirty.Length; i++) if (sim.dirty[i]) { sim.dirty[i] = false; headBody.MarkDirty(i); }
+            for (int i = 0; i < sim.dirty.Length; i++) if (sim.dirty[i]) { sim.dirty[i] = false; headBody.MarkDirtyCells(i, sim.dmn[i], sim.dmx[i]); }
             foreach (var b in bodies) b.SyncVis();
             frameChunks = 0;
             for (int guard = 0; guard < 64; guard++)

@@ -1,4 +1,5 @@
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
@@ -8,7 +9,7 @@ namespace VoxProbe
 {
     /// Отрисовка одной решётки анатомической головы: чанки 32³ — по объекту с MeshRenderer.
     /// Корень тела: позиция pos + rot·org (см → м), поворот rot, масштаб step; вершины — в ячейках чанка.
-    public class AnatBody
+    public unsafe class AnatBody
     {
         public readonly AnatGrid g;
         public readonly Transform root;
@@ -31,6 +32,10 @@ namespace VoxProbe
         readonly Mesh[][] jobMeshes;               // массивы сеток по числу чанков в партии (заводятся один раз, без выделений в кадре)
         readonly AnatSpare spare;                  // у куска: откуда брать и куда возвращать объекты чанков
         public int rebuilt; public double rebuildMs;
+        // часть 7 (только голова): прошлая сетка чанков по слоям и коробка изменений с прошлой перестройки (ячейки решётки) —
+        // слои дальше AnatMesher.PrevM от коробки берутся из прошлой сетки. Без коробки (MarkDirty) — чанк целиком.
+        NativeArray<UnsafeList<AVert>> prevV; NativeArray<int> prevSeg, prevNav; NativeArray<byte> prevSt;
+        readonly bool[] prevOk, dfull; readonly int3[] dmn, dmx; NativeArray<int> jobChunk; NativeArray<int4> jobRmn, jobRmx;
 
         public int ChunkCount => nch.x * nch.y * nch.z;
         public int3 ChunkCoord(int i) => new int3(i % nch.x, (i / nch.x) % nch.y, i / (nch.x * nch.y));
@@ -50,6 +55,8 @@ namespace VoxProbe
             int n = ChunkCount;
             rs = new MeshRenderer[n]; meshes = new Mesh[n]; quads = new int[n]; naive = new int[n]; dirty = new bool[n];
             jobIdx = new int[n]; jobMeshes = new Mesh[n + 1][];
+            prevOk = new bool[n]; dfull = new bool[n]; dmn = new int3[n]; dmx = new int3[n];
+            for (int i = 0; i < n; i++) { dfull[i] = true; dmn[i] = int.MaxValue; dmx[i] = int.MinValue; }
             for (int i = 0; i < n; i++)
             {
                 var go = spare != null && spare.chunks.Count > 0 ? spare.chunks.Pop() : null;
@@ -86,18 +93,24 @@ namespace VoxProbe
             return new StateView { pool = nopool, slot = noslot, nch = 1, bs = 1, on = false };
         }
 
-        public void MarkDirty(int chunk) { if (!dirty[chunk]) { dirty[chunk] = true; dirtyCount++; } }
+        public void MarkDirty(int chunk) { dfull[chunk] = true; if (!dirty[chunk]) { dirty[chunk] = true; dirtyCount++; } }
+        /// Часть 7: чанк грязный из-за ячеек решётки в [mn, mx] (изменились материал, состояние или видимость).
+        public void MarkDirtyCells(int chunk, int3 mn, int3 mx)
+        {
+            int3 o = ChunkCoord(chunk) * AnatMesher.CS; dmn[chunk] = math.min(dmn[chunk], mn - o); dmx[chunk] = math.max(dmx[chunk], mx - o);
+            if (!dirty[chunk]) { dirty[chunk] = true; dirtyCount++; }
+        }
 
         VisView Vis() => cull ? VisView.Of(g, isHead) : VisView.Off(g.mat);
 
         /// Забрать из решётки ячейки, сменившие видимость (AnatGrid.Touch), и пометить чанки с отступом сетки (2 ячейки + угол).
         public void SyncVis()
         {
-            foreach (int c in g.tch) MarkDirty(c);
-            g.tch.Clear();
+            foreach (int c in g.tch) { if (g.tbox.TryGetValue(c, out var b)) MarkDirtyCells(c, b.Item1, b.Item2); else MarkDirty(c); }
+            g.tch.Clear(); g.tbox.Clear();
             if (math.any(g.tmn > g.tmx)) return;
             int3 c0 = math.max(g.tmn - 3, 0) / AnatMesher.CS, c1 = math.min(g.tmx + 3, g.dims - 1) / AnatMesher.CS;
-            for (int z = c0.z; z <= c1.z; z++) for (int y = c0.y; y <= c1.y; y++) for (int x = c0.x; x <= c1.x; x++) MarkDirty(x + nch.x * (y + nch.y * z));
+            for (int z = c0.z; z <= c1.z; z++) for (int y = c0.y; y <= c1.y; y++) for (int x = c0.x; x <= c1.x; x++) MarkDirtyCells(x + nch.x * (y + nch.y * z), g.tmn, g.tmx);
             g.tmn = int.MaxValue; g.tmx = int.MinValue;
         }
 
@@ -111,7 +124,29 @@ namespace VoxProbe
             jobOrg = new NativeArray<int3>(n, Allocator.TempJob); jobSt = new NativeArray<long>(n * 4, Allocator.TempJob); jobPh = new NativeArray<long>(n * AnatMesher.PhN, Allocator.TempJob);
             for (int k = 0; k < n; k++) jobOrg[k] = ChunkCoord(jobIdx[k]) * AnatMesher.CS;
             jobData = Mesh.AllocateWritableMeshData(n);
-            job = new AnatChunkJob { mat = g.mat, origins = jobOrg, layout = layout, dims = g.dims, sv = View(), vv = Vis(), style = style, grid = new float4(g.org, g.step), dscale = 0.01f / g.step, meshes = jobData, stats = jobSt, ph = jobPh }.Schedule(n, 1);
+            var cj = new AnatChunkJob { mat = g.mat, origins = jobOrg, layout = layout, dims = g.dims, sv = View(), vv = Vis(), style = style, grid = new float4(g.org, g.step), dscale = 0.01f / g.step, meshes = jobData, stats = jobSt, ph = jobPh };
+            jobChunk = new NativeArray<int>(n, Allocator.TempJob); jobRmn = new NativeArray<int4>(n, Allocator.TempJob); jobRmx = new NativeArray<int4>(n, Allocator.TempJob);
+            if (isHead)
+            {
+                int nc = ChunkCount;
+                if (!prevV.IsCreated)
+                {
+                    prevV = new NativeArray<UnsafeList<AVert>>(nc, Allocator.Persistent);
+                    for (int i = 0; i < nc; i++) prevV[i] = new UnsafeList<AVert>(0, Allocator.Persistent);
+                    prevSeg = new NativeArray<int>(nc * (AnatMesher.SegN + 1), Allocator.Persistent); prevNav = new NativeArray<int>(nc * (AnatMesher.SegN + 1), Allocator.Persistent);
+                    prevSt = new NativeArray<byte>(nc, Allocator.Persistent);
+                }
+                for (int k = 0; k < n; k++)
+                {
+                    int i = jobIdx[k]; jobChunk[k] = i;
+                    jobRmn[k] = new int4(dmn[i], prevOk[i] && !dfull[i] ? 1 : 0); jobRmx[k] = new int4(dmx[i], 0);
+                    prevOk[i] = true;
+                }
+                cj.pv = (UnsafeList<AVert>*)prevV.GetUnsafePtr(); cj.pseg = (int*)prevSeg.GetUnsafePtr(); cj.pnav = (int*)prevNav.GetUnsafePtr(); cj.pst = (byte*)prevSt.GetUnsafePtr();
+            }
+            for (int k = 0; k < n; k++) { int i = jobIdx[k]; dfull[i] = false; dmn[i] = int.MaxValue; dmx[i] = int.MinValue; }
+            cj.chunk = jobChunk; cj.rmn = jobRmn; cj.rmx = jobRmx;
+            job = cj.Schedule(n, 1);
             inFlight = true;
         }
 
@@ -133,7 +168,7 @@ namespace VoxProbe
                 if (cm > AnatProf.chunkMax) { AnatProf.chunkMax = cm; for (int q = 0; q < AnatMesher.PhN; q++) AnatProf.chunkPh[q] = q < 4 ? jobPh[k * AnatMesher.PhN + q] * 1000.0 / freq : jobPh[k * AnatMesher.PhN + q]; }
             }
             rebuilt += ms.Length; rebuildMs += sum;
-            jobOrg.Dispose(); jobSt.Dispose(); jobPh.Dispose();
+            jobOrg.Dispose(); jobSt.Dispose(); jobPh.Dispose(); jobChunk.Dispose(); jobRmn.Dispose(); jobRmx.Dispose();
             AnatProf.meshApply += AnatProf.Now() - w1;
         }
 
@@ -150,7 +185,9 @@ namespace VoxProbe
             var st = new NativeArray<long>(n * 4, Allocator.TempJob);
             for (int i = 0; i < n; i++) orgs[i] = ChunkCoord(i) * AnatMesher.CS;
             var data = Mesh.AllocateWritableMeshData(n);
-            new AnatChunkJob { mat = g.mat, origins = orgs, layout = layout, dims = g.dims, sv = View(), vv = Vis(), style = style, grid = new float4(g.org, g.step), dscale = 0.01f / g.step, meshes = data, stats = st }.Schedule(n, 1).Complete();
+            var e = new NativeArray<int>(0, Allocator.TempJob); var e4 = new NativeArray<int4>(0, Allocator.TempJob);
+            new AnatChunkJob { mat = g.mat, origins = orgs, layout = layout, dims = g.dims, sv = View(), vv = Vis(), style = style, grid = new float4(g.org, g.step), dscale = 0.01f / g.step, meshes = data, stats = st, chunk = e, rmn = e4, rmx = e4 }.Schedule(n, 1).Complete();
+            e.Dispose(); e4.Dispose();
             Mesh.ApplyAndDisposeWritableMeshData(data, meshes, MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices);
             for (int i = 0; i < n; i++)
             {
@@ -159,7 +196,8 @@ namespace VoxProbe
                 rs[i].enabled = quads[i] > 0;
                 dirty[i] = false;
             }
-            dirtyCount = 0; g.tmn = int.MaxValue; g.tmx = int.MinValue; g.tch.Clear();
+            dirtyCount = 0; g.tmn = int.MaxValue; g.tmx = int.MinValue; g.tch.Clear(); g.tbox.Clear();
+            for (int i = 0; i < n; i++) { prevOk[i] = false; dfull[i] = false; dmn[i] = int.MaxValue; dmx[i] = int.MinValue; }   // часть 7: прошлые сетки по слоям не заведены — следующая перестройка целиком
             orgs.Dispose(); st.Dispose();
         }
 
@@ -167,6 +205,7 @@ namespace VoxProbe
         {
             if (inFlight) Complete();
             if (nopool.IsCreated) { nopool.Dispose(); noslot.Dispose(); }
+            if (prevV.IsCreated) { for (int i = 0; i < prevV.Length; i++) prevV[i].Dispose(); prevV.Dispose(); prevSeg.Dispose(); prevNav.Dispose(); prevSt.Dispose(); }
             if (spare != null && root != null)
             {
                 // кусок: объекты чанков с сетками и корень — в запас (во время игры без создания и DestroyImmediate)
