@@ -6,6 +6,9 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/Game/Game.unity
+    guid: 2e7a08813e460574e8fd0a91a85012ec
+  - enabled: 1
     path: Assets/Probe/Probe.unity
     guid: e86c62b84cd54cb49a389e19e4c4e685
   m_configObjects: {}

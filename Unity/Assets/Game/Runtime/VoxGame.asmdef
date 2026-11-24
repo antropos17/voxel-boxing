@@ -1,0 +1,6 @@
+{
+  "name": "VoxGame",
+  "rootNamespace": "VoxGame",
+  "references": ["VoxProbe", "Unity.InputSystem", "Unity.Mathematics", "Unity.Collections", "Unity.Burst", "UnityEngine.UI"],
+  "autoReferenced": true
+}
