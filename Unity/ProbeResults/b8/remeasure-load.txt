@@ -1,0 +1,7 @@
+﻿remeasure-1 02:37:39 args='' load_before=34 load_after=63 tries=52/34
+remeasure-2 02:41:31 args='' load_before=41 load_after=57 tries=48/51/87/41 UNDER_LOAD top3='chrome, claude, Telegram'
+remeasure-3 02:44:09 args='' load_before=39 load_after=29 tries=51/53/39
+remeasure-async60-1 02:44:31 args='-anatBenchVsync -anatBenchAsyncMesh' load_before=38 load_after=33 tries=38
+remeasure-async60-2 02:44:52 args='-anatBenchVsync -anatBenchAsyncMesh' load_before=29 load_after=39 tries=29
+remeasure-async60-3 02:48:44 args='-anatBenchVsync -anatBenchAsyncMesh' load_before=59 load_after=55 tries=49/55/49/59 UNDER_LOAD top3='claude, chrome, node'
+remeasure-lite-1 02:51:22 args='-anatLite' load_before=29 load_after=39 tries=47/82/29
