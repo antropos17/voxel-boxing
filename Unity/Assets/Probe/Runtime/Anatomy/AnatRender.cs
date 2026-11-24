@@ -118,7 +118,7 @@ namespace VoxProbe
         public void Complete()
         {
             if (!inFlight) return;
-            job.Complete(); inFlight = false;
+            double w0 = AnatProf.Now(); job.Complete(); inFlight = false; double w1 = AnatProf.Now(); AnatProf.meshWait += w1 - w0;
             var ms = jobMeshes[jobN] ??= new Mesh[jobN];
             for (int k = 0; k < ms.Length; k++) ms[k] = meshes[jobIdx[k]];
             Mesh.ApplyAndDisposeWritableMeshData(jobData, ms, MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices);
@@ -133,6 +133,7 @@ namespace VoxProbe
             }
             rebuilt += ms.Length; rebuildMs += sum;
             jobOrg.Dispose(); jobSt.Dispose();
+            AnatProf.meshApply += AnatProf.Now() - w1;
         }
 
         /// Перестроить все грязные чанки сразу (для снимков и тестов).

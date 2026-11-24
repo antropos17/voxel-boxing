@@ -225,6 +225,7 @@ namespace VoxProbe
             }
             hits++;
             float3 n = Normal(hc.x, hc.y, hc.z);
+            AnatProf.Lap(AnatProf.Locate);
             float3 l = math.normalize(-n * 0.7f + dir * 0.3f);          // ось пятна — внутрь
             float Rc = (power ? 2.4f : 1.7f) / S, R2 = Rc * Rc * 2.1f, hs = 1.4f / S;
             int R = (int)math.ceil(Rc * 1.5f + 2);
@@ -242,6 +243,7 @@ namespace VoxProbe
                 PL.Add((i, x, y, z, pp));
                 if (pp > best && h.zone[i] != 0) { best = pp; zone = h.zone[i]; }
             }
+            AnatProf.Lap(AnatProf.Spot);
             r.zone = zone; lastZone = zone; r.cells = PL.Count; r.entryMat = h.mat[h.Index(hc.x, hc.y, hc.z)];
             // травма зоны: 30% общей травмы головы добавляется к каждой зоне
             float add = E * (power ? 1 : 0.5f);
@@ -284,6 +286,7 @@ namespace VoxProbe
                     float ba = Ep * 15; v.blt = Wt(v.blt, v.blood, now, ba); v.blood = Add8(v.blood, ba); Put(q.x, q.y, q.z, v);
                 }
             }
+            AnatProf.Lap(AnatProf.Apply);
             // веки — рыхлая клетчатка: отёк от любого удара в область глазницы (бровь, скула, сам глаз) собирается в них,
             // сильнее при ударе ближе к глазу (до 4 см от центра шара)
             float3 hp = h.Local(hc.x, hc.y, hc.z);
@@ -299,6 +302,7 @@ namespace VoxProbe
                     v.rt = Wt(v.rt, v.red + v.swell, now, la); v.swell = (byte)math.min(cap, v.swell + la); Put(c3.x, c3.y, c3.z, v);
                 }
             }
+            AnatProf.Lap(AnatProf.Lids);
             foreach (var f in FAIL)
             {
                 int i = h.Index(f.x, f.y, f.z); byte m = h.mat[i]; if (!AnatMat.Cull(m)) continue;
@@ -308,13 +312,18 @@ namespace VoxProbe
                 if (Surface(m)) { r.split++; r.removed += Tear(f.x, f.y, f.z, E, zq, n); AddWound(f.x, f.y, f.z, AnatZone.Bleed[zq], WSkin, 22, "рана: " + AnatZone.Names[zq]); }
                 else if (rng.NextDouble() < 0.3) AddWound(f.x, f.y, f.z, AnatZone.Bleed[zq] * 0.5f, WSkin, 22, "рана глубже кожи: " + AnatZone.Names[zq]);
             }
+            AnatProf.Lap(AnatProf.Fail);
             Smear(dir, n);
+            AnatProf.Lap(AnatProf.Smear);
             r.macer = Macerate(zone, eff, h.Local(hc.x, hc.y, hc.z), E, power);
+            AnatProf.Lap(AnatProf.Macer);
             if (power) Break(hc, n, l, dir, E, zone, eff);
             if (noseAcc > 3 && zone == AnatZone.Nose)
                 for (int s = 0; s < 2; s++) if (nostril[s].x >= 0) AddWound(nostril[s].x, nostril[s].y, nostril[s].z, 2.2f + noseAcc * 0.25f, WNose, 45, "кровь из носа");
+            AnatProf.Lap(AnatProf.Break);
             sw.Stop(); r.ms = (float)sw.Elapsed.TotalMilliseconds; hitMs += r.ms; hitMsMax = math.max(hitMsMax, r.ms);
             SyncVis();
+            AnatProf.Lap(AnatProf.DmgVis);
             return r;
         }
 
@@ -332,7 +341,7 @@ namespace VoxProbe
         {
             int i = h.Index(x, y, z); byte m = h.mat[i], part = h.part[i];
             if (seenMat.Add(h.zone[i] * 64 + m)) exposed.Add((time, AnatMat.Table[m].name, h.zone[i]));   // первое появление материала в зоне
-            cutLog.Add(i);
+            cutLog.Add(i); AnatProf.removes++;
             SetMat(i, AnatMat.Empty); if (st.Idx(x, y, z, false) >= 0) st.Set(x, y, z, default);
             opened.Add(i);
             removed++;
@@ -684,7 +693,7 @@ namespace VoxProbe
             if (h.mat[i] == AnatMat.Empty) return;
             int x = i % h.dims.x, y = (i / h.dims.x) % h.dims.y, z = i / (h.dims.x * h.dims.y);
             SetMat(i, AnatMat.Empty); if (st.Idx(x, y, z, false) >= 0) st.Set(x, y, z, default);
-            opened.Add(i); removed++; Dirty(x, y, z);
+            opened.Add(i); removed++; Dirty(x, y, z); AnatProf.takes++;
         }
 
         /// Мощный удар по кости и в пролом: оболочка и мозг в проломе, перелом кольцом (травма зоны > 24), разрыв (> 42).
@@ -700,7 +709,7 @@ namespace VoxProbe
             }
             if (eff > 24) Fracture(hp, l, E, zone);
             // разрыв: травма зоны > 42 (как в вебе) или общая травма головы > 90 — дальше каждый мощный удар рвёт голову
-            if (eff > 42 || traumaAll > 90) { float R = 1.6f + 0.3f * E + math.min(0.8f, traumaAll / 400f); Rip(hp + dir * R * 0.4f, R); }
+            if (eff > 42 || traumaAll > 90) { float R = 1.6f + 0.3f * E + math.min(0.8f, traumaAll / 400f); AnatProf.Lap(AnatProf.Break); Rip(hp + dir * R * 0.4f, R); AnatProf.Lap(AnatProf.Rip); }
         }
 
         /// Перелом: кость под ударом раскалывается по кольцу (неровному) вместе с мягкими тканями над ним; оболочка под отломком
@@ -720,9 +729,10 @@ namespace VoxProbe
             {
                 int x = bc.x + dx, y = bc.y + dy, z = bc.z + dz; if (!In(x, y, z)) continue;
                 int i = h.Index(x, y, z); byte m = h.mat[i]; if (!AnatMat.Cull(m) || m == AnatMat.Covered || Brainy(m)) continue;
-                float3 p = h.Local(x, y, z); if (Protected(p)) continue;
-                float3 q = p - B; float al = math.dot(q, l); if (al < -2.6f || al > 3.5f) continue;
-                float3 rv = q - l * al; float rad = math.length(rv), ang = math.atan2(math.dot(rv, w), math.dot(rv, u));
+                // часть 4: дешёвый отсев по геометрии до Protected и тригонометрии (кольцо и отломок не шире Rf·1,21 + 0,17)
+                float3 p = h.Local(x, y, z); float3 q = p - B; float al = math.dot(q, l); if (al < -2.6f || al > 3.5f) continue;
+                float3 rv = q - l * al; float rad = math.length(rv); if (rad > Rf * 1.25f + 0.2f || Protected(p)) continue;
+                float ang = math.atan2(math.dot(rv, w), math.dot(rv, u));
                 float R = Rf * (1 + 0.14f * math.sin(ang * 3 + ph) + 0.07f * math.sin(ang * 7 + ph2));
                 bool ring = math.abs(rad - R) < 0.17f && al < 1.6f;
                 bool under = rad < R && al > 0 && (m == AnatMat.Dura || m == AnatMat.Csf);
@@ -754,8 +764,8 @@ namespace VoxProbe
             for (int z = lo.z; z <= hi.z; z++) for (int y = lo.y; y <= hi.y; y++) for (int x = lo.x; x <= hi.x; x++)
             {
                 int i = h.Index(x, y, z); byte m = h.mat[i]; if (!AnatMat.Cull(m)) continue;
-                float3 p = h.Local(x, y, z); if (Protected(p)) continue;
-                float3 d = p - c; float r = math.length(d);
+                // часть 4: дешёвый отсев до Protected и синусов (неровный шар не шире R·1,28)
+                float3 p = h.Local(x, y, z); float3 d = p - c; float r = math.length(d); if (r > R * 1.3f || Protected(p)) continue;
                 float Rn = R * (1 + 0.18f * math.sin(d.x * 2.1f + ph) * math.sin(d.y * 1.7f - ph) + 0.1f * math.sin(d.z * 3.3f + ph * 2));
                 if (r > Rn) continue;
                 // разрыв убирает без пропитки соседей кровью: иначе срез (культя) сплошь красный и слоёв не видно;
