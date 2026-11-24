@@ -1,0 +1,36 @@
+init
+first load=40
+wait load=40
+wait load=20
+wait load=33
+wait load=49
+wait load=40
+wait load=50
+wait load=36
+wait load=40
+wait load=28
+wait load=54
+wait load=62
+wait load=57
+wait load=64
+wait load=64
+wait load=73
+wait load=83
+wait load=91
+wait load=91
+wait load=90
+wait load=68
+wait load=47
+wait load=46
+wait load=33
+wait load=30
+wait load=50
+wait load=49
+start load=40 waited_min=30.6
+idle-1 loadBefore=32 loadAfter=34
+idle-2 loadBefore=37 loadAfter=34
+idle-3 loadBefore=34 loadAfter=33
+idle-async60-1 loadBefore=33 loadAfter=33
+idle-async60-2 loadBefore=34 loadAfter=37
+idle-async60-3 loadBefore=27 loadAfter=26
+DONE
