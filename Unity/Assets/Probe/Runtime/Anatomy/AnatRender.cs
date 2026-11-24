@@ -27,7 +27,7 @@ namespace VoxProbe
         static MaterialPropertyBlock mpb;
         static readonly int ChunkOrgId = Shader.PropertyToID("_ChunkOrg"), BodyParId = Shader.PropertyToID("_BodyPar");
         // перестройка части чанков (джобами)
-        JobHandle job; Mesh.MeshDataArray jobData; NativeArray<int3> jobOrg; NativeArray<long> jobSt; readonly int[] jobIdx; int jobN; bool inFlight;
+        JobHandle job; Mesh.MeshDataArray jobData; NativeArray<int3> jobOrg; NativeArray<long> jobSt, jobPh; readonly int[] jobIdx; int jobN; bool inFlight;
         readonly Mesh[][] jobMeshes;               // массивы сеток по числу чанков в партии (заводятся один раз, без выделений в кадре)
         readonly AnatSpare spare;                  // у куска: откуда брать и куда возвращать объекты чанков
         public int rebuilt; public double rebuildMs;
@@ -108,10 +108,10 @@ namespace VoxProbe
             int n = 0;
             for (int i = 0; i < dirty.Length && n < max; i++) if (dirty[i]) { jobIdx[n++] = i; dirty[i] = false; dirtyCount--; }
             jobN = n;
-            jobOrg = new NativeArray<int3>(n, Allocator.TempJob); jobSt = new NativeArray<long>(n * 4, Allocator.TempJob);
+            jobOrg = new NativeArray<int3>(n, Allocator.TempJob); jobSt = new NativeArray<long>(n * 4, Allocator.TempJob); jobPh = new NativeArray<long>(n * AnatMesher.PhN, Allocator.TempJob);
             for (int k = 0; k < n; k++) jobOrg[k] = ChunkCoord(jobIdx[k]) * AnatMesher.CS;
             jobData = Mesh.AllocateWritableMeshData(n);
-            job = new AnatChunkJob { mat = g.mat, origins = jobOrg, layout = layout, dims = g.dims, sv = View(), vv = Vis(), style = style, grid = new float4(g.org, g.step), dscale = 0.01f / g.step, meshes = jobData, stats = jobSt }.Schedule(n, 1);
+            job = new AnatChunkJob { mat = g.mat, origins = jobOrg, layout = layout, dims = g.dims, sv = View(), vv = Vis(), style = style, grid = new float4(g.org, g.step), dscale = 0.01f / g.step, meshes = jobData, stats = jobSt, ph = jobPh }.Schedule(n, 1);
             inFlight = true;
         }
 
@@ -129,10 +129,11 @@ namespace VoxProbe
                 ms[k].bounds = bnd;
                 quads[i] = (int)jobSt[k * 4 + 1]; naive[i] = (int)jobSt[k * 4];
                 rs[i].enabled = quads[i] > 0;
-                double cm = (jobSt[k * 4 + 3] - jobSt[k * 4 + 2]) * 1000.0 / freq; sum += cm; if (cm > AnatProf.chunkMax) AnatProf.chunkMax = cm;
+                double cm = (jobSt[k * 4 + 3] - jobSt[k * 4 + 2]) * 1000.0 / freq; sum += cm;
+                if (cm > AnatProf.chunkMax) { AnatProf.chunkMax = cm; for (int q = 0; q < AnatMesher.PhN; q++) AnatProf.chunkPh[q] = q < 4 ? jobPh[k * AnatMesher.PhN + q] * 1000.0 / freq : jobPh[k * AnatMesher.PhN + q]; }
             }
             rebuilt += ms.Length; rebuildMs += sum;
-            jobOrg.Dispose(); jobSt.Dispose();
+            jobOrg.Dispose(); jobSt.Dispose(); jobPh.Dispose();
             AnatProf.meshApply += AnatProf.Now() - w1;
         }
 

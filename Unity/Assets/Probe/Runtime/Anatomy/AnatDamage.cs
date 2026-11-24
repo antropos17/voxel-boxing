@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -99,12 +100,22 @@ namespace VoxProbe
         /// Часть 5, только вид: ось и радиус кольца каждого перелома (xyz — направление удара, w — Rf, см) — для трещин в шейдере.
         public readonly List<float4> fracAxis = new List<float4>();
         public int ripCount, brainHits; public byte lastZone;
-        readonly HashSet<int> seenMat = new HashSet<int>();
+        readonly bool[] seenMat = new bool[256 * 64];   // часть 7: зона·64 + материал уже открывался (было HashSet)
+        bool SeenMat(int k) { if (seenMat[k]) return false; seenMat[k] = true; return true; }
+        // часть 7: предварительный отбор ячеек в Burst (AnatScanJob), пометки обхода Strip, таблицы синусов разрыва по осям
+        Unity.Collections.NativeList<int> scan;
+        Unity.Collections.NativeArray<byte> mflags;
+        byte[] mark; readonly List<int> marked = new List<int>();
+        float[] sinX = new float[64], sinY = new float[64], sinZ = new float[64];
         bool closed;                                 // ячейка закрылась (отёк века) — видимость заново
 
         public AnatDamage(AnatHead a, int seed = 1)
         {
-            this.a = a; h = a.head; st = new AnatState(h); rng = new System.Random(seed);
+            // часть 7: пул состояний сразу на все чанки головы — рост NativeList копировал весь пул посреди удара (до 5–7 мс)
+            int3 nc = (a.head.dims + AnatState.CS - 1) / AnatState.CS;
+            this.a = a; h = a.head; st = new AnatState(h, nc.x * nc.y * nc.z); rng = new System.Random(seed);
+            scan = new Unity.Collections.NativeList<int>(4096, Unity.Collections.Allocator.Persistent);
+            mflags = AnatScan.Flags(Surface, Soft);
             opened = new Unity.Collections.NativeList<int>(256, Unity.Collections.Allocator.Persistent);
             cutLog = new Unity.Collections.NativeList<int>(1024, Unity.Collections.Allocator.Persistent);
             dirty = new bool[st.nch.x * st.nch.y * st.nch.z];
@@ -163,17 +174,31 @@ namespace VoxProbe
         }
 
         /// Ближайшая открытая рисуемая ячейка в кубе r вокруг точки (lowY — среди равных брать нижнюю).
+        /// Часть 7: обход смещений куба в порядке возрастания d (при равных — в прежнем порядке z, y, x): первая подходящая ячейка —
+        /// та же, что давал полный обход с выбором строго меньшего d (раньше — все (2r+1)³ ячеек с Exposed у каждой).
         int3 Nearest(float3 p, int r, bool lowY)
         {
-            int3 c = (int3)math.floor((p - h.org) / S); int3 best = new int3(-1); float bd = 1e9f;
-            for (int dz = -r; dz <= r; dz++) for (int dy = -r; dy <= r; dy++) for (int dx = -r; dx <= r; dx++)
+            int3 c = (int3)math.floor((p - h.org) / S);
+            var o = NearOrder(r, lowY);
+            for (int k = 0; k < o.Length; k++)
             {
-                int x = c.x + dx, y = c.y + dy, z = c.z + dz; byte m = M(x, y, z);
-                if (!AnatMat.Cull(m) || m == AnatMat.Covered || !Exposed(x, y, z)) continue;
-                float d = dx * dx + dy * dy + dz * dz + (lowY ? dy * 0.8f : 0);
-                if (d < bd) { bd = d; best = new int3(x, y, z); }
+                int3 q = c + o[k]; byte m = M(q.x, q.y, q.z);
+                if (!AnatMat.Cull(m) || m == AnatMat.Covered || !Exposed(q.x, q.y, q.z)) continue;
+                return q;
             }
-            return best;
+            return new int3(-1);
+        }
+        static readonly int3[][] nearOrd = new int3[16][];
+        static int3[] NearOrder(int r, bool lowY)
+        {
+            int key = r * 2 + (lowY ? 1 : 0);
+            if (nearOrd[key] != null) return nearOrd[key];
+            var L = new List<(float d, int n, int3 o)>();
+            for (int dz = -r; dz <= r; dz++) for (int dy = -r; dy <= r; dy++) for (int dx = -r; dx <= r; dx++)
+                L.Add((dx * dx + dy * dy + dz * dz + (lowY ? dy * 0.8f : 0), L.Count, new int3(dx, dy, dz)));
+            L.Sort((u, v) => u.d != v.d ? u.d.CompareTo(v.d) : u.n.CompareTo(v.n));
+            var a = new int3[L.Count]; for (int k = 0; k < a.Length; k++) a[k] = L[k].o;
+            return nearOrd[key] = a;
         }
 
         /// Глубина до кости (или зуба) вдоль l от ячейки, см. Хрящ — как кость в 1,6 раза дальше, полость — опоры нет.
@@ -369,9 +394,9 @@ namespace VoxProbe
         void Remove(int x, int y, int z)
         {
             int i = h.Index(x, y, z); byte m = h.mat[i], part = h.part[i];
-            if (seenMat.Add(h.zone[i] * 64 + m)) exposed.Add((time, AnatMat.Table[m].name, h.zone[i]));   // первое появление материала в зоне
+            if (SeenMat(h.zone[i] * 64 + m)) exposed.Add((time, AnatMat.Table[m].name, h.zone[i]));   // первое появление материала в зоне
             cutLog.Add(i); AnatProf.removes++;
-            SetMat(i, AnatMat.Empty); if (st.Idx(x, y, z, false) >= 0) st.Set(x, y, z, default);
+            SetMat(i, AnatMat.Empty); int sk = st.Idx(x, y, z, false); if (sk >= 0) st.pool[sk] = default;
             opened.Add(i);
             removed++;
             Dirty(x, y, z);
@@ -383,8 +408,9 @@ namespace VoxProbe
                 byte nm = M(xx, yy, zz);
                 if (nm == AnatMat.Artery || nm == AnatMat.Vein) OpenVessel(h.part[h.Index(xx, yy, zz)], xx, yy, zz);
                 if (!AnatMat.Cull(nm) || nm == AnatMat.Covered) continue;
-                var v = Get(xx, yy, zz); float ba = d == 3 || d == 7 ? 90 : d == 6 ? 60 : 55;
-                v.blt = Wt(v.blt, v.blood, now, ba); v.blood = Add8(v.blood, ba); Put(xx, yy, zz, v);
+                // часть 7: Get + Put одним индексом (чанк состояний заводится сразу — Put завёл бы его же; новая память обнулена)
+                ref VS v = ref st.pool.ElementAt(st.Idx(xx, yy, zz, true)); float ba = d == 3 || d == 7 ? 90 : d == 6 ? 60 : 55;
+                v.blt = Wt(v.blt, v.blood, now, ba); v.blood = Add8(v.blood, ba); Dirty(xx, yy, zz);
             }
             if (m == AnatMat.Artery || m == AnatMat.Vein) OpenVessel(part, x, y, z);
         }
@@ -497,11 +523,31 @@ namespace VoxProbe
                 if (math.lengthsq(h.Local(x, y, z) - c) <= R * R) yield return new int3(x, y, z);
         }
 
+        /// Часть 7: ячейки шара Ball(c, R) с материалом из need (и открытые наружу, если exposed) → BL, в порядке Ball.
+        /// Отбор в Burst с запасом по радиусу, здесь — прежняя проверка расстояния.
+        readonly List<int3> BL = new List<int3>();
+        void BallScan(float3 c, float R, byte need, bool exposed)
+        {
+            BL.Clear();
+            int3 lo = math.max((int3)math.floor((c - R - h.org) / S), 0), hi = math.min((int3)math.ceil((c + R - h.org) / S), h.dims - 1);
+            if (math.any(lo > hi)) return;
+            RunScan(0, lo, hi, need, exposed, c, 0, R * R, 0, 0);
+            for (int k = 0; k < scan.Length; k++)
+            {
+                int3 q = Cell(scan[k]);
+                if (math.lengthsq(h.Local(q.x, q.y, q.z) - c) <= R * R) BL.Add(q);
+            }
+        }
+        void RunScan(int mode, int3 lo, int3 hi, byte need, bool exposed, float3 c, float3 l, float r2, float r, float Rf)
+        {
+            new AnatScanJob { mat = h.mat, vis = h.vis.IsCreated ? h.vis : h.mat, hasVis = h.vis.IsCreated, exposed = exposed, flags = mflags, dims = h.dims, lo = lo, hi = hi,
+                org = h.org, S = h.step, mode = mode, need = need, c = c, l = l, r2 = r2, r = r, Rf = Rf, outI = scan }.Run();
+        }
+
         /// Каша: открытая мягкая ткань рвётся клочьями, остальное размозжено и пропитано кровью.
         void Pulp(float3 c, float R, float amt)
         {
-            var L = new List<int3>();
-            foreach (var q in Ball(c, R)) { byte m = M(q.x, q.y, q.z); if ((Surface(m) || Soft(m)) && Exposed(q.x, q.y, q.z)) L.Add(q); }
+            BallScan(c, R, AnatScan.FSurf | AnatScan.FSoft, true); var L = BL;
             byte now = T2(time);
             foreach (var q in L)
             {
@@ -516,34 +562,37 @@ namespace VoxProbe
             }
         }
 
+        readonly List<int3> SL = new List<int3>();
         /// До кости: всё мягкое покрытие, достижимое от поверхности без прохода сквозь кость, снимается; надкостница — частично.
         void Strip(float3 c, float R)
         {
-            var seen = new HashSet<int>(); var q = new Queue<int3>();
-            foreach (var p in Ball(c, R)) { byte m = M(p.x, p.y, p.z); if ((Surface(m) || Soft(m)) && Exposed(p.x, p.y, p.z)) { q.Enqueue(p); seen.Add(h.Index(p.x, p.y, p.z)); } }
-            var L = new List<int3>();
-            while (q.Count > 0)
+            // часть 7: пометки «уже в очереди» — массив байтов головы со списком для сброса (было HashSet), очередь — список с головой
+            if (mark == null) mark = new byte[h.Count];
+            BallScan(c, R, AnatScan.FSurf | AnatScan.FSoft, true);
+            var L = SL; L.Clear();
+            foreach (var p in BL) { L.Add(p); int i0 = h.Index(p.x, p.y, p.z); mark[i0] = 1; marked.Add(i0); }
+            for (int qh = 0; qh < L.Count; qh++)
             {
-                var p = q.Dequeue(); L.Add(p);
+                var p = L[qh];
                 for (int d = 0; d < 6; d++)
                 {
                     int3 nb = p + new int3(d == 0 ? 1 : d == 1 ? -1 : 0, d == 2 ? 1 : d == 3 ? -1 : 0, d == 4 ? 1 : d == 5 ? -1 : 0);
                     if (!In(nb.x, nb.y, nb.z)) continue; int i = h.Index(nb.x, nb.y, nb.z); byte m = h.mat[i];
-                    if (seen.Contains(i) || !(Surface(m) || Soft(m)) || m == AnatMat.OrbFat || m == AnatMat.Nerve || m == AnatMat.Mucosa) continue;
+                    if (mark[i] != 0 || !(Surface(m) || Soft(m)) || m == AnatMat.OrbFat || m == AnatMat.Nerve || m == AnatMat.Mucosa) continue;
                     if (AnatPart.IsMuscle(h.part[i]) && h.part[i] >= AnatPart.RectusSup && h.part[i] <= AnatPart.ObliqueInf) continue;
                     if (math.lengthsq(h.Local(nb.x, nb.y, nb.z) - c) > R * R) continue;
-                    seen.Add(i); q.Enqueue(nb);
+                    mark[i] = 1; marked.Add(i); L.Add(nb);
                 }
             }
+            foreach (int i in marked) mark[i] = 0; marked.Clear();
             foreach (var p in L) { byte m = M(p.x, p.y, p.z); if (m == AnatMat.Periost && rng.NextDouble() > 0.7) continue; Remove(p.x, p.y, p.z); }
         }
 
         /// Сколы: верхний слой открытой компакты выбит, видна губчатая кость (сами летящие куски — этап C).
         void Chips(float3 c, float R)
         {
-            var L = new List<int3>();
-            foreach (var p in Ball(c, R)) if (M(p.x, p.y, p.z) == AnatMat.Compact && Exposed(p.x, p.y, p.z)) L.Add(p);
-            foreach (var p in L) if (rng.NextDouble() < 0.5) Remove(p.x, p.y, p.z);
+            BallScan(c, R, AnatScan.FCompact, true);
+            foreach (var p in BL) if (rng.NextDouble() < 0.5) Remove(p.x, p.y, p.z);
         }
 
         // ---------- кровь ----------
@@ -731,7 +780,7 @@ namespace VoxProbe
             visMs += a.vis.lastMs; visMsMax = math.max(visMsMax, a.vis.lastMs);
         }
 
-        public void Dispose() { st.Dispose(); if (opened.IsCreated) opened.Dispose(); if (cutLog.IsCreated) cutLog.Dispose(); }
+        public void Dispose() { st.Dispose(); if (opened.IsCreated) opened.Dispose(); if (cutLog.IsCreated) cutLog.Dispose(); if (scan.IsCreated) scan.Dispose(); }
 
         // ---------- часть 2: переломы, мозг, разрыв ----------
         int3 CellOf(float3 p) => (int3)math.floor((p - h.org) / S);
@@ -741,7 +790,7 @@ namespace VoxProbe
         {
             if (h.mat[i] == AnatMat.Empty) return;
             int x = i % h.dims.x, y = (i / h.dims.x) % h.dims.y, z = i / (h.dims.x * h.dims.y);
-            SetMat(i, AnatMat.Empty); if (st.Idx(x, y, z, false) >= 0) st.Set(x, y, z, default);
+            SetMat(i, AnatMat.Empty); int sk = st.Idx(x, y, z, false); if (sk >= 0) st.pool[sk] = default;
             opened.Add(i); removed++; Dirty(x, y, z); AnatProf.takes++;
         }
 
@@ -774,10 +823,13 @@ namespace VoxProbe
             float3 u = math.normalize(math.cross(l, math.abs(l.y) < 0.9f ? new float3(0, 1, 0) : new float3(1, 0, 0))), w = math.cross(l, u);
             float ph = (float)rng.NextDouble() * 6.28f, ph2 = (float)rng.NextDouble() * 6.28f;
             int3 bc = CellOf(B); int Rc = (int)math.ceil((Rf * 1.25f + 3f) / S); int cut = 0;
-            for (int dz = -Rc; dz <= Rc; dz++) for (int dy = -Rc; dy <= Rc; dy++) for (int dx = -Rc; dx <= Rc; dx++)
+            // часть 7: куб (до 55³) отбирается в Burst с запасом (AnatScanJob, режим 2); здесь — прежние проверки по отобранным, в том же порядке
+            int3 flo = math.max(bc - Rc, 0), fhi = math.min(bc + Rc, h.dims - 1);
+            if (math.any(flo > fhi)) scan.Clear(); else RunScan(2, flo, fhi, AnatScan.FFrac, false, B, l, 0, 0, Rf);
+            for (int k = 0; k < scan.Length; k++)
             {
-                int x = bc.x + dx, y = bc.y + dy, z = bc.z + dz; if (!In(x, y, z)) continue;
-                int i = h.Index(x, y, z); byte m = h.mat[i]; if (!AnatMat.Cull(m) || m == AnatMat.Covered || Brainy(m)) continue;
+                int i = scan[k]; int3 xyz = Cell(i); int x = xyz.x, y = xyz.y, z = xyz.z;
+                byte m = h.mat[i]; if (!AnatMat.Cull(m) || m == AnatMat.Covered || Brainy(m)) continue;
                 // часть 4: дешёвый отсев по геометрии до Protected и тригонометрии (кольцо и отломок не шире Rf·1,21 + 0,17)
                 float3 p = h.Local(x, y, z); float3 q = p - B; float al = math.dot(q, l); if (al < -2.6f || al > 3.5f) continue;
                 bool soft = m == AnatMat.Dura || m == AnatMat.Csf; if (al >= 1.6f && !soft) continue;   // часть 6: кольцо — только при al < 1,6, ниже отломка — только оболочка и ликвор
@@ -811,28 +863,40 @@ namespace VoxProbe
             rips.Add(new float4(c, R)); ripCount++;
             int3 lo = math.max(CellOf(c - R * 1.25f), 0), hi = math.min(CellOf(c + R * 1.25f), h.dims - 1);
             float ph = (float)rng.NextDouble() * 6.28f; int cut = 0;
-            for (int z = lo.z; z <= hi.z; z++) for (int y = lo.y; y <= hi.y; y++) for (int x = lo.x; x <= hi.x; x++)
+            if (math.any(lo > hi)) { if (CanLog()) events.Add(F1(time) + " с: разрыв — шар " + F1(R) + " см, 0 ячеек"); return; }
+            // часть 7: синусы неровного шара раздельны по осям (d.x зависит только от x и т. д.) — по таблице на каждую ось, те же выражения;
+            // ячейки шара до 1,3 R отбираются в Burst с запасом (AnatScanJob, режим 1), здесь — прежние проверки в том же порядке
+            int3 n3 = hi - lo + 1;
+            if (sinX.Length < n3.x) sinX = new float[n3.x * 2]; if (sinY.Length < n3.y) sinY = new float[n3.y * 2]; if (sinZ.Length < n3.z) sinZ = new float[n3.z * 2];
+            for (int x = lo.x; x <= hi.x; x++) { float3 d = h.Local(x, lo.y, lo.z) - c; sinX[x - lo.x] = math.sin(d.x * 2.1f + ph); }
+            for (int y = lo.y; y <= hi.y; y++) { float3 d = h.Local(lo.x, y, lo.z) - c; sinY[y - lo.y] = math.sin(d.y * 1.7f - ph); }
+            for (int z = lo.z; z <= hi.z; z++) { float3 d = h.Local(lo.x, lo.y, z) - c; sinZ[z - lo.z] = math.sin(d.z * 3.3f + ph * 2); }
+            RunScan(1, lo, hi, AnatScan.FCull, false, c, 0, 0, R * 1.3f, 0);
+            for (int k = 0; k < scan.Length; k++)
             {
-                int i = h.Index(x, y, z); byte m = h.mat[i]; if (!AnatMat.Cull(m)) continue;
+                int i = scan[k]; int3 xyz = Cell(i); int x = xyz.x, y = xyz.y, z = xyz.z;
+                byte m = h.mat[i]; if (!AnatMat.Cull(m)) continue;
                 // часть 4: дешёвый отсев до Protected и синусов (неровный шар не шире R·1,28)
                 float3 p = h.Local(x, y, z); float3 d = p - c; float r = math.length(d); if (r > R * 1.3f || Protected(p)) continue;
                 // часть 6: неровный шар не уже R·0,72 (0,18 + 0,1) — ближе R·0,71 ячейка внутри без синусов
                 if (r >= R * 0.71f)
                 {
-                    float Rn = R * (1 + 0.18f * math.sin(d.x * 2.1f + ph) * math.sin(d.y * 1.7f - ph) + 0.1f * math.sin(d.z * 3.3f + ph * 2));
+                    float Rn = R * (1 + 0.18f * sinX[x - lo.x] * sinY[y - lo.y] + 0.1f * sinZ[z - lo.z]);
                     if (r > Rn) continue;
                 }
                 // разрыв убирает без пропитки соседей кровью: иначе срез (культя) сплошь красный и слоёв не видно;
                 // кровь — пятнами на краю и из вскрытых сосудов
                 byte part = h.part[i];
                 Take(i); cutLog.Add(i); cut++;
-                if (seenMat.Add(h.zone[i] * 64 + m)) exposed.Add((time, AnatMat.Table[m].name, h.zone[i]));
+                if (SeenMat(h.zone[i] * 64 + m)) exposed.Add((time, AnatMat.Table[m].name, h.zone[i]));
                 if (m == AnatMat.Artery || m == AnatMat.Vein) OpenVessel(part, x, y, z);
             }
             // край: кровь пятнами на трети открытых ячеек
             byte now = T2(time);
-            for (int z = lo.z; z <= hi.z; z++) for (int y = lo.y; y <= hi.y; y++) for (int x = lo.x; x <= hi.x; x++)
+            RunScan(0, lo, hi, AnatScan.FCullC, false, c, 0, R * R * 1.6f, 0, 0);   // часть 7: отбор в Burst с запасом, проверки прежние
+            for (int k = 0; k < scan.Length; k++)
             {
+                int3 xyz = Cell(scan[k]); int x = xyz.x, y = xyz.y, z = xyz.z;
                 byte m = h.mat[h.Index(x, y, z)]; if (!AnatMat.Cull(m) || m == AnatMat.Covered) continue;
                 float3 d = h.Local(x, y, z) - c; if (math.lengthsq(d) > R * R * 1.6f || rng.NextDouble() > 0.33 || !Exposed(x, y, z)) continue;
                 var v = Get(x, y, z); float ba = 40 + 60 * (float)rng.NextDouble(); v.blt = Wt(v.blt, v.blood, now, ba); v.blood = Add8(v.blood, ba); Put(x, y, z, v);

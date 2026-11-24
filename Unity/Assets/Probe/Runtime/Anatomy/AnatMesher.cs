@@ -1,5 +1,6 @@
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Profiling.LowLevel.Unsafe;
@@ -32,9 +33,10 @@ namespace VoxProbe
         public static readonly Unity.Burst.SharedStatic<ProfData> Prof = Unity.Burst.SharedStatic<ProfData>.GetOrCreate<ProfKey>();
     }
 
-    public static class AnatMesher
+    public static unsafe class AnatMesher
     {
         public const int CS = 32, P = CS + 4, L = CS + 1;
+        public const int PhN = 6;   // часть 7: профиль чанка — заполнение, состояния, кэши, грани (тики), вершин в чанке, гладких вершин построено
         public const int ModeRender = 0, ModeNaive = 1, ModeGreedyAO = 2;
         public const float K = 0.7f;
 
@@ -50,6 +52,7 @@ namespace VoxProbe
         struct Ctx
         {
             public NativeArray<byte> occ, dm;
+            public NativeArray<ulong> rm;   // часть 7: занятость строки поля (бит px) для Field и Grad
             public NativeArray<sbyte> lcs;
             public NativeArray<int> ls, lg;
             public bool st;                  // в окрестности чанка есть состояния
@@ -65,6 +68,14 @@ namespace VoxProbe
             public NativeArray<int> vk;      // часть 6: кэш гладких вершин слоя — ключ (слой, материал·8 + направление, затенение) по углу плоскости
             public NativeArray<AVert> vc;
             public int gen;                  // номер слоя (dir, d) — ключ кэша вершин
+            // часть 7: веса поля и градиента по 64 ячейкам угла (те же произведения), кэши угла: тень щетины (−1 — не считана), «в изгибе» (0 — не считано)
+            public NativeArray<float4> fw;
+            public NativeArray<int3> gw;
+            public NativeArray<short> stb;
+            public NativeArray<byte> bend;
+            public NativeArray<AVert> cvt;   // часть 7: гладкая вершина угла без направления грани (1 — нормаль грани, 2 — нормаль поля), см. VCorner
+            public NativeArray<byte> cok;
+            public int nV;   // часть 7: число построенных гладких вершин (для профиля)
         }
 
         public const int StyleNoAO = 1, StyleFieldNormal = 2, StyleFieldPos = 4, StyleStubble = 8;
@@ -87,13 +98,14 @@ namespace VoxProbe
         /// То же с состояниями вокселей (sv.on): цвет углов и смещение ячеек; dscale — ячеек на 0,1 мм.
         /// vv.on — видимость (AnatVis): невидимая открытая ячейка сплошная, у головы на границе с видимой — тень полости.
         /// Роговица и водянистая влага прозрачны всегда.
-        public static int Build(NativeArray<byte> mat, int3 dims, int3 org, int mode, ref NativeList<AVert> verts, in StateView sv, float dscale, in VisView vv, int style, float4 grid = default)
+        public static int Build(NativeArray<byte> mat, int3 dims, int3 org, int mode, ref NativeList<AVert> verts, in StateView sv, float dscale, in VisView vv, int style, float4 grid = default, NativeArray<long> ph = default, int phAt = 0)
         {
             long pt0 = ProfilerUnsafeUtility.Timestamp;
             var c = new Ctx(); c.style = mode == ModeRender ? style : 0;
             c.grid = grid; c.corg = org; if (grid.w <= 0) c.style &= ~StyleStubble;
             c.occ = new NativeArray<byte>(P * P * P, Allocator.Temp, NativeArrayOptions.ClearMemory);
             c.dm = new NativeArray<byte>(P * P * P, Allocator.Temp, NativeArrayOptions.ClearMemory);
+            c.rm = new NativeArray<ulong>(P * P, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
             c.dscale = dscale;
             int W = dims.x, H = dims.y, D = dims.z;
             bool any = false;
@@ -120,11 +132,13 @@ namespace VoxProbe
                         c.occ[pi + px] = 1;
                         if (m != AnatMat.Covered) { c.dm[pi + px] = m; if (core) any = true; }
                     }
+                    ulong rb = 0; for (int px = 0; px < P; px++) if (c.occ[pi + px] != 0) rb |= 1ul << px;
+                    c.rm[py + P * pz] = rb;
                 }
             }
             int naive = 0;
             long pt1 = ProfilerUnsafeUtility.Timestamp;
-            if (!any) { c.occ.Dispose(); c.dm.Dispose(); System.Threading.Interlocked.Add(ref AnatMeshProf.Prof.Data.fill, pt1 - pt0); return 0; }
+            if (!any) { c.occ.Dispose(); c.dm.Dispose(); c.rm.Dispose(); System.Threading.Interlocked.Add(ref AnatMeshProf.Prof.Data.fill, pt1 - pt0); if (ph.IsCreated) { ph[phAt] = pt1 - pt0; for (int q = 1; q < PhN; q++) ph[phAt + q] = 0; } return 0; }
 
             // состояния: только если у чанка или соседей (в пределах отступа) они заведены
             if (sv.on && mode == ModeRender)
@@ -136,18 +150,22 @@ namespace VoxProbe
             if (c.st)
             {
                 c.ps = new NativeArray<VS>(P * P * P, Allocator.Temp, NativeArrayOptions.ClearMemory);
+                // часть 7: строка поля по x копируется отрезками по чанкам состояний (внутри чанка ячейки по x идут подряд), а не по ячейке
+                VS* dst = (VS*)c.ps.GetUnsafePtr(), src = (VS*)sv.pool.GetUnsafeReadOnlyPtr();
+                int gx0 = math.max(0, org.x - 2), gx1 = math.min(W - 1, org.x + P - 3);
                 for (int pz = 0; pz < P; pz++)
                 {
                     int gz = org.z + pz - 2; if (gz < 0 || gz >= D) continue;
                     for (int py = 0; py < P; py++)
                     {
                         int gy = org.y + py - 2; if (gy < 0 || gy >= H) continue;
-                        for (int px = 0; px < P; px++)
+                        int sb = sv.nch.x * (gy / CS + sv.nch.y * (gz / CS)), so = sv.bs.x * ((gy % CS) + sv.bs.y * (gz % CS)), drow = P * (py + P * pz) - org.x + 2;
+                        for (int gx = gx0; gx <= gx1;)
                         {
-                            int gx = org.x + px - 2; if (gx < 0 || gx >= W) continue;
-                            int s = sv.slot[gx / CS + sv.nch.x * (gy / CS + sv.nch.y * (gz / CS))];
-                            if (s < 0) continue;
-                            c.ps[px + P * (py + P * pz)] = sv.pool[s + (gx % CS) + sv.bs.x * ((gy % CS) + sv.bs.y * (gz % CS))];
+                            int e = math.min(gx1, (gx / CS) * CS + CS - 1);
+                            int s = sv.slot[gx / CS + sb];
+                            if (s >= 0) UnsafeUtility.MemCpy(dst + drow + gx, src + s + (gx % CS) + so, (e - gx + 1) * sizeof(VS));
+                            gx = e + 1;
                         }
                     }
                 }
@@ -160,8 +178,24 @@ namespace VoxProbe
             c.lcs = new NativeArray<sbyte>(L * L * L, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
             c.ls = new NativeArray<int>(L * L * L, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
             c.lg = new NativeArray<int>(L * L * L, Allocator.Temp, NativeArrayOptions.ClearMemory); // 0 — не считан
-            for (int i = 0; i < c.lcs.Length; i++) c.lcs[i] = -1;
-            if ((c.style & (StyleFieldNormal | StyleFieldPos)) != 0) { c.lf = new NativeArray<float4>(L * L * L, Allocator.Temp); for (int i = 0; i < c.lf.Length; i++) c.lf[i] = -1; }
+            UnsafeUtility.MemSet(c.lcs.GetUnsafePtr(), 0xFF, c.lcs.Length);   // −1
+            if ((c.style & (StyleFieldNormal | StyleFieldPos)) != 0)
+            {
+                c.lf = new NativeArray<float4>(L * L * L, Allocator.Temp, NativeArrayOptions.UninitializedMemory); float4 m1 = -1; UnsafeUtility.MemCpyReplicate(c.lf.GetUnsafePtr(), &m1, sizeof(float4), c.lf.Length);
+                c.fw = new NativeArray<float4>(64, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+                for (int dz = 0, k = 0; dz < 4; dz++) for (int dy = 0; dy < 4; dy++) for (int dx = 0; dx < 4; dx++, k++)
+                    c.fw[k] = new float4(Gd[dx] * Gw[dy] * Gw[dz], Gw[dx] * Gd[dy] * Gw[dz], Gw[dx] * Gw[dy] * Gd[dz], Gw[dx] * Gw[dy] * Gw[dz]);
+            }
+            c.gw = new NativeArray<int3>(64, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            for (int dz = 0, k = 0; dz < 4; dz++) for (int dy = 0; dy < 4; dy++) for (int dx = 0; dx < 4; dx++, k++)
+            {
+                int wz = dz == 0 || dz == 3 ? 1 : 2, oz = dz * 2 - 3, wy = dy == 0 || dy == 3 ? 1 : 2, oy = dy * 2 - 3, wx = dx == 0 || dx == 3 ? 1 : 2, ox = dx * 2 - 3;
+                c.gw[k] = new int3(ox * wy * wz, oy * wx * wz, oz * wx * wy);
+            }
+            if ((c.style & StyleStubble) != 0) { c.stb = new NativeArray<short>(L * L * L, Allocator.Temp, NativeArrayOptions.UninitializedMemory); UnsafeUtility.MemSet(c.stb.GetUnsafePtr(), 0xFF, c.stb.Length * 2); }
+            if ((c.style & StyleBend) != 0) c.bend = new NativeArray<byte>(L * L * L, Allocator.Temp, NativeArrayOptions.ClearMemory);
+            if ((c.style & StyleFieldNormal) != 0) { c.cvt = new NativeArray<AVert>(L * L * L, Allocator.Temp, NativeArrayOptions.UninitializedMemory); c.cok = new NativeArray<byte>(L * L * L, Allocator.Temp, NativeArrayOptions.ClearMemory); }
+            bool noAo = (c.style & StyleNoAO) != 0;   // часть 7: затенение углов не нужно — вершина берёт тень щетины, ключ кэша без него
 
             var keys = new NativeArray<int>(CS * CS, Allocator.Temp, NativeArrayOptions.ClearMemory);
             var km = new NativeArray<uint>(CS, Allocator.Temp, NativeArrayOptions.ClearMemory);   // ключи > 0 строки b — битами по a
@@ -207,7 +241,8 @@ namespace VoxProbe
                         // углы грани в решётке: плоскость pd, (a0|a1, b0|b1)
                         int pd = d + (pos ? 1 : 0);
                         int3 l00 = Lat(A, pd, a, b), l01 = Lat(A, pd, a, b + 1), l11 = Lat(A, pd, a + 1, b + 1), l10 = Lat(A, pd, a + 1, b);
-                        int ao0 = Ao(c.occ, nb, ea, eb, -1, -1), ao1 = Ao(c.occ, nb, ea, eb, -1, 1), ao2 = Ao(c.occ, nb, ea, eb, 1, 1), ao3 = Ao(c.occ, nb, ea, eb, 1, -1);
+                        int ao0 = 0, ao1 = 0, ao2 = 0, ao3 = 0;
+                        if (!noAo) { ao0 = Ao(c.occ, nb, ea, eb, -1, -1); ao1 = Ao(c.occ, nb, ea, eb, -1, 1); ao2 = Ao(c.occ, nb, ea, eb, 1, 1); ao3 = Ao(c.occ, nb, ea, eb, 1, -1); }
                         bool merge;
                         if (mode == ModeGreedyAO) { int s = ao0 | (ao1 << 2) | (ao2 << 4) | (ao3 << 6); merge = s == 0 || s == 0x55 || s == 0xAA || s == 0xFF; keys[b * CS + a] = merge ? (m | (s << 8)) + 1 : -(m + 1); if (merge) km[b] |= 1u << a; if (!merge) Emit(ref verts, ref c, A, pos, dir, pd, a, b, 1, 1, m, ao0, ao1, ao2, ao3, l00, l01, l11, l10, false); continue; }
                         merge = Flat(ref c, l00, n) && Flat(ref c, l01, n) && Flat(ref c, l11, n) && Flat(ref c, l10, n);
@@ -244,10 +279,12 @@ namespace VoxProbe
             long pt4 = ProfilerUnsafeUtility.Timestamp;
             ref var prd = ref AnatMeshProf.Prof.Data;
             System.Threading.Interlocked.Add(ref prd.fill, pt1 - pt0); System.Threading.Interlocked.Add(ref prd.state, pt2 - pt1); System.Threading.Interlocked.Add(ref prd.init, pt3 - pt2); System.Threading.Interlocked.Add(ref prd.faces, pt4 - pt3);
+            if (ph.IsCreated) { ph[phAt] = pt1 - pt0; ph[phAt + 1] = pt2 - pt1; ph[phAt + 2] = pt3 - pt2; ph[phAt + 3] = pt4 - pt3; ph[phAt + 4] = verts.Length; ph[phAt + 5] = c.nV; }   // часть 7: стадии этого чанка
             System.Threading.Interlocked.Add(ref prd.nCorner, c.nCorner); System.Threading.Interlocked.Add(ref prd.nGrad, c.nGrad); System.Threading.Interlocked.Add(ref prd.nField, c.nField); System.Threading.Interlocked.Add(ref prd.nState, c.nState); System.Threading.Interlocked.Add(ref prd.nVert, verts.Length);
-            c.occ.Dispose(); c.dm.Dispose(); c.lcs.Dispose(); c.ls.Dispose(); c.lg.Dispose(); keys.Dispose(); km.Dispose(); ex.Dispose(); c.vk.Dispose(); c.vc.Dispose();
+            c.occ.Dispose(); c.dm.Dispose(); c.rm.Dispose(); c.lcs.Dispose(); c.ls.Dispose(); c.lg.Dispose(); keys.Dispose(); km.Dispose(); ex.Dispose(); c.vk.Dispose(); c.vc.Dispose();
             if (c.st) { c.ps.Dispose(); c.lc.Dispose(); c.ld.Dispose(); }
-            if (c.lf.IsCreated) c.lf.Dispose();
+            if (c.lf.IsCreated) { c.lf.Dispose(); c.fw.Dispose(); }
+            c.gw.Dispose(); if (c.stb.IsCreated) c.stb.Dispose(); if (c.bend.IsCreated) c.bend.Dispose(); if (c.cvt.IsCreated) { c.cvt.Dispose(); c.cok.Dispose(); }
             return naive;
         }
 
@@ -326,7 +363,12 @@ namespace VoxProbe
             if (!math.all(g * (1 - math.abs(n)) == 0)) return false;
             if (c.st) { CornerState(ref c, l, out uint2 col, out float3 disp); if (col.x != 0 || col.y != 0 || math.any(disp != 0)) return false; }
             if ((c.style & StyleFieldPos) != 0 && math.abs(Field(ref c, l).w - 0.5f) > 1e-4f) return false;
-            if ((c.style & StyleBend) != 0 && AnatBend.InBend(c.grid.xyz + (float3)(c.corg + l) * c.grid.w)) return false;
+            if ((c.style & StyleBend) != 0)
+            {
+                int li = LI(l); byte bv = c.bend[li];
+                if (bv == 0) { bv = AnatBend.InBend(c.grid.xyz + (float3)(c.corg + l) * c.grid.w) ? (byte)2 : (byte)1; c.bend[li] = bv; }
+                if (bv == 2) return false;
+            }
             return true;
         }
 
@@ -338,19 +380,13 @@ namespace VoxProbe
             int v = c.lg[li];
             if (v != 0) return new int3((v & 1023) - 512, ((v >> 10) & 1023) - 512, ((v >> 20) & 1023) - 512);
             int3 g = 0; c.nGrad++;
-            for (int dz = 0; dz < 4; dz++)
+            // часть 7: веса — из таблицы (те же целые), пустые ячейки пропускаются (целые — сумма точная)
+            // строка из 4 ячеек — 4 бита маски rm, обход по возрастанию dx (порядок прежний)
+            int r0 = l.y + P * l.z;
+            for (int dz = 0; dz < 4; dz++) for (int dy = 0; dy < 4; dy++)
             {
-                int wz = dz == 0 || dz == 3 ? 1 : 2, oz = dz * 2 - 3;
-                for (int dy = 0; dy < 4; dy++)
-                {
-                    int wy = dy == 0 || dy == 3 ? 1 : 2, oy = dy * 2 - 3;
-                    for (int dx = 0; dx < 4; dx++)
-                    {
-                        int o = c.occ[PI(l + new int3(dx, dy, dz))];   // часть 6: без ветвления (целые — сумма точная)
-                        int wx = dx == 0 || dx == 3 ? 1 : 2, ox = dx * 2 - 3;
-                        g += o * new int3(ox * wy * wz, oy * wx * wz, oz * wx * wy);
-                    }
-                }
+                uint m = (uint)(c.rm[r0 + dy + P * dz] >> l.x) & 15u; int k = dz * 16 + dy * 4;
+                while (m != 0) { g += c.gw[k + math.tzcnt(m)]; m &= m - 1; }
             }
             c.lg[li] = (g.x + 512) | ((g.y + 512) << 10) | ((g.z + 512) << 20) | (1 << 30);
             return g;
@@ -366,14 +402,15 @@ namespace VoxProbe
             float f = 0; float3 g = 0; c.nField++;
             // часть 6: без ветвления — пустая ячейка добавляет 0·w (ровно ±0, сумма не меняется), занятая — 1·w = w;
             // произведения весов те же и в том же порядке (FloatMode.Strict без слияния) — значение побитно прежнее
-            int b0 = PI(l);
+            // часть 7: произведения весов — из таблицы fw (те же выражения), пустая ячейка пропускается: она добавляла бы ±0, а суммы
+            // никогда не равны −0 (f — сумма положительных, g начинается с +0, а +0 + (−0) = +0) — значение побитно прежнее
+            // строка из 4 ячеек — 4 бита маски rm, обход по возрастанию dx: те же слагаемые в том же порядке
+            int r0 = l.y + P * l.z;
             for (int dz = 0; dz < 4; dz++)
             for (int dy = 0; dy < 4; dy++)
-            for (int dx = 0; dx < 4; dx++)
             {
-                float o = c.occ[b0 + dx + P * (dy + P * dz)];
-                f += o * (Gw[dx] * Gw[dy] * Gw[dz]);
-                g += o * new float3(Gd[dx] * Gw[dy] * Gw[dz], Gw[dx] * Gd[dy] * Gw[dz], Gw[dx] * Gw[dy] * Gd[dz]);
+                uint m = (uint)(c.rm[r0 + dy + P * dz] >> l.x) & 15u; int k = dz * 16 + dy * 4;
+                while (m != 0) { float4 w = c.fw[k + math.tzcnt(m)]; f += w.w; g += w.xyz; m &= m - 1; }
             }
             const float N = 1 / (2.2136f * 2.2136f * 2.2136f);
             v = new float4(g * N, f * N);
@@ -404,6 +441,11 @@ namespace VoxProbe
         {
             if ((c.style & StyleStubble) == 0) return 126;
             int m = wv >> 3; if (m != AnatMat.Skin && m != AnatMat.Stubble) return 126;
+            int li = LI(l); int sv0 = c.stb[li]; if (sv0 >= 0) return sv0;   // часть 7: зависит только от угла — считается раз на угол
+            int r = Stubble0(ref c, l); c.stb[li] = (short)r; return r;
+        }
+        static int Stubble0(ref Ctx c, int3 l)
+        {
             float3 p = c.grid.xyz + (float3)(c.corg + l) * c.grid.w;
             float d = AnatGeo.StubbleDensity(p.x, p.y, p.z);
             if (d <= 0) return 126;
@@ -417,11 +459,43 @@ namespace VoxProbe
         {
             int i = (A == 0 ? l.y : l.x) + L * (A == 2 ? l.y : l.z), key = c.gen * 8192 + wv * 4 + ((c.style & StyleNoAO) != 0 ? 0 : ao);
             if (c.vk[i] == key) return c.vc[i];
-            var r = V(ref c, l, ao, wv, fn, true); c.vk[i] = key; c.vc[i] = r; return r;
+            var r = V(ref c, l, ao, wv, fn, true); c.vk[i] = key; c.vc[i] = r; c.nV++; return r;
+        }
+
+        /// Часть 7: при нормали поля гладкая вершина зависит от направления грани только материалом·8 + направлением (w), тенью и нормалью
+        /// грани там, где поле нулевое (fl ≤ 1e-4). Остальное (позиция, нормаль поля, цвет) считается раз на угол — те же выражения, что в V.
+        static AVert VCorner(ref Ctx c, int3 l, int ao, int wv, float3 fn)
+        {
+            int li = LI(l);
+            byte ok = c.cok[li];
+            if (ok == 0)
+            {
+                float3 p = l; uint2 col = 0;
+                Corner(ref c, l, out int cs, out int3 s2);
+                float4 F = Field(ref c, l);
+                float fl = math.length(F.xyz);
+                if ((c.style & StyleFieldPos) != 0) { if (fl > 1e-4f) p += F.xyz / fl * math.clamp((F.w - 0.5f) / fl, -0.8f, 0.8f); }
+                else if (cs > 0 && cs < 8)
+                {
+                    float3 S = (float3)s2 * 0.5f;
+                    p += K * S * (1f / cs - 1f / (8 - cs));
+                }
+                bool nOk = fl > 1e-4f; float3 nr = 0; if (nOk) nr = F.xyz / fl;
+                if (c.st) { CornerState(ref c, l, out col, out float3 disp); p += disp; }
+                p = math.round(p * 32f) / 32f;
+                c.cvt[li] = new AVert { x = (half)p.x, y = (half)p.y, z = (half)p.z, nx = (sbyte)math.round(nr.x * 127), ny = (sbyte)math.round(nr.y * 127), nz = (sbyte)math.round(nr.z * 127), c0 = col.x, c1 = col.y };
+                c.cok[li] = ok = nOk ? (byte)2 : (byte)1;
+            }
+            var r = c.cvt[li];
+            r.w = (half)(float)wv;
+            if (ok == 1) { r.nx = (sbyte)math.round(fn.x * 127); r.ny = (sbyte)math.round(fn.y * 127); r.nz = (sbyte)math.round(fn.z * 127); }
+            r.ao = (sbyte)((c.style & StyleNoAO) != 0 ? Stubble(ref c, l, wv) : ao * 42);
+            return r;
         }
 
         static AVert V(ref Ctx c, int3 l, int ao, int wv, float3 fn, bool smooth)
         {
+            if (smooth && (c.style & StyleFieldNormal) != 0) return VCorner(ref c, l, ao, wv, fn);
             float3 p = l, nr = fn;
             uint2 col = 0;
             if (smooth)
@@ -457,6 +531,7 @@ namespace VoxProbe
     }
 
     /// Сетки чанков анатомического тела в Mesh.MeshData. stats[i] = (открытые грани, прямоугольники, тики начала, тики конца).
+    /// Часть 7: ph (если задан) — тики стадий построителя по чанку: заполнение, состояния, кэши, грани.
     [BurstCompile(CompileSynchronously = true)]
     public struct AnatChunkJob : IJobParallelFor
     {
@@ -471,12 +546,13 @@ namespace VoxProbe
         public float4 grid;   // начало решётки и шаг (тень щетины), w = 0 — нет
         public Mesh.MeshDataArray meshes;
         [NativeDisableParallelForRestriction] public NativeArray<long> stats;
+        [NativeDisableParallelForRestriction, Unity.Collections.LowLevel.Unsafe.NativeDisableContainerSafetyRestriction] public NativeArray<long> ph;
 
         public void Execute(int i)
         {
             long t0 = ProfilerUnsafeUtility.Timestamp;
             var verts = new NativeList<AVert>(4096, Allocator.Temp);
-            int naive = AnatMesher.Build(mat, dims, origins[i], AnatMesher.ModeRender, ref verts, sv, dscale, vv, style, grid);
+            int naive = AnatMesher.Build(mat, dims, origins[i], AnatMesher.ModeRender, ref verts, sv, dscale, vv, style, grid, ph, i * AnatMesher.PhN);
             long tw = ProfilerUnsafeUtility.Timestamp;
             int nv = verts.Length, nq = nv / 4;
             var md = meshes[i];

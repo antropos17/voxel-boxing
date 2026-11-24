@@ -55,14 +55,20 @@ namespace VoxProbe
             var sw = openClock; sw.Restart();
             var box = new NativeArray<int>(7, Allocator.TempJob);
             var fl = new NativeList<int>(1024, Allocator.TempJob);
+            long xt = AnatProf.XT();
             new FloodJob { mat = h.mat, vis = h.vis, opened = cells, box = box, dims = h.dims, full = false, flipped = fl }.Run();
             int flips = box[6];
+            AnatProf.XAdd(AnatProf.XVisFlood, xt); xt = AnatProf.XT();
             if (flips > 0)
             {
                 int3 mn = new int3(box[0], box[1], box[2]), mx = new int3(box[3], box[4], box[5]);
                 // перестраиваются чанки самих ячеек, сменивших видимость, а не вся их коробка (полость рта тянется через полголовы)
-                int W = h.dims.x, H = h.dims.y;
-                for (int k = 0; k < fl.Length; k++) { int i = fl[k]; h.TouchCell(new int3(i % W, (i / W) % H, i / (W * H))); }
+                // часть 7: чанки сменивших видимость ячеек (как AnatGrid.TouchCell для каждой) собираются в Burst, в набор — только разные
+                var tc = new NativeList<int>(64, Allocator.TempJob);
+                new TouchJob { flipped = fl, dims = h.dims, outC = tc }.Run();
+                for (int k = 0; k < tc.Length; k++) h.tch.Add(tc[k]);
+                tc.Dispose();
+                AnatProf.XAdd(AnatProf.XVisTouch, xt); xt = AnatProf.XT();
                 float3 lo = h.Local(mn.x, mn.y, mn.z) - 2 * h.step, hi = h.Local(mx.x, mx.y, mx.z) + 2 * h.step;   // ячейка тела зависит от ячейки головы и её соседей: до 1,5 шага
                 // тела рядом: все джобы разом (пересчёт в коробке → растекание по прозрачным → сравнение со старым), одно ожидание;
                 // перестраиваются только тела, у которых видимость сменилась, и только сменившаяся область
@@ -88,6 +94,7 @@ namespace VoxProbe
                     gb.Dispose(); olds[k].Dispose();
                 }
                 hs.Dispose();
+                AnatProf.XAdd(AnatProf.XVisBodies, xt);
             }
             box.Dispose(); fl.Dispose();
             lastMs = sw.Elapsed.TotalMilliseconds; lastFlips = flips;
@@ -103,6 +110,30 @@ namespace VoxProbe
 
         BodyVisJob BodyVisJobFor(AnatGrid g, bool boxed, float3 lo, float3 hi) =>
             new BodyVisJob { boxed = boxed, lo = lo, hi = hi, hmat = h.mat, hvis = h.vis, hdims = h.dims, horg = h.org, hstep = h.step, vis = g.vis, mat = g.mat, dims = g.dims, org = g.org, step = g.step, pos = g.pos, rot = g.rot };
+
+        /// Часть 7: чанки, которые пометил бы AnatGrid.TouchCell для каждой ячейки flipped (окрестность ±3), — каждый один раз.
+        [BurstCompile(CompileSynchronously = true)]
+        struct TouchJob : IJob
+        {
+            [ReadOnly] public NativeList<int> flipped;
+            public int3 dims;
+            public NativeList<int> outC;
+            public void Execute()
+            {
+                int3 nch = (dims + AnatMesher.CS - 1) / AnatMesher.CS;
+                var seen = new NativeArray<bool>(nch.x * nch.y * nch.z, Allocator.Temp);
+                int W = dims.x, H = dims.y;
+                for (int k = 0; k < flipped.Length; k++)
+                {
+                    int i = flipped[k]; int3 c = new int3(i % W, (i / W) % H, i / (W * H));
+                    int3 c0 = math.max(c - 3, 0) / AnatMesher.CS, c1 = math.min(c + 3, dims - 1) / AnatMesher.CS;
+                    for (int z = c0.z; z <= c1.z; z++) for (int y = c0.y; y <= c1.y; y++) for (int x = c0.x; x <= c1.x; x++)
+                    {
+                        int q = x + nch.x * (y + nch.y * z); if (seen[q]) continue; seen[q] = true; outC.Add(q);
+                    }
+                }
+            }
+        }
 
         /// Коробка ячеек, у которых видимость (≤ Lim) различается в a и b, и их число.
         [BurstCompile(CompileSynchronously = true)]

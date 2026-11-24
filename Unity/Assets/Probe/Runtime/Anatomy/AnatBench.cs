@@ -88,6 +88,7 @@ namespace VoxProbe
         readonly System.Collections.Generic.List<int2> profN = new System.Collections.Generic.List<int2>();
         readonly System.Collections.Generic.List<double[]> tprof = new System.Collections.Generic.List<double[]>();   // первый Tick после удара
         float[] twMs = new float[1024], taMs = new float[1024], tcMs = new float[1024]; int nTw, nTa, nTc;   // часть 6: первый Tick — ожидание сеток, применение, самый долгий чанк
+        float[][] phMs = { new float[1024], new float[1024], new float[1024], new float[1024], new float[1024], new float[1024] }; int[] nPh = new int[AnatMesher.PhN];   // часть 7: стадии самого долгого чанка первого Tick
 
         static float Med(float[] a, int n) { if (n == 0) return 0; var c = new float[n]; System.Array.Copy(a, c, n); System.Array.Sort(c); return n % 2 == 1 ? c[n / 2] : (c[n / 2 - 1] + c[n / 2]) * 0.5f; }
         static float Max(float[] a, int n) { float m = 0; for (int i = 0; i < n; i++) m = Mathf.Max(m, a[i]); return m; }
@@ -137,12 +138,12 @@ namespace VoxProbe
                 {
                     // кадр 0: удар и первый Tick (как в редакторе); кадры 1, 2: ещё по Tick. Между вызовами — кадр Unity.
                     AnatProf.Begin(); sw.Restart(); bool ok = AnatBench.Strike(v, st.where, ref rnd); double hm = sw.Elapsed.TotalMilliseconds;
-                    if (!ok) miss++; else { hitsAll++; Add(ref hitMs, ref nHit, (float)hm); var pr = (double[])AnatProf.t.Clone(); prof.Add(pr); profN.Add(new int2(AnatProf.removes, AnatProf.takes)); Add(ref mwMs, ref nMw, (float)AnatProf.meshWait); Add(ref maMs, ref nMa, (float)AnatProf.meshApply); }
+                    if (!ok) miss++; else { hitsAll++; Add(ref hitMs, ref nHit, (float)hm); var pr = new double[AnatProf.N + AnatProf.XN]; System.Array.Copy(AnatProf.t, pr, AnatProf.N); System.Array.Copy(AnatProf.x, 0, pr, AnatProf.N, AnatProf.XN); prof.Add(pr); profN.Add(new int2(AnatProf.removes, AnatProf.takes)); Add(ref mwMs, ref nMw, (float)AnatProf.meshWait); Add(ref maMs, ref nMa, (float)AnatProf.meshApply); }
                     for (int f = 0; f < 3; f++)
                     {
-                        double w0 = AnatProf.meshWait, a0 = AnatProf.meshApply; AnatProf.chunkMax = 0;
+                        double w0 = AnatProf.meshWait, a0 = AnatProf.meshApply; AnatProf.chunkMax = 0; System.Array.Clear(AnatProf.chunkPh, 0, AnatMesher.PhN);
                         sw.Restart(); v.Tick(1 / 30f, 12); double tm = sw.Elapsed.TotalMilliseconds;
-                        if (f == 0 && ok) { Add(ref twMs, ref nTw, (float)(AnatProf.meshWait - w0)); Add(ref taMs, ref nTa, (float)(AnatProf.meshApply - a0)); Add(ref tcMs, ref nTc, (float)AnatProf.chunkMax); }
+                        if (f == 0 && ok) { Add(ref twMs, ref nTw, (float)(AnatProf.meshWait - w0)); Add(ref taMs, ref nTa, (float)(AnatProf.meshApply - a0)); Add(ref tcMs, ref nTc, (float)AnatProf.chunkMax); for (int q = 0; q < AnatMesher.PhN; q++) Add(ref phMs[q], ref nPh[q], (float)AnatProf.chunkPh[q]); }
                         Add(ref tickMs, ref nTick, (float)tm); if (f == 0) { Add(ref worstMs, ref nWorst, (float)(tm + hm)); if (ok) tprof.Add((double[])AnatProf.tk.Clone()); }
                         Shader.SetGlobalFloat("_AnatTime", v.sim.time); View();
                         yield return null;
@@ -169,10 +170,10 @@ namespace VoxProbe
             // разбивка: по каждой части худшее, медиана, сумма за прогон; пять худших ударов целиком
             sb.Length -= 3; sb.Append(",\n  \"hitParts\": {");
             int nh = prof.Count; var col = new float[math.max(1, nh)];
-            for (int k = 0; k < AnatProf.N; k++)
+            for (int k = 0; k < AnatProf.N + AnatProf.XN; k++)
             {
                 double sum = 0; for (int j = 0; j < nh; j++) { col[j] = (float)prof[j][k]; sum += prof[j][k]; }
-                sb.Append(k == 0 ? "\n" : ",\n").Append("    \"").Append(AnatProf.Names[k]).Append("\": { \"max\": ").Append(F(Max(col, nh))).Append(", \"median\": ").Append(F(Med(col, nh))).Append(", \"sum\": ").Append(F(sum)).Append(" }");
+                sb.Append(k == 0 ? "\n" : ",\n").Append("    \"").Append(PName(k)).Append("\": { \"max\": ").Append(F(Max(col, nh))).Append(", \"median\": ").Append(F(Med(col, nh))).Append(", \"sum\": ").Append(F(sum)).Append(" }");
             }
             sb.Append(",\n    \"meshWaitInHit\": { \"max\": ").Append(F(Max(mwMs, nMw))).Append(", \"median\": ").Append(F(Med(mwMs, nMw))).Append(" }, \"meshApplyInHit\": { \"max\": ").Append(F(Max(maMs, nMa))).Append(", \"median\": ").Append(F(Med(maMs, nMa))).Append(" }");
             sb.Append("\n  },\n  \"tickParts\": {");
@@ -184,6 +185,8 @@ namespace VoxProbe
             }
             sb.Append(",\n    \"meshWait\": { \"max\": ").Append(F(Max(twMs, nTw))).Append(", \"median\": ").Append(F(Med(twMs, nTw))).Append(" }, \"meshApply\": { \"max\": ").Append(F(Max(taMs, nTa))).Append(", \"median\": ").Append(F(Med(taMs, nTa)))
               .Append(" }, \"chunkMax\": { \"max\": ").Append(F(Max(tcMs, nTc))).Append(", \"median\": ").Append(F(Med(tcMs, nTc))).Append(" }");
+            string[] phN = { "chFill", "chState", "chInit", "chFaces", "chVerts", "chVcalls" };
+            for (int q = 0; q < AnatMesher.PhN; q++) sb.Append(", \"").Append(phN[q]).Append("\": { \"max\": ").Append(F(Max(phMs[q], nPh[q]))).Append(", \"median\": ").Append(F(Med(phMs[q], nPh[q]))).Append(" }");
             var mp = AnatMeshProf.Prof.Data; double tf = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             sb.Append("\n  },\n  \"meshProf\": { \"chunks\": ").Append(mp.chunks).Append(", \"fillMs\": ").Append(F(mp.fill * tf)).Append(", \"stateMs\": ").Append(F(mp.state * tf)).Append(", \"initMs\": ").Append(F(mp.init * tf))
               .Append(", \"facesMs\": ").Append(F(mp.faces * tf)).Append(", \"writeMs\": ").Append(F(mp.write * tf)).Append(", \"corners\": ").Append(mp.nCorner).Append(", \"grads\": ").Append(mp.nGrad).Append(", \"fields\": ").Append(mp.nField)
@@ -204,7 +207,7 @@ namespace VoxProbe
             for (int q = 0; q < math.min(5, nh); q++)
             {
                 int j = order[q]; sb.Append(q == 0 ? "\n" : ",\n").Append("    { \"hit\": ").Append(j).Append(", \"ms\": ").Append(F(hitMs[j])).Append(", \"removes\": ").Append(profN[j].x).Append(", \"takes\": ").Append(profN[j].y);
-                for (int k = 0; k < AnatProf.N; k++) if (prof[j][k] >= 0.05) sb.Append(", \"").Append(AnatProf.Names[k]).Append("\": ").Append(F(prof[j][k]));
+                for (int k = 0; k < AnatProf.N + AnatProf.XN; k++) if (prof[j][k] >= 0.05) sb.Append(", \"").Append(PName(k)).Append("\": ").Append(F(prof[j][k]));
                 sb.Append(" }");
             }
             sb.Append("\n  ]\n}\n");
@@ -215,5 +218,6 @@ namespace VoxProbe
         }
 
         static AnatBench.Stage[] Stages(AnatView w) => AnatBench.Stages(w);
+        static string PName(int k) => k < AnatProf.N ? AnatProf.Names[k] : AnatProf.XNames[k - AnatProf.N];
     }
 }

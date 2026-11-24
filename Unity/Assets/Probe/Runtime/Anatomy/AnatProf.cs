@@ -17,7 +17,15 @@ namespace VoxProbe
         static readonly System.Diagnostics.Stopwatch sw = new System.Diagnostics.Stopwatch();
         static double last;
 
-        public static void Begin() { System.Array.Clear(t, 0, N); removes = takes = 0; meshWait = meshApply = 0; sw.Restart(); last = 0; }
+        public static void Begin() { System.Array.Clear(t, 0, N); System.Array.Clear(x, 0, XN); removes = takes = 0; meshWait = meshApply = 0; sw.Restart(); last = 0; }
+        /// Часть 7: вложенные отметки (копятся за удар поверх частей t): части обновления видимости.
+        public const int XVisFlood = 0, XVisTouch = 1, XVisBodies = 2, XN = 3;
+        public static readonly string[] XNames = { "x.visFlood", "x.visTouch", "x.visBodies" };
+        public static readonly double[] x = new double[XN];
+        static readonly double tickMs = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        public static long XT() => System.Diagnostics.Stopwatch.GetTimestamp();
+        public static void XAdd(int k, long t0) { x[k] += (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * tickMs; }
+        public static readonly double[] chunkPh = new double[AnatMesher.PhN];   // часть 7: стадии самого долгого чанка (заполнение, состояния, кэши, грани), мс
         public static void Lap(int k) { double e = sw.Elapsed.TotalMilliseconds; t[k] += e - last; last = e; }
 
         /// То же для AnatView.Tick: TBegin() в начале, TLap(k) — в слот tk[k].
