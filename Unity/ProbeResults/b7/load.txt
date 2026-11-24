@@ -57,3 +57,9 @@ fin-3 13:15:39 build=AnatWin args='' load_before=13,1 load_after=20,4
 fin-async60-1 13:16:06 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=11,4 load_after=30,5
 fin-async60-2 13:16:32 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=11,9 load_after=12,1
 fin-async60-3 13:16:59 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=13,7 load_after=13,5
+fin2-1 13:21:53 build=AnatWin args='' load_before=8,6 load_after=13,6
+fin2-2 13:22:19 build=AnatWin args='' load_before=12,7 load_after=11,3
+fin2-3 13:22:45 build=AnatWin args='' load_before=10,7 load_after=7,9
+fin2-async60-1 13:23:11 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=7 load_after=6,5
+fin2-async60-2 13:23:38 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=8,7 load_after=9
+fin2-async60-3 13:24:04 build=AnatWin args='-anatBenchVsync -anatBenchAsyncMesh' load_before=8,4 load_after=8,3

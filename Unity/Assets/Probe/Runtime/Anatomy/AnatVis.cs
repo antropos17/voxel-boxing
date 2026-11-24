@@ -269,8 +269,6 @@ namespace VoxProbe
             public int3 dims; public bool full;
             int3 lo, hi; int flips;
 
-            static int Div(int a, int b, double ib) { int q = (int)(a * ib); if (q * b > a) q--; else if ((q + 1) * b <= a) q++; return q; }
-
             void Set(int i, int v)
             {
                 if (vis[i] > Lim && v <= Lim)
@@ -285,7 +283,6 @@ namespace VoxProbe
             public void Execute()
             {
                 int W = dims.x, H = dims.y, D = dims.z, n = W * H * D;
-                double iW = 1.0 / W, iH = 1.0 / H;
                 lo = int.MaxValue; hi = int.MinValue; flips = 0;
                 var seeds = new NativeList<int>(4096, Allocator.Temp);
                 if (full)
@@ -328,18 +325,12 @@ namespace VoxProbe
                     {
                         int i = cur[cur.Length - 1]; cur.RemoveAt(cur.Length - 1);
                         if (vis[i] != k) continue;
-                        // часть 7: координаты без целочисленного деления (частное через обратное в double с поправкой — точное),
-                        // соседи — сдвигом индекса; порядок соседей прежний (+x, −x, +y, −y, +z, −z)
-                        int yz = Div(i, W, iW), x = i - yz * W, z = Div(yz, H, iH), y = yz - z * H;
+                        int x = i % W, y = (i / W) % H, z = i / (W * H);
                         for (int dd = 0; dd < 6; dd++)
                         {
-                            int j;
-                            if (dd == 0) { if (x + 1 >= W) continue; j = i + 1; }
-                            else if (dd == 1) { if (x == 0) continue; j = i - 1; }
-                            else if (dd == 2) { if (y + 1 >= H) continue; j = i + W; }
-                            else if (dd == 3) { if (y == 0) continue; j = i - W; }
-                            else if (dd == 4) { if (z + 1 >= D) continue; j = i + W * H; }
-                            else { if (z == 0) continue; j = i - W * H; }
+                            int3 q = new int3(x, y, z) + Dir(dd);
+                            if (math.any(q < 0) || math.any(q >= dims)) continue;
+                            int j = q.x + W * (q.y + H * q.z);
                             byte m = mat[j]; if (!Open(m)) continue;
                             int v = k + (m == AnatMat.Air ? 1 : 0);
                             if (v >= vis[j]) continue;
