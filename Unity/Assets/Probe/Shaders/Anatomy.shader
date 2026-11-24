@@ -25,6 +25,9 @@ Shader "VoxProbe/Anatomy"
             float4 _AnatPar[64];
             float4 _AnatDmg[12];
             float _AnatTime, _BruiseDay;
+            // часть 5: переломы головы для трещин на кости — пары (центр в ячейках тела, радиус кольца в ячейках), (ось удара, фаза); число и номер тела головы
+            float4 _AnatFrac[32];
+            float _AnatFracN, _AnatFracBody;
             float4 _ChunkOrg;   // начало чанка в ячейках тела; w — номер тела
             float4 _BodyPar;    // x — шаг решётки тела, см; yzw — центр тела в ячейках (у глаза — ось взгляда)
             // этап A3, изгиб шеи (AnatSkin): мир ↔ см головы, поворот сустава (вектор: ось × угол), (0, высота, z оси, полуширина)
@@ -47,6 +50,7 @@ Shader "VoxProbe/Anatomy"
                 float ao : TEXCOORD4;
                 float4 c : TEXCOORD5;
                 float4 t : TEXCOORD6;
+                float sw : TEXCOORD7;   // отёк в вершине, см (для рельефа и цвета)
             };
 
             float3 Rod(float3 v, float3 k, float a) { float c = cos(a), s = sin(a); return v * c + cross(k, v) * s + k * dot(k, v) * (1.0 - c); }
@@ -82,7 +86,9 @@ Shader "VoxProbe/Anatomy"
                 // отёк: цель в 0,05 мм, растёт с постоянной 4 с от последнего удара
                 float sw = i.t.w * 255.0 * 0.005;
                 float grow = 1.0 - exp(-max(0.0, _AnatTime - i.t.x * 510.0) / 4.0);
-                float3 p = i.p.xyz + normalize(i.n.xyz) * (sw * grow / max(_BodyPar.x, 0.01));
+                // часть 5: отёк на экране вдвое выше модельного, иначе миллиметры не читаются с расстояния боя
+                float swv = sw * grow * 2.0;
+                float3 p = i.p.xyz + normalize(i.n.xyz) * (swv / max(_BodyPar.x, 0.01));
                 float3 ws = TransformObjectToWorld(p);
                 float3 nw = TransformObjectToWorldNormal(normalize(i.n.xyz));
                 if (_SkinOn > 0.5 && _ChunkOrg.w < 99.5)   // оторванные куски (тело ≥ 100) лежат в мире сами по себе
@@ -97,6 +103,7 @@ Shader "VoxProbe/Anatomy"
                 o.c = i.c; o.t = i.t;
                 o.nw = nw;
                 o.md = float2(mat, dir);
+                o.sw = swv;
                 o.ao = saturate(i.n.w * 127.0 / 126.0);
                 return o;
             }
@@ -121,7 +128,18 @@ Shader "VoxProbe/Anatomy"
                 int mat = (int)(i.md.x + 0.5);
                 int dir = (int)(i.md.y + 0.5);
                 float4 pal = _AnatPal[mat];
-                float h = VNoise(i.os + _ChunkOrg.xyz + _ChunkOrg.w * 131.0);
+                float3 pc = i.os + _ChunkOrg.xyz;   // точка в ячейках тела
+                float h = VNoise(pc + _ChunkOrg.w * 131.0);
+                float3 n = normalize(i.nw);
+                // часть 5: рельеф отёка — наклон нормали по производным высоты отёка (без этого сдвиг вершин не меняет свет)
+                float3 dpx = ddx(i.ws), dpy = ddy(i.ws);
+                float hsx = ddx(i.sw * 0.01), hsy = ddy(i.sw * 0.01);
+                if (hsx != 0 || hsy != 0)
+                {
+                    float3 r1 = cross(dpy, n), r2 = cross(n, dpx); float det = dot(dpx, r1);
+                    float3 sg = (det < 0 ? -1.0 : 1.0) * (hsx * r1 + hsy * r2);
+                    if (abs(det) > 1e-12) n = normalize(abs(det) * n - sg * 0.8);
+                }
                 float3 col = pal.rgb * (1.0 + pal.a * (h * 2.0 - 1.0) * 0.9);
                 // радужка и зрачок: круги по расстоянию от оси взгляда (ячейка глаза 1 мм), тёмный ободок радужки, радиальные волокна
                 if (mat == 27 || mat == 28)
@@ -145,6 +163,15 @@ Shader "VoxProbe/Anatomy"
                           : lerp(_AnatDmg[4].rgb, _AnatDmg[5].rgb, saturate((day - 7.5) / 3.5));
                 float ba = saturate(i.c.y * 1.6) * (1.0 - saturate((day - 11.0) / 5.0)) * skin;
                 col *= lerp(float3(1, 1, 1), bc, ba);
+                // часть 5: синяк читается издали — плотный темнее, края пятнами
+                float bv = i.c.y * (1.0 - saturate((day - 11.0) / 5.0)) * skin;
+                float bvis = bv > 0.002 ? saturate(sqrt(bv) * 1.7) * lerp(0.6, 1.0, VNoise(pc * 0.8 + 17.0)) : 0.0;
+                col *= lerp(float3(1, 1, 1), bc * lerp(0.85, 0.6, saturate(bv * 2.5)), saturate(bvis - ba));
+                col *= 1.0 - 0.18 * bvis;
+                // отёк: натянутая блестящая кожа, чуть краснее
+                float swc = saturate(i.sw / 0.35) * skin;
+                col *= lerp(float3(1, 1, 1), float3(1.0, 0.8, 0.8), swc * 0.7);
+                wet = lerp(wet, 0.75, swc);
                 // ссадина: снятый эпидермис, точечная кровь
                 float ab = saturate(i.c.z * 1.5) * skin;
                 col = lerp(col, _AnatDmg[6].rgb * (0.9 + 0.2 * h), ab * 0.85);
@@ -154,10 +181,69 @@ Shader "VoxProbe/Anatomy"
                 // кровь: свежая яркая и мокрая, за ~2 мин густеет и темнеет
                 float bage = saturate(max(0.0, _AnatTime - i.t.z * 510.0) / 120.0);
                 float bcov = saturate(i.c.w * 1.7);
+                // часть 5: край крови неровный, ширина плавает (шум по ячейкам); на кости кровь не держится; в мозге — в бороздах
+                if (bcov > 0.002)
+                {
+                    float bn = VNoise(pc * 0.4 + 41.0) * 0.85 + h * 0.15;
+                    bcov = smoothstep(0.06, 0.6, bcov * 1.15 + (bn - 0.5) * 0.5);
+                    if (_AnatPar[mat].w > 1.5 && _AnatPar[mat].w < 2.5) bcov *= 0.55;
+                    // срез внутренних тканей: редкие пятна разрыва не заливают слои, лужа остаётся лужей
+                    if (skin < 0.5 && mat != 41 && mat != 43) bcov *= smoothstep(0.35, 0.7, saturate(i.c.w * 1.7) + (bn - 0.5) * 0.6);
+                }
+                if (mat == 18 || mat == 19 || mat == 20)
+                {
+                    // извилины: изолиния шума с искажением — извилистые борозды; рельеф по разностям шума
+                    float fq = mat == 20 ? 0.9 : 0.42;
+                    float3 q = pc * fq; float wq = VNoise(q * 0.6 + 3.0); q += float3(wq, 1.0 - wq, wq * wq) * 2.2;
+                    float g = VNoise(q), e = 0.25;
+                    float3 gg = float3(VNoise(q + float3(e, 0, 0)), VNoise(q + float3(0, e, 0)), VNoise(q + float3(0, 0, e))) - g;
+                    float ad = abs(g - 0.5);
+                    float sul = 1.0 - smoothstep(0.035, 0.11, ad);
+                    float3 hg = -(g > 0.5 ? 1.0 : -1.0) * gg / e * (1.0 - smoothstep(0.0, 0.15, ad)) * 3.5;
+                    n = normalize(n + hg - n * dot(hg, n));
+                    float kw = mat == 19 ? 0.5 : 1.0;
+                    if (mat == 19) col = lerp(col, _AnatPal[18].rgb * 1.15, 0.5);   // открытое белое вещество ближе к коре: меньше пестроты
+                    col *= lerp(1.0, lerp(1.1, 0.35, sul), kw);
+                    col = lerp(col, float3(0.22, 0.02, 0.03), sul * 0.55 * kw);
+                    wet = lerp(wet, 0.9, sul);
+                    bcov *= lerp(0.3, 1.0, sul);
+                }
                 float3 blc = lerp(_AnatDmg[8].rgb, _AnatDmg[9].rgb, pow(bage, 0.7));
                 col = lerp(col, blc * (0.92 + 0.16 * h), bcov * lerp(0.75, 0.95, bcov));
                 wet = lerp(wet, lerp(1.0, 0.35, bage), bcov);
-                float3 n = normalize(i.nw);
+                col *= 1.0 - 0.3 * saturate(bcov * (1.0 - bcov) * 4.0);   // тёмная кайма плёнки крови
+                // мышца на срезе: пучки со светлыми прослойками
+                if (mat == 10)
+                {
+                    float fm = VNoise(pc * float3(0.9, 0.35, 0.9) + 7.0);
+                    float per = 1.0 - smoothstep(0.02, 0.06, abs(fm - 0.5));
+                    col = lerp(col, float3(0.62, 0.42, 0.36), per * 0.6 * (1.0 - bcov));
+                }
+                // трещины на кости вокруг переломов головы: лучи от кольца и обрывки второго кольца
+                if ((mat == 12 || mat == 13 || mat == 14) && _AnatFracN > 0.5 && abs(_ChunkOrg.w - _AnatFracBody) < 0.5)
+                {
+                    float cr = 0;
+                    [loop] for (int k = 0; k < 16; k++)
+                    {
+                        if (k >= (int)_AnatFracN) break;
+                        float4 A = _AnatFrac[k * 2], B = _AnatFrac[k * 2 + 1];
+                        float3 d = pc - A.xyz; float al = dot(d, B.xyz); float3 rv = d - B.xyz * al; float rad = length(rv);
+                        float R = A.w;
+                        if (rad > R * 2.8 || abs(al) > R * 1.4) continue;
+                        float3 u = normalize(cross(B.xyz, abs(B.y) < 0.9 ? float3(0, 1, 0) : float3(1, 0, 0))), w = cross(B.xyz, u);
+                        float ang = atan2(dot(rv, w), dot(rv, u));
+                        float s = (ang / 6.2832 + 0.5) * 12.0, si = floor(s);
+                        float ray = si + 0.3 + 0.4 * Hash(float3(si, k, B.w)) + sin(rad * 0.9 + si * 2.3 + B.w) * 0.12 + sin(rad * 2.3 + si) * 0.05;
+                        float dA = abs(s - ray) * 0.5236 * rad;
+                        float len = R * (1.5 + 1.2 * Hash(float3(si, k, 3.0 + B.w)));
+                        float ln = (1.0 - smoothstep(0.3, 0.6, dA)) * smoothstep(R * 0.5, R * 0.7, rad) * (1.0 - smoothstep(len * 0.75, len, rad));
+                        float dr = abs(rad - R * (1.6 + 0.12 * sin(ang * 4.0 + B.w)));
+                        float arc = (1.0 - smoothstep(0.28, 0.55, dr)) * step(0.45, Hash(float3(floor(ang * 2.5 + B.w), k, 7.0)));
+                        cr = max(cr, max(ln, arc));
+                    }
+                    col = lerp(col, float3(0.07, 0.015, 0.01), cr * 0.92);
+                    wet = lerp(wet, 0.1, cr);
+                }
                 Light L = GetMainLight();
                 float ndl = dot(n, L.direction);
                 float dif = saturate(ndl * 0.8 + 0.2);

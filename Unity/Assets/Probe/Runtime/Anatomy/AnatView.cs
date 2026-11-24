@@ -98,6 +98,21 @@ namespace VoxProbe
         public int Chunks { get { int c = 0; foreach (var b in bodies) c += b.ChunkCount; return c; } }
         public int ChunksDrawn { get { MeshDone(); int c = 0; foreach (var b in bodies) for (int i = 0; i < b.ChunkCount; i++) if (b.quads[i] > 0) c++; return c; } }
 
+        // часть 5: последние 16 переломов головы в шейдер (трещины на кости): центр и радиус в ячейках головы, ось удара
+        static readonly int FracId = Shader.PropertyToID("_AnatFrac"), FracNId = Shader.PropertyToID("_AnatFracN"), FracBodyId = Shader.PropertyToID("_AnatFracBody");
+        readonly Vector4[] fracBuf = new Vector4[32]; int fracSent = -1;
+        void SendFractures()
+        {
+            int n = sim.fractures.Count, k0 = math.max(0, n - 16); var h = a.head;
+            for (int k = k0; k < n; k++)
+            {
+                float3 c = (sim.fractures[k] - h.org) / h.step; float4 ax = sim.fracAxis[k];
+                fracBuf[(k - k0) * 2] = new Vector4(c.x, c.y, c.z, ax.w / h.step); fracBuf[(k - k0) * 2 + 1] = new Vector4(ax.x, ax.y, ax.z, k * 1.7f);
+            }
+            Shader.SetGlobalVectorArray(FracId, fracBuf); Shader.SetGlobalFloat(FracNId, n - k0); Shader.SetGlobalFloat(FracBodyId, headK);
+            fracSent = n;
+        }
+
         void NewSim()
         {
             MeshDone();
@@ -107,7 +122,7 @@ namespace VoxProbe
             sim.onMat = (i, m) => dm[i] = m;
             headBody.st = sim.st;
             drops?.Destroy(); drops = new AnatBloodFx(root, material, layout);
-            Shader.SetGlobalFloat("_AnatTime", 0);
+            Shader.SetGlobalFloat("_AnatTime", 0); fracSent = -1; SendFractures();
             if (wp != null) { pieces.Drop(wp); wp = null; }
             wk = -1; if (want != null) System.Array.Clear(want, 0, want.Length);
             isl?.Reset(); pieces?.Clear(); crumbs = 0; detachedBodies = 0;
@@ -124,6 +139,7 @@ namespace VoxProbe
             sim.Step(dt);
             AnatProf.TLap(AnatProf.TStep);
             Shader.SetGlobalFloat("_AnatTime", sim.time);
+            if (sim.fractures.Count != fracSent) SendFractures();
             drops.Update(sim.drops, sim.time);
             AnatProf.TLap(AnatProf.TDrops);
             // отдельные тела, сорванные ударом прошлого кадра; куски: результат поиска в назначенном кадре, разбор по бюджету,

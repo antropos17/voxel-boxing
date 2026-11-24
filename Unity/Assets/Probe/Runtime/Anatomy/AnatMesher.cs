@@ -240,6 +240,8 @@ namespace VoxProbe
         }
 
         static uint B8(float v) => (uint)math.clamp((int)math.round(v), 0, 255);
+        /// Часть 5: кровь угла на коже ближе к максимуму по ячейкам (след шире); ноль там же, где у среднего, — склейка граней и треугольники не меняются.
+        static uint BloodB(float avg, float max) => B8(avg) == 0 ? 0 : B8(0.7f * max + 0.3f * avg);
 
         /// Состояние угла: среднее по рисуемым ячейкам вокруг него; времена — с весом своей величины.
         static void CornerState(ref Ctx c, int3 l, out uint2 col, out float3 disp)
@@ -247,7 +249,7 @@ namespace VoxProbe
             int li = LI(l);
             float4 cd = c.ld[li];
             if (cd.w != 0) { col = c.lc[li]; disp = cd.xyz; return; }
-            float n = 0, red = 0, br = 0, ab = 0, bl = 0, sw = 0, wr = 0, tr = 0, tb = 0, tl = 0; float3 dd = 0;
+            float n = 0, red = 0, br = 0, ab = 0, bl = 0, blm = 0, sk = 0, sw = 0, wr = 0, tr = 0, tb = 0, tl = 0; float3 dd = 0;
             for (int dz = 0; dz < 2; dz++)
             for (int dy = 0; dy < 2; dy++)
             for (int dx = 0; dx < 2; dx++)
@@ -255,7 +257,7 @@ namespace VoxProbe
                 int pi = PI(l + 1 + new int3(dx, dy, dz));
                 if (c.dm[pi] == 0) continue;
                 VS s = c.ps[pi]; n++;
-                red += s.red; br += s.bruise; ab += s.abr; bl += s.blood; sw += s.swell;
+                red += s.red; br += s.bruise; ab += s.abr; bl += s.blood; blm = math.max(blm, s.blood); sw += s.swell; if (AnatDamage.SkinLike(c.dm[pi])) sk = 1;
                 float w = s.red + s.swell; wr += w; tr += w * s.rt; tb += s.bruise * s.bt; tl += s.blood * s.blt;
                 dd += new float3(s.dx, s.dy, s.dz);
             }
@@ -263,7 +265,7 @@ namespace VoxProbe
             else
             {
                 float k = 1f / n;
-                col = new uint2(B8(red * k) | (B8(br * k) << 8) | (B8(ab * k) << 16) | (B8(bl * k) << 24),
+                col = new uint2(B8(red * k) | (B8(br * k) << 8) | (B8(ab * k) << 16) | (BloodB(bl * k, sk > 0 ? blm : bl * k) << 24),
                                 B8(wr > 0 ? tr / wr : 0) | (B8(br > 0 ? tb / br : 0) << 8) | (B8(bl > 0 ? tl / bl : 0) << 16) | (B8(sw * k) << 24));
                 disp = dd * k * c.dscale;
             }

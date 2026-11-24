@@ -95,6 +95,8 @@ namespace VoxProbe
         public readonly List<Eject> ejects = new List<Eject>();   // куски мозга на вылет (делает AnatView: это отдельные тела)
         public readonly List<float4> rips = new List<float4>();    // разрывы: центр и радиус (AnatView убирает и другие тела, полный поиск кусков)
         public readonly List<float3> fractures = new List<float3>();
+        /// Часть 5, только вид: ось и радиус кольца каждого перелома (xyz — направление удара, w — Rf, см) — для трещин в шейдере.
+        public readonly List<float4> fracAxis = new List<float4>();
         public int ripCount, brainHits; public byte lastZone;
         readonly HashSet<int> seenMat = new HashSet<int>();
         bool closed;                                 // ячейка закрылась (отёк века) — видимость заново
@@ -721,7 +723,7 @@ namespace VoxProbe
             if (!got || Protected(B)) return;
             foreach (var f in fractures) if (math.distance(f, B) < 1.3f) return;   // здесь уже сломано — дальше работает разрыв
             fractures.Add(B);
-            float Rf = 1.3f + 0.12f * E;
+            float Rf = 1.3f + 0.12f * E; fracAxis.Add(new float4(l, Rf));
             float3 u = math.normalize(math.cross(l, math.abs(l.y) < 0.9f ? new float3(0, 1, 0) : new float3(1, 0, 0))), w = math.cross(l, u);
             float ph = (float)rng.NextDouble() * 6.28f, ph2 = (float)rng.NextDouble() * 6.28f;
             int3 bc = CellOf(B); int Rc = (int)math.ceil((Rf * 1.25f + 3f) / S); int cut = 0;
