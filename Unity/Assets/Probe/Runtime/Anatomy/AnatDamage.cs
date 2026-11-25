@@ -82,6 +82,7 @@ namespace VoxProbe
         void SetMat(int i, byte m) { h.mat[i] = m; onMat?.Invoke(i, m); }
         public bool boneCrush = true;               // учитывать раздавливание о кость (для проверки)
         public float3 lastTearDir; public byte lastTearZone;
+        public float3 lastP, lastN;                 // часть 9: точка контакта последнего удара и наружная нормаль (для переломов §5)
         // счёт
         public int hits, removed, peakWounds, peakDrips, peakDrops;
         public double hitMs, hitMsMax, stepMs, stepMsMax, visMs, visMsMax;
@@ -276,6 +277,7 @@ namespace VoxProbe
             }
             hits++;
             float3 n = Normal(hc.x, hc.y, hc.z);
+            lastP = h.Local(hc.x, hc.y, hc.z); lastN = n;
             AnatProf.Lap(AnatProf.Locate);
             float3 l = math.normalize(-n * 0.7f + dir * 0.3f);          // ось пятна — внутрь
             float Rc = (power ? 2.4f : 1.7f) / S, R2 = Rc * Rc * 2.1f, hs = 1.4f / S;

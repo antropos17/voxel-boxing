@@ -106,6 +106,7 @@ namespace VoxProbe
                 else if (args[i] == "-anatBenchSeed" && i + 1 < args.Length) seed = uint.Parse(args[++i]);
                 else if (args[i] == "-anatBenchNoQuit") quit = false;
                 else if (args[i] == "-anatBenchNoBranches") AnatDamage.Branches = false;   // часть 8: без веток подтёков и пятен у ран — замер их цены той же сборкой
+                else if (args[i] == "-anatBenchNoBones") AnatBones.On = false;   // часть 9: без переломов §5 — замер их цены той же сборкой
                 else if (args[i] == "-anatBenchAsyncMesh") asyncMesh = true;   // часть 4: сетки на рабочих потоках между кадрами (AnatView.asyncMesh)
                 else if (args[i] == "-anatBenchVsync") { QualitySettings.vSyncCount = 1; Application.targetFrameRate = 60; vsync = true; }   // часть 6: 60 кадров/с с вертикальной синхронизацией
             }
@@ -160,6 +161,7 @@ namespace VoxProbe
             sb.Length -= 2; sb.Append("\n  ],\n");
             long mono2 = Profiler.GetMonoUsedSizeLong(), tot2 = Profiler.GetTotalAllocatedMemoryLong();
             sb.Append("  \"platform\": \"").Append(Application.platform).Append("\", \"seed\": ").Append(seed).Append(", \"asyncMesh\": ").Append(v.asyncMesh ? "true" : "false").Append(", \"vsync\": ").Append(vsync ? "true" : "false").Append(", \"cpu\": \"").Append(SystemInfo.processorType.Replace("\"", "'")).Append("\", \"gpu\": \"").Append(SystemInfo.graphicsDeviceName.Replace("\"", "'")).Append("\", \"res\": \"").Append(Screen.width).Append('x').Append(Screen.height).Append("\",\n");
+            sb.Append("  \"bones\": ").Append(AnatBones.On ? "true" : "false").Append(", \"fractures\": [").Append(string.Join(", ", v.bones.log.ConvertAll(x => "\"" + x + "\""))).Append("],\n");
             sb.Append("  \"hits\": ").Append(hitsAll).Append(", \"trisIntact\": ").Append(tris0).Append(", \"trisStump\": ").Append(v.Triangles).Append(", \"pieceTrisStump\": ").Append(v.PieceTriangles).Append(",\n");
             sb.Append("  \"hitMsMax\": ").Append(F(Max(hitMs, nHit))).Append(", \"hitMsMedian\": ").Append(F(Med(hitMs, nHit))).Append(",\n");
             sb.Append("  \"worstFrameMsEditorStyle\": ").Append(F(Max(worstMs, nWorst))).Append(", \"medianFrameMsEditorStyle\": ").Append(F(Med(worstMs, nWorst))).Append(", \"tickMsMax\": ").Append(F(Max(tickMs, nTick))).Append(", \"tickMsMedian\": ").Append(F(Med(tickMs, nTick))).Append(",\n");
