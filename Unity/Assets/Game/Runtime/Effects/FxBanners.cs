@@ -18,7 +18,7 @@ namespace VoxGame
 
         // Раскладка (доли экрана и опорные пиксели холста). Голова соперника занимает верх кадра под полосами HUD,
         // поэтому надписи ниже лица: слово удара — на уровне груди, центральные — у пояса; лицо остаётся открытым.
-        public const float CenterYPort = 0.40f, CenterYLand = 0.30f;   // центральные надписи
+        public const float CenterYPort = 0.40f, CenterYLand = 0.34f;   // центральные надписи (в ландшафте выше подсказки жестов)
         public const float WordYPort = 0.55f, WordYLand = 0.45f;       // слово удара (по горизонтали — у точки удара)
         public const float NumberSide = 0.13f;   // число урона сбоку от точки удара, доля ширины
         public const float StackStep = 92f;      // сдвиг вверх старых центральных надписей при новой

@@ -394,10 +394,11 @@ namespace VoxGame {
             var buy = _buyBtn.GetComponent<RectTransform>();
             var equip = _equipBtn.GetComponent<RectTransform>();
             if (landscape) {
-                MenuKit.Place(_header.rectTransform, 0.02f, 0.80f, 0.30f, 0.995f);
-                MenuKit.Place(_tabGloves.GetComponent<RectTransform>(),   0.31f, 0.80f, 0.52f, 0.995f);
-                MenuKit.Place(_tabUpgrades.GetComponent<RectTransform>(), 0.53f, 0.80f, 0.74f, 0.995f);
-                MenuKit.Place(_coins.rectTransform,  0.75f, 0.80f, 0.98f, 0.995f);
+                // верхний ряд не вплотную к краю: вкладки — кнопки, им нужен отступ, как у кнопок внизу
+                MenuKit.Place(_header.rectTransform, 0.02f, 0.80f, 0.30f, 0.975f);
+                MenuKit.Place(_tabGloves.GetComponent<RectTransform>(),   0.31f, 0.80f, 0.52f, 0.975f);
+                MenuKit.Place(_tabUpgrades.GetComponent<RectTransform>(), 0.53f, 0.80f, 0.74f, 0.975f);
+                MenuKit.Place(_coins.rectTransform,  0.75f, 0.80f, 0.98f, 0.975f);
                 MenuKit.Place(_line,                 0.02f, 0.785f, 0.98f, 0.790f);
                 MenuKit.Place(back,  0.02f, 0.015f, 0.22f, 0.205f);
                 MenuKit.Place(buy,   0.62f, 0.015f, 0.98f, 0.205f);
@@ -407,11 +408,12 @@ namespace VoxGame {
                 // перчатки: плитки сеткой слева, карточка справа
                 PlaceTiles(0.02f, 0.225f, 0.46f, 0.775f);
                 MenuKit.Place(_card, 0.48f, 0.225f, 0.98f, 0.775f);
-                MenuKit.Place(_previewBox,          0.02f, 0.47f, 0.23f, 0.97f);
-                MenuKit.Place(_gName.rectTransform, 0.26f, 0.84f, 0.98f, 0.98f);
-                MenuKit.Place(_gDesc.rectTransform, 0.26f, 0.57f, 0.98f, 0.84f);
-                MenuKit.Place(_gStatus.rectTransform, 0.26f, 0.46f, 0.98f, 0.57f);
-                MenuKit.Place(_stats.Root,          0.04f, 0.03f, 0.97f, 0.44f);
+                // свойства — на всю высоту карточки справа от превью, строки не слипаются
+                MenuKit.Place(_previewBox,          0.02f, 0.52f, 0.23f, 0.97f);
+                MenuKit.Place(_gName.rectTransform, 0.26f, 0.85f, 0.98f, 0.98f);
+                MenuKit.Place(_gDesc.rectTransform, 0.26f, 0.62f, 0.98f, 0.85f);
+                MenuKit.Place(_gStatus.rectTransform, 0.26f, 0.52f, 0.98f, 0.62f);
+                MenuKit.Place(_stats.Root,          0.04f, 0.03f, 0.97f, 0.50f);
 
                 // улучшения: пять столбцов
                 for (int i = 0; i < _rows.Count; i++) {

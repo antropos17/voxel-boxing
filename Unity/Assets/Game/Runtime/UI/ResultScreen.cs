@@ -61,26 +61,22 @@ namespace VoxGame {
             // --- Кнопки ---
 
             // ДАЛЕЕ (основная — видна только при победе)
-            _nextBtn = UIKit.Btn(transform, "BtnNext", "ДАЛЕЕ",
-                UIKit.FontMd, UIKit.Accent, UIKit.BgDark);
+            // кнопки — как в остальных экранах меню (MenuKit): главная оранжевая крупным кеглем, прочие с рамкой
+            _nextBtn = MenuKit.Primary(transform, "BtnNext", "ДАЛЕЕ", UIKit.FontLg);
             var nextRT = _nextBtn.GetComponent<RectTransform>();
             UIKit.SetAnchors(nextRT, 0.10f, 0.195f, 0.90f, 0.308f);
             nextRT.offsetMin = nextRT.offsetMax = Vector2.zero;
             _nextBtn.onClick.AddListener(() => OnNext?.Invoke());
-            // тёмная надпись на светлой кнопке: тёмная обводка её только мажет
-            _nextBtn.GetComponentInChildren<Outline>().enabled = false;
 
             // ЕЩЁ РАЗ
-            _rematchBtn = UIKit.Btn(transform, "BtnRematch", "ЕЩЁ РАЗ",
-                UIKit.FontMd, UIKit.BgPanel, UIKit.TextMain);
+            _rematchBtn = MenuKit.Secondary(transform, "BtnRematch", "ЕЩЁ РАЗ", UIKit.FontMd);
             var remRT = _rematchBtn.GetComponent<RectTransform>();
             UIKit.SetAnchors(remRT, 0.10f, 0.093f, 0.90f, 0.188f);
             remRT.offsetMin = remRT.offsetMax = Vector2.zero;
             _rematchBtn.onClick.AddListener(() => OnRematch?.Invoke());
 
             // В МЕНЮ
-            _menuBtn = UIKit.Btn(transform, "BtnMenu", "В МЕНЮ",
-                UIKit.FontMd, UIKit.BgPanelLt, UIKit.TextMain);
+            _menuBtn = MenuKit.Secondary(transform, "BtnMenu", "В МЕНЮ", UIKit.FontMd);
             var menuRT = _menuBtn.GetComponent<RectTransform>();
             UIKit.SetAnchors(menuRT, 0.25f, 0.015f, 0.75f, 0.085f);
             menuRT.offsetMin = menuRT.offsetMax = Vector2.zero;
@@ -123,7 +119,10 @@ namespace VoxGame {
             _rematchBtn.GetComponent<Image>().color = victory ? UIKit.BgPanel : UIKit.Accent;
             var rl = _rematchBtn.GetComponentInChildren<Text>();
             rl.color = victory ? UIKit.TextMain : UIKit.BgDark;
+            rl.fontSize = victory ? UIKit.FontMd : UIKit.FontLg;
             rl.GetComponent<Outline>().enabled = victory;
+            // рамка обычной кнопки на оранжевой главной не нужна
+            foreach (var o in _rematchBtn.GetComponents<Outline>()) o.enabled = victory;
         }
 
         // Строка награды по начислению GameFlow (утешительный приз и опыт).
@@ -159,9 +158,9 @@ namespace VoxGame {
                 Place(_kdLbl.rectTransform,     0.05f, 0.525f, 0.95f, 0.600f);
                 Place(_accLbl.rectTransform,    0.05f, 0.445f, 0.95f, 0.520f);
                 Place(_rewardLbl.rectTransform, 0.05f, 0.365f, 0.95f, 0.440f);
-                Place(_nextBtn.GetComponent<RectTransform>(),    0.10f, 0.225f, 0.90f, 0.330f);
-                Place(_rematchBtn.GetComponent<RectTransform>(), 0.10f, 0.115f, 0.90f, 0.215f);
-                Place(_menuBtn.GetComponent<RectTransform>(),    0.10f, 0.012f, 0.90f, 0.105f);
+                Place(_nextBtn.GetComponent<RectTransform>(),    0.05f, 0.225f, 0.95f, 0.330f);
+                Place(_rematchBtn.GetComponent<RectTransform>(), 0.05f, 0.115f, 0.95f, 0.215f);
+                Place(_menuBtn.GetComponent<RectTransform>(),    0.05f, 0.012f, 0.95f, 0.105f);
             }
         }
 

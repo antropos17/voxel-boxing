@@ -36,7 +36,7 @@ namespace VoxGame {
             MenuKit.Root(gameObject);
             MenuKit.Backdrop(transform, UIKit.BgDark);
 
-            _header = UIKit.Label(transform, "Header", UIKit.FontXl, UIKit.Accent, semiBold: true);
+            _header = UIKit.Label(transform, "Header", UIKit.FontXl, UIKit.Accent, semiBold: true, TextAnchor.MiddleLeft);
             _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
             _total = UIKit.Label(transform, "Total", 58, UIKit.MegaGold, semiBold: true);
             var sh = _total.gameObject.AddComponent<Shadow>();
@@ -166,7 +166,7 @@ namespace VoxGame {
                 MenuKit.Place(shop, 0.53f, 0.020f, 0.75f, 0.215f);
                 MenuKit.Place(menu, 0.76f, 0.020f, 0.98f, 0.215f);
             } else {
-                MenuKit.Place(_header.rectTransform, 0.03f, 0.920f, 0.97f, 0.995f);
+                MenuKit.Place(_header.rectTransform, 0.05f, 0.920f, 0.95f, 0.995f);
                 MenuKit.Place(_line,                 0.05f, 0.912f, 0.95f, 0.916f);
                 MenuKit.Place(_total.rectTransform,  0.03f, 0.825f, 0.97f, 0.905f);
                 // от разбивки до строки соперника — блок по центру между суммой и кнопками
