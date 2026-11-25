@@ -1,5 +1,5 @@
 // GameBugsTests.cs — мелкие баги игрового слоя (Unity/GAME-BUGS.md): рывок перчатки соперника в начале удара,
-// вид кнопок экрана поражения.
+// вид кнопок экрана поражения, переключатели настроек «ВКЛ / ВЫКЛ».
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -72,6 +72,43 @@ namespace VoxGame.Tests
             Assert.AreEqual(UIKit.FontMd, lbl.fontSize);
             Assert.AreEqual(UIKit.BgPanel, btn.GetComponent<Image>().color);
             Assert.AreEqual(UIKit.FontLg, Find(_root.transform, "BtnNext").GetComponentInChildren<Text>().fontSize);
+        }
+
+        // Настройки: «выключено» видно (ползунок слева, «ВЫКЛ», тёмная подложка), состояние из сохранения
+        // восстанавливается на экране, нажатие переключает вид обратно.
+        [Test]
+        public void SettingsSwitch_OffStateVisible_AndRestoredFromSave()
+        {
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "voxsw_" + System.Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(dir);
+            string path = System.IO.Path.Combine(dir, "save.json");
+            try
+            {
+                var f = new GameFlow(path, 7u); f.Boot();
+                f.OpenSettings();
+                Assert.IsTrue(f.SetSoundEnabled(false));
+                var g = new GameFlow(path, 8u);   // перезапуск игры: профиль из сохранения
+
+                _root = new GameObject("set", typeof(RectTransform));
+                var ss = _root.AddComponent<SettingsScreen>();
+                typeof(SettingsScreen).GetMethod("BuildUI", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(ss, null);
+                ss.SetData(g.Profile, true);
+                Assert.IsFalse(ss.SwitchShownOn(true));
+                Assert.AreEqual("ВЫКЛ", ss.SwitchCaption(true));
+                Assert.IsTrue(ss.SwitchShownOn(false), "вибрация включена");
+                Assert.AreEqual("ВКЛ", ss.SwitchCaption(false));
+                var soundBtn = Find(Find(_root.transform, "Sound"), "Toggle");
+                Assert.AreEqual(SettingsScreen.SwitchOffBg, soundBtn.GetComponent<Image>().color);
+
+                bool? sent = null;
+                ss.OnSound = v => sent = v;
+                ss.PressSound();
+                Assert.IsTrue(ss.SwitchShownOn(true));
+                Assert.AreEqual("ВКЛ", ss.SwitchCaption(true));
+                Assert.AreEqual(SettingsScreen.SwitchOnBg, soundBtn.GetComponent<Image>().color);
+                Assert.AreEqual(true, sent);
+            }
+            finally { if (System.IO.Directory.Exists(dir)) System.IO.Directory.Delete(dir, true); }
         }
     }
 }

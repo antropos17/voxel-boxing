@@ -418,8 +418,9 @@ namespace VoxGame
                 case FightPhase.Stagger:
                     t0 = Abs(0.23f, 1.34f, 0.20f); t1 = Abs(-0.23f, 1.34f, 0.20f); leanT = -7f; break;
                 case FightPhase.Down:
-                    // на коленях, руки упёрты в настил
-                    t0 = new Vector3(0.24f, 0.07f, 0.36f); t1 = new Vector3(-0.24f, 0.07f, 0.36f);
+                    // на коленях, руки упёрты в настил по бокам корпуса: перед коленями их закрывали перчатки игрока,
+                    // и у нижнего края кадра торчали одни перчатки соперника, будто оторванные
+                    t0 = new Vector3(0.17f, 0.35f, 0.22f); t1 = new Vector3(-0.17f, 0.35f, 0.22f);
                     leanT = 30f; dropT = 0.60f; rate = 6f; break;
                 case FightPhase.Rise:
                     t0 = Abs(0.20f, 1.22f, 0.24f); t1 = Abs(-0.20f, 1.22f, 0.24f);
