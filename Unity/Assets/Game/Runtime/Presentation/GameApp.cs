@@ -188,6 +188,9 @@ namespace VoxGame {
             var kb = UnityEngine.InputSystem.Keyboard.current;
             if (kb != null && kb.escapeKey.wasPressedThisFrame) BackPressed();
             Tick(Time.deltaTime);
+#if UNITY_WEBGL && !UNITY_EDITOR
+            WebStats.Frame(Fight, Flow != null ? Flow.State.ToString() : "Boot");   // замер кадров в браузере (только Web)
+#endif
         }
 
         // Игра свернута (звонок, «Домой», шторка): бой встаёт на паузу, прогресс пишется на диск.

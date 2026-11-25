@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Воксель Бокс</title>
+    <link rel="icon" href="data:,">
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #14141f; touch-action: none; }
+      #unity-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #14141f; outline: none; }
+      #vb-load { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(70vw, 320px); color: #ddd; font: 15px system-ui, sans-serif; text-align: center; }
+      #vb-bar { height: 6px; margin-top: 10px; background: #333; border-radius: 3px; overflow: hidden; }
+      #vb-fill { height: 100%; width: 0; background: #e8c547; }
+      #vb-err { position: fixed; left: 12px; right: 12px; bottom: 12px; color: #fff; background: #a22; font: 14px system-ui, sans-serif; padding: 10px; border-radius: 6px; display: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="vb-load">Загрузка…<div id="vb-bar"><div id="vb-fill"></div></div></div>
+    <div id="vb-err"></div>
+    <script src="Build/Web.loader.js"></script>
+    <script>
+      // Полноэкранный холст для портрета и ландшафта. Плотность пикселей не выше 2 — дешевле заливка на телефоне.
+      // autoSyncPersistentDataPath — сохранение (persistentDataPath/save.json) переживает перезагрузку страницы (IndexedDB).
+      window.vbStart = performance.now();
+      createUnityInstance(document.querySelector("#unity-canvas"), {
+        arguments: [],
+        dataUrl: "Build/Web.data.unityweb",
+        frameworkUrl: "Build/Web.framework.js.unityweb",
+        codeUrl: "Build/Web.wasm.unityweb",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "VoxelBox",
+        productName: "VoxelProbe",
+        productVersion: "1.0",
+        devicePixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+        autoSyncPersistentDataPath: true,
+      }, function (p) {
+        document.getElementById("vb-fill").style.width = (100 * p) + "%";
+      }).then(function (u) {
+        window.unityInstance = u;
+        window.vbReady = performance.now();
+        document.getElementById("vb-load").style.display = "none";
+      }).catch(function (m) {
+        var e = document.getElementById("vb-err"); e.textContent = "Ошибка: " + m; e.style.display = "block";
+      });
+    </script>
+  </body>
+</html>
