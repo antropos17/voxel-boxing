@@ -137,7 +137,47 @@ namespace VoxGame.Tests
                 $"Уровень 10 ({t10:F3} с) должен замахиваться короче, чем уровень 1 ({t1:F3} с)");
         }
 
-        // ── 4. Окно Open завершается через ~0.95 с ─────────────────────────────
+        // ── 4. Rise-фаза выдерживается RISE_DUR после нокдауна ─────────────────
+
+        // Баг: HandleRefereeEvent(SayBox) устанавливал Guard вместо Rise →
+        // FightAI.SyncExternal(Guard) ставил _timer=0 → EnterWindup немедленно.
+        // Исправление: устанавливается Rise → SyncExternal(Rise) ставит _timer=RISE_DUR=1.9с.
+        [Test]
+        public void Rise_HoldsForRiseDur_AfterExternalTransition()
+        {
+            var ai    = new FightAI(FightAI.Styles[0], 1, 1u);
+            var state = MakeState(1);
+
+            // Имитируем нокдаун
+            state.phase = FightPhase.Down;
+            ai.Tick(0.001f, state); // синхронизация с Down
+
+            // Устанавливаем Rise (исправленное поведение SayBox)
+            state.phase = FightPhase.Rise;
+            var cmd = ai.Tick(0.001f, state);
+            Assert.AreEqual(FightPhase.Rise, cmd.newPhase,
+                "Сразу после Rise: AI должен оставаться в Rise (выдерживает RISE_DUR=1.9с)");
+
+            // Прогоняем 1.5 с — всё ещё в Rise (RISE_DUR=1.9с)
+            for (int i = 0; i < 90; i++)
+            {
+                cmd = ai.Tick(1f / 60f, state);
+                state.phase = cmd.newPhase;
+            }
+            Assert.AreEqual(FightPhase.Rise, cmd.newPhase,
+                "За 1.5 с (< RISE_DUR=1.9с) AI не должен покидать Rise");
+
+            // Прогоняем ещё 1 с — суммарно > RISE_DUR; должен выйти
+            for (int i = 0; i < 60; i++)
+            {
+                cmd = ai.Tick(1f / 60f, state);
+                state.phase = cmd.newPhase;
+            }
+            Assert.AreNotEqual(FightPhase.Rise, cmd.newPhase,
+                "После RISE_DUR (~1.9с) AI должен покинуть Rise");
+        }
+
+        // ── 5. Окно Open завершается через ~0.95 с ─────────────────────────────
 
         // Когда соперник промахнулся (состояние Open 0.95 с), ИИ должен его покинуть.
         [Test]

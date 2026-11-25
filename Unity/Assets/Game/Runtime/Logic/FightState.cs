@@ -123,7 +123,7 @@ namespace VoxGame
             stunAccum += stunDmg;
 
             // Мега-шкала
-            _UpdateMegaOnHit(strength, isMega);
+            _UpdateMegaOnHit(strength, isMega, counterHit, openHit);
 
             return new HitResult { hit = true, dmgDealt = dmg };
         }
@@ -172,8 +172,9 @@ namespace VoxGame
             return false;
         }
 
-        // Мега-шкала при попадании игрока
-        void _UpdateMegaOnHit(int strength, bool isMega)
+        // Мега-шкала при попадании игрока.
+        // counterHit/openHit: множитель ×1.5 применяется к рассчитанному gain, не ко всему meter.
+        void _UpdateMegaOnHit(int strength, bool isMega, bool counterHit, bool openHit)
         {
             if (megaReady) return; // не растёт когда заполнена
             idleTimer = 0f;        // сбросить таймер простоя
@@ -182,16 +183,10 @@ namespace VoxGame
             // комбо-бонус +(combo-1) до 6
             int comboBon = Mathf.Min(comboCount, 6);
             if (comboBon > 0) gain += comboBon;
+            // контр/встречный: ×1.5 на текущий gain (contracts.md «контр/встречный: ×1.5»)
+            if (counterHit || openHit) gain *= 1.5f;
 
             megaMeter = Mathf.Min(100f, megaMeter + gain * fightParams.megaGainMult);
-            megaReady = megaMeter >= 100f;
-        }
-
-        // Вызывается FightSim при counterHit или openHit для мега бонуса ×1.5
-        public void ApplyMegaCounterBonus()
-        {
-            if (megaReady) return;
-            megaMeter = Mathf.Min(100f, megaMeter * 1.5f);
             megaReady = megaMeter >= 100f;
         }
 

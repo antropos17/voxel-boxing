@@ -109,10 +109,8 @@ namespace VoxGame
                 openHit        = openHit,
             };
 
-            // --- Мега: контр-/встречный бонус шкалы ---
-            if (counterHit || openHit) State.ApplyMegaCounterBonus();
-
             // --- Расчёт урона через FightState ---
+            // Бонус ×1.5 контр/встречного удара применяется внутри TakeHit → _UpdateMegaOnHit.
             var fromState = State.TakeHit(removed, zone, strength, isMega, pw, counterHit, openHit);
             r.dmgDealt = fromState.dmgDealt;
 

@@ -362,6 +362,35 @@ namespace VoxGame.Tests
             }
         }
 
+        // ---- Мега: бонус контр/встречного удара ----
+
+        [Test]
+        public void MegaMeter_CounterBonus_MultipliesGainNotMeter()
+        {
+            // Баг: ApplyMegaCounterBonus умножала весь meter на 1.5 → при meter≥67 немедленный megaReady.
+            // Исправление: ×1.5 применяется к gain текущего удара.
+            var sim = MakeSim();
+            sim.State.megaMeter = 70f;
+            // strength=1 (power), counter: gain = 11 × 1.5 = 16.5; ожидаем 70 + 16.5 = 86.5
+            Hit(sim, removed: 10, strength: 1, counter: true);
+            Assert.IsFalse(sim.State.megaReady,
+                "При meter=70 и counter-ударе шкала должна быть ~86.5, не 100 (megaReady не должен взводиться)");
+            Assert.AreEqual(70f + 11f * 1.5f, sim.State.megaMeter, 1f,
+                "Ожидаемое значение ~86.5: gain=11 × 1.5, не meter × 1.5");
+        }
+
+        [Test]
+        public void MegaMeter_OpenHitBonus_MultipliesGainNotMeter()
+        {
+            var sim = MakeSim();
+            sim.State.megaMeter = 70f;
+            // strength=1, openHit: gain = 11 × 1.5 = 16.5
+            Hit(sim, removed: 10, strength: 1, open: true);
+            Assert.IsFalse(sim.State.megaReady,
+                "OpenHit тоже не должен мгновенно заполнять шкалу при meter=70");
+            Assert.AreEqual(70f + 11f * 1.5f, sim.State.megaMeter, 1f);
+        }
+
         // ---- Мультипликаторы перчаток/улучшений ----
 
         [Test]

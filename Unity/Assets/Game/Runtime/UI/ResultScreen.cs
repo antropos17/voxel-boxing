@@ -124,8 +124,17 @@ namespace VoxGame {
         // ------------------------------------------------------------------ ILayoutHandler
 
         public void OnLayout(bool landscape) {
-            // Кнопки одинаково расположены в обоих режимах;
-            // при необходимости здесь можно адаптировать под ландшафт.
+            if (!landscape) return;
+            // В ландшафте safe-area высота ~519px; каждая кнопка должна быть ≥96px (≥0.185 from height).
+            var nextRT  = _nextBtn.GetComponent<RectTransform>();
+            var remRT   = _rematchBtn.GetComponent<RectTransform>();
+            var menuRT  = _menuBtn.GetComponent<RectTransform>();
+            UIKit.SetAnchors(nextRT,  0.10f, 0.60f, 0.90f, 0.80f); // height=0.20×519≈104px
+            UIKit.SetAnchors(remRT,   0.10f, 0.38f, 0.90f, 0.57f); // height=0.19×519≈99px
+            UIKit.SetAnchors(menuRT,  0.25f, 0.15f, 0.75f, 0.33f); // height=0.18×519≈93px
+            nextRT.offsetMin  = nextRT.offsetMax  = Vector2.zero;
+            remRT.offsetMin   = remRT.offsetMax   = Vector2.zero;
+            menuRT.offsetMin  = menuRT.offsetMax  = Vector2.zero;
         }
 
         // ------------------------------------------------------------------ Tick (на будущее)

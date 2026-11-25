@@ -72,6 +72,13 @@ namespace VoxGame
         int   _restartCount;
         bool  _blockFromButton;
 
+        // История ударов для ComputeReward
+        readonly HitResult[] _hitHistory = new HitResult[512];
+        int _hitCount;
+
+        // Режим игры (для расчёта награды)
+        ModeManager _modeManager;
+
         // Замер кадра удара
         readonly Stopwatch _tickSw = new Stopwatch();
         bool _hitThisFrame;
@@ -82,12 +89,14 @@ namespace VoxGame
         // ---- Инициализация -------------------------------------------------
 
         // Строит сцену, головы и соперника. Вызывается создателем после AddComponent.
-        public void Init(FighterDef foe, PlayerProfile profile, Camera cam, UIRoot ui)
+        public void Init(FighterDef foe, PlayerProfile profile, Camera cam, UIRoot ui,
+                         ModeManager modeManager = null)
         {
-            _foeDef  = foe;
-            _profile = profile;
-            _cam     = cam;
-            _uiRoot  = ui;
+            _foeDef      = foe;
+            _profile     = profile;
+            _cam         = cam;
+            _uiRoot      = ui;
+            _modeManager = modeManager;
 
             // Материалы
             var anatShader = Shader.Find("VoxProbe/Anatomy");
@@ -116,6 +125,8 @@ namespace VoxGame
             AnatSkin.on = true;
             AnatSkin.Reset();
             _v = new AnatView(null, _foeBody.headMount.position, _anatMat);
+            // Голова по умолчанию лицом в +Z, камера смотрит в +Z → видна спина; поворот на 180°.
+            _v.root.rotation = Quaternion.Euler(0f, 180f, 0f);
 
             // Перчатки игрока
             var glove = GlovesCatalog.Get(profile.equippedGloveId);
@@ -286,7 +297,11 @@ namespace VoxGame
                     _v.detachedBodies, strength, p.isMega, p.pw, counter, open);
 
                 _hitsTotal++;
-                if (result.hit) _hitsLanded++;
+                if (result.hit)
+                {
+                    _hitsLanded++;
+                    if (_hitCount < _hitHistory.Length) _hitHistory[_hitCount++] = result;
+                }
 
                 if (!result.hit)
                 {
@@ -386,7 +401,7 @@ namespace VoxGame
                 return;
             }
 
-            float dmgBase = (8f + 1.4f * (_foeDef.level - 1)) * _aiStyle.d;
+            float dmgBase = (9f + 1.6f * (_foeDef.level - 1)) * _aiStyle.d;
             if (_strikeCmd.isHook)    dmgBase *= 1.25f;
             if (_strikeCmd.isCounter) dmgBase *= 1.2f;
             dmgBase *= st.fightParams.defenseMult;
@@ -432,7 +447,8 @@ namespace VoxGame
                     _hud.ShowCount(re.Count);
                     break;
                 case RefereeEventType.SayBox:
-                    _sim.State.phase = FightPhase.Guard;
+                    // Rise, не Guard: FightAI.SyncExternal(Rise) выдерживает RISE_DUR=1.9с перед EnterIdle.
+                    _sim.State.phase = FightPhase.Rise;
                     _sim.State.groggy = Mathf.Max(0f, _sim.State.groggy * 0.5f);
                     _hud.ShowBanner("БОЙ!", 1.5f);
                     break;
@@ -451,7 +467,20 @@ namespace VoxGame
             _resultShown = true;
             bool win = _referee.PlayerWon;
             float accuracy = _hitsTotal > 0 ? (float)_hitsLanded / _hitsTotal : 0f;
-            int reward = win ? 100 + _sim.State.knockdowns * 50 : 20;
+
+            int reward;
+            if (win && _modeManager != null)
+            {
+                // Правильный расчёт через ModeManager: base 100 + KD×20 + точность%×0.5 + KO +50; Trial ×2
+                var hist = new HitResult[_hitCount];
+                System.Array.Copy(_hitHistory, hist, _hitCount);
+                reward = _modeManager.ComputeReward(hist, _modeManager.CurrentMode);
+            }
+            else
+            {
+                reward = win ? 100 : 0;
+            }
+
             _result.Show(win, _fightTime, _sim.State.knockdowns, accuracy, reward);
             _uiRoot.ShowScreen(ScreenId.Result);
         }
@@ -518,6 +547,7 @@ namespace VoxGame
             _fightTime    = 0f;
             _hitsTotal    = 0;
             _hitsLanded   = 0;
+            _hitCount     = 0;
             _blockFromButton = false;
             _strikePending   = false;
             _prevAIPhase     = FightPhase.Idle;

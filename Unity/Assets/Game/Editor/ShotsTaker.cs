@@ -83,17 +83,23 @@ namespace VoxGame.Editor
             {
                 foeBody = new FoeBody(null, def, voxMat);
                 foeBody.root.position = new Vector3(0f, 0f, 0.5f);
+                // Euler(0,180,0): тело по умолчанию смотрит грудью в +Z, переворачиваем к камере (-Z)
                 foeBody.root.rotation = Quaternion.Euler(0f, 180f, 0f);
             }
             catch { /* продолжаем без тела */ }
 
             // --- Соперник: анатомическая голова ---
+            // v вынесена наружу try-блока для корректного Dispose (NativeArray/NativeList утечка).
+            AnatView v = null;
             try
             {
                 AnatSkin.on = true;
                 AnatSkin.Reset();
                 var headPos = foeBody != null ? foeBody.headMount.position : new Vector3(0f, 1.57f, 0.47f);
-                var v = new AnatView(null, headPos, anatMat);
+                v = new AnatView(null, headPos, anatMat);
+                // Голова по умолчанию лицом в +Z, камера смотрит в +Z → видна спина.
+                // Вращаем на 180° по Y, чтобы лицо повернулось к камере (-Z).
+                v.root.rotation = Quaternion.Euler(0f, 180f, 0f);
                 // Несколько тиков для инициализации меша
                 for (int i = 0; i < 3; i++) { AnatSkin.Step(0.016f); v.Tick(0.016f, 999); AnatSkin.SetGlobals(v.root); }
             }
@@ -116,10 +122,12 @@ namespace VoxGame.Editor
             camGo.transform.LookAt(lookTarget);
 
             // --- Перчатки игрока (вид от первого лица) ---
+            // playerGloves вынесен наружу для корректного Dispose (Material утечка).
+            PlayerGloves playerGloves = null;
             try
             {
                 var gloveEntry = GlovesCatalog.Get("classic");
-                var _ = new PlayerGloves(camGo.transform, GloveLook.FromEntry(gloveEntry), voxMat);
+                playerGloves = new PlayerGloves(camGo.transform, GloveLook.FromEntry(gloveEntry), voxMat);
             }
             catch { /* продолжаем без перчаток */ }
 
@@ -280,11 +288,18 @@ namespace VoxGame.Editor
             hitFrameMs.Sort();
             double max = hitFrameMs.Count > 0 ? hitFrameMs[hitFrameMs.Count - 1] : 0.0;
             double avg = 0.0;
-            foreach (var v in hitFrameMs) avg += v;
+            foreach (var ms in hitFrameMs) avg += ms;
             avg = hitFrameMs.Count > 0 ? avg / hitFrameMs.Count : 0.0;
 
             UnityEngine.Debug.Log(
                 $"GAME_HIT_FRAME_MS max={max:0.##} avg={avg:0.##} n={hitFrameMs.Count}");
+
+            // --- Освободить ресурсы (Material и NativeArray/NativeList не удаляются NewScene) ---
+            v?.Dispose();
+            foeBody?.Dispose();
+            playerGloves?.Dispose();
+            if (voxMat  != null) Object.DestroyImmediate(voxMat);
+            if (anatMat != null) Object.DestroyImmediate(anatMat);
 
             // --- Освободить сцену ---
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);

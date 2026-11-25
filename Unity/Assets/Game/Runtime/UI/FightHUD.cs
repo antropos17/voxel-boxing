@@ -119,14 +119,16 @@ namespace VoxGame {
 
         void BuildMega() {
             // Вертикальная мега-шкала справа, заполнение снизу вверх.
+            // xMax≤0.76 чтобы не заходить под кнопку паузы (x≈0.80–1.00, y≈0.91–1.00).
             (_megaBg, _megaFill) = UIKit.Bar(transform, "Mega",
                 new Color32(50, 30, 10, 200), UIKit.MegaGold, vertical: true);
-            UIKit.SetAnchors(_megaBg, 0.78f, 0.70f, 0.96f, 0.945f);
+            UIKit.SetAnchors(_megaBg, 0.60f, 0.70f, 0.76f, 0.945f);
             _megaBg.offsetMin = _megaBg.offsetMax = Vector2.zero;
 
             _megaReadyLbl = UIKit.Label(transform, "MegaRdy", UIKit.FontSm, UIKit.MegaGold,
                                         semiBold: true);
-            UIKit.SetAnchors(_megaReadyLbl.rectTransform, 0.56f, 0.90f, 0.98f, 0.975f);
+            // x=0.42–0.76 чтобы не перекрывать кнопку паузы справа
+            UIKit.SetAnchors(_megaReadyLbl.rectTransform, 0.42f, 0.90f, 0.76f, 0.975f);
             _megaReadyLbl.text = "МЕГА ГОТОВ";
             _megaReadyLbl.gameObject.SetActive(false);
         }
@@ -138,8 +140,10 @@ namespace VoxGame {
         }
 
         void BuildKDCounter() {
+            // Слева от полосы HP игрока (x=0.00–0.25), вне мега-шкалы (x=0.60–0.76).
+            // Оранжевый (#E68C28) на тёмном фоне — достаточный контраст.
             _kdLbl = UIKit.Label(transform, "KD", UIKit.FontSm, UIKit.Accent, semiBold: true);
-            UIKit.SetAnchors(_kdLbl.rectTransform, 0.75f, 0.820f, 1.0f, 0.882f);
+            UIKit.SetAnchors(_kdLbl.rectTransform, 0.00f, 0.820f, 0.25f, 0.882f);
             _kdLbl.text = "";
         }
 
@@ -334,7 +338,8 @@ namespace VoxGame {
                 // Уклоны по бокам в ландшафте
                 UIKit.SetAnchors(_dodgeL.GetComponent<RectTransform>(), 0.00f, 0.10f, 0.11f, 0.40f);
                 UIKit.SetAnchors(_dodgeR.GetComponent<RectTransform>(), 0.89f, 0.10f, 1.00f, 0.40f);
-                UIKit.SetAnchors(_blockBtn.GetComponent<RectTransform>(), 0.35f, 0.02f, 0.65f, 0.14f);
+                // БЛОК: высота 0.20×519≈104px ≥96px (минимальная цель пальца)
+                UIKit.SetAnchors(_blockBtn.GetComponent<RectTransform>(), 0.35f, 0.02f, 0.65f, 0.22f);
             } else {
                 // Портрет: кнопки внизу
                 UIKit.SetAnchors(_dodgeL.GetComponent<RectTransform>(), 0.00f, 0.02f, 0.26f, 0.11f);
