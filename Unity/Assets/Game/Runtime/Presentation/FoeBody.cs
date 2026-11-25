@@ -68,6 +68,11 @@ namespace VoxGame
         readonly Vector3[] glovePos = new Vector3[2];   // центры перчаток в осях корня (до масштаба)
         float lean, twist, drop, lunge, anim;
         float impLean, impLeanV, impTwist, impTwistV;
+        // упругий отклик на удар (FoeSpring.Enabled): сдвиг головы, корпус, отшаг, перчатки
+        public readonly FoeSpring spring = new FoeSpring();
+        int strikeHand; bool strikeHook;          // бьющая рука и вид удара (полюс локтя в замахе и ударе)
+        readonly Vector3[] armKn = new Vector3[2], armPole = new Vector3[2];   // сглаженные костяшки и полюс локтя
+        bool armInit; float poseDt;
         float headPitch = HeadPitchStance, headYaw, headRoll;   // поза головы в осях корня, град
         float headDy;   // поправка поз, заданных абсолютной высотой, к настоящей высоте головы
         FightPhase phase = FightPhase.Idle;
@@ -395,6 +400,7 @@ namespace VoxGame
             float leanT = 0f, twistT = Mathf.Sin(anim * 1.4f) * 1.5f, dropT = 0f, lungeT = 0f, rate = 12f;
             int hand = cmd.side < 0 ? 0 : 1;   // сторона удара на экране: слева — рука 0
             float hs = ArmSign(hand);
+            strikeHand = hand; strikeHook = cmd.isHook;
 
             switch (phase)
             {
@@ -456,6 +462,12 @@ namespace VoxGame
                 impLeanV += (-90f * impLean - 11f * impLeanV) * h; impLean += impLeanV * h;
                 impTwistV += (-90f * impTwist - 11f * impTwistV) * h; impTwist += impTwistV * h;
             }
+            if (FoeSpring.Enabled)
+            {
+                spring.Step(sdt);
+                if (phase == FightPhase.Strike) spring.HoldGlove(hand);   // бьющая рука идёт точно в цель
+            }
+            poseDt = sdt;
 
             // голова: в стойке ровная (крен 0, лёгкий наклон вперёд), наклоны — в шатании и на настиле;
             // поверх — быстрый отклик на удар (кивок, поворот и крен от скрутки)
@@ -480,20 +492,25 @@ namespace VoxGame
         // Расставить корпус и руки по текущему состоянию. offset — смещение корпуса в осях корня.
         void Pose(Vector3 offset)
         {
+            bool sp = FoeSpring.Enabled;
+            if (sp) offset += spring.root / scale;   // отшаг от удара: всё тело уезжает назад-вбок и возвращается
             torsoJoint.localPosition = new Vector3(0f, WaistY - HipDrop, 0f) + offset;
             float il = Mathf.Clamp(impLean, -14f, 14f), it = Mathf.Clamp(impTwist, -18f, 18f);
+            if (sp) { il += spring.lean; it += spring.twist; }
             torsoJoint.localRotation = Quaternion.Euler(lean + il, twist + it, 0f);
             // голова стоит на шее корпуса, но поворот у неё свой (в осях корня): корпус качается, голова ровная
             headMount.localPosition = HeadLocal();
+            if (sp) headMount.localPosition += Quaternion.Inverse(torsoJoint.localRotation) * spring.head / scale;
             headMount.localRotation = Quaternion.Inverse(torsoJoint.localRotation)
                                     * Quaternion.Euler(headPitch + il * 0.5f, headYaw + it * 0.5f, headRoll - it * 0.4f);
 
             bool low = phase == FightPhase.Down || phase == FightPhase.KO;
+            float sk = 1f - Mathf.Exp(-30f * poseDt);
             for (int s = 0; s < 2; s++)
             {
                 float sg = ArmSign(s);
                 Vector3 sh = torsoJoint.TransformPoint(shoulderLocal[s]);
-                Vector3 gt = root.TransformPoint(glovePos[s]);
+                Vector3 gt = root.TransformPoint(sp ? glovePos[s] + spring.glove[s] / scale : glovePos[s]);
                 Vector3 fwd = root.forward, up = root.up, right = root.right;
                 // костяшки: в стойке вверх и вперёд, в ударе — по линии плечо → цель, на настиле — вниз
                 Vector3 kn = phase == FightPhase.Strike ? (gt - sh).normalized
@@ -505,6 +522,7 @@ namespace VoxGame
                 Vector3 pole = low ? right * sg * 0.9f - fwd * 0.4f
                                    : Vector3.Lerp(right * sg * 0.35f - up + fwd * 0.1f, right * sg * 0.25f - up - fwd * 0.7f, armLow);
                 Vector3 back = right * sg * 0.85f + fwd * 0.5f;
+                if (sp) ArmStyle(s, sg, sh, gt, fwd, up, right, sk, ref kn, ref pole);
                 if (s == holdArm && holdW > 0f)
                 {
                     // запястье в руке рефери, перчатка над ним костяшками вверх, локоть наружу и назад
@@ -515,6 +533,31 @@ namespace VoxGame
                 }
                 BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale);
             }
+        }
+
+        // Костяшки и локоть бьющей руки по виду удара (как в вебе, poseArms): прямой — локоть вниз за кулаком,
+        // хук — локоть вверх и наружу, кулак поперёк; в замахе — то же заранее. Смена плавная (30/с), без рывка локтя.
+        void ArmStyle(int s, float sg, Vector3 sh, Vector3 gt, Vector3 fwd, Vector3 up, Vector3 right, float sk,
+                      ref Vector3 kn, ref Vector3 pole)
+        {
+            if (s == strikeHand && phase == FightPhase.Strike)
+            {
+                Vector3 d = (gt - sh).normalized;
+                if (strikeHook) { kn = (d * 0.6f - right * sg * 0.6f).normalized; pole = right * sg + up * 0.7f; }
+                else pole = -up + right * sg * 0.45f;
+            }
+            else if (s == strikeHand && phase == FightPhase.Windup)
+            {
+                if (strikeHook) { kn = (fwd * 0.5f - right * sg * 0.55f + up * 0.4f).normalized; pole = right * sg + up * 0.35f; }
+                else { kn = (fwd * 0.75f + up * 0.55f).normalized; pole = -up + right * sg * 0.4f; }
+            }
+            if (!armInit) { armKn[0] = armKn[1] = kn; armPole[0] = armPole[1] = pole; armInit = true; }
+            if (poseDt > 0f)
+            {
+                armKn[s] = Vector3.Lerp(armKn[s], kn, sk); if (armKn[s].sqrMagnitude < 1e-6f) armKn[s] = kn;
+                armPole[s] = Vector3.Lerp(armPole[s], pole, sk);
+            }
+            kn = armKn[s].normalized; pole = armPole[s];
         }
 
         // Рефери держит руку arm (0 — на экране слева, 1 — справа) за запястье в точке worldWrist (мир).
@@ -529,6 +572,20 @@ namespace VoxGame
         public void ReleaseWrist()
         {
             holdArm = -1; holdW = 0f;
+        }
+
+        // Удар игрока в голову: point — точка попадания (мир), dir — направление удара (мир), strength 0..2, pw — сила перчаток.
+        // С пружинностью — толчок FoeSpring (сдвиг головы, корпус по моменту от шеи, отшаг, перчатки), без неё — как раньше.
+        public void AddHit(Vector3 point, Vector3 dir, int strength, float pw)
+        {
+            if (!FoeSpring.Enabled)
+            {
+                AddImpulse(dir * (strength == 0 ? 0.25f : strength == 1 ? 0.6f : 1f));
+                return;
+            }
+            Vector3 neck = headMount.position - root.up * (0.12f * scale);
+            spring.Kick(root.InverseTransformDirection(dir), root.InverseTransformDirection(point - neck),
+                        FoeSpring.Impulse(strength, pw));
         }
 
         // Импульс от удара игрока (мир): корпус отклоняется назад и скручивается.
