@@ -19,12 +19,20 @@ namespace VoxProbe
         public float age, still; public bool asleep, ready; public int cells; public string what; public int id;
         public float3 ext;                 // полуразмер решётки, см
         public int3 lo; public float3 sum;  // сборка по частям: угол рамки в ячейках источника, сумма центров ячеек
+        // висит на упругой нити от места отрыва (покой головы, см): длина, срок до разрыва
+        public bool teth; public float3 anchor; public float tethLen, tethLife;
     }
 
     public class AnatPieces
     {
         public const int MaxPieces = 24, MaxCells = 900000;
         public const float Floor = -26f;   // пол, см рамки головы (низ шеи на −20)
+        // Висящие куски (по образцу веб-версии, p.teth): мягкий островок сначала висит на упругой нити от места отрыва
+        // (нить идёт за головой и изгибом шеи), качается и рвётся по растяжению или по сроку. Флаг выключает целиком.
+        public static bool Tethers = true;
+        public const int MaxTethered = 6, TetherMaxCells = 6000;
+        public const float TetherK = 900f, TetherC = 8f, TearOver = 8f, TetherVMax = 400f;   // 1/с², 1/с, см сверх длины, см/с
+        public int tethered;   // висят сейчас
         public readonly List<AnatPiece> list = new List<AnatPiece>();
         readonly Transform root; readonly Material material;
         readonly AnatSpare spare;          // объекты и сетки чанков убранных кусков: новый кусок берёт их, а не создаёт
@@ -82,6 +90,12 @@ namespace VoxProbe
             else p.x = rest;
             var rnd = new Unity.Mathematics.Random((uint)(p.id * 7919 + 13));
             p.w = rnd.NextFloat3(-6, 6) / math.max(1, math.length(p.ext) * 0.5f);
+            if (Tethers && what == "кусок" && p.cells <= TetherMaxCells && Tethered() < MaxTethered)
+            {
+                p.teth = true; p.anchor = rest;
+                p.tethLen = math.clamp(math.length(p.ext) * 0.6f, 0.8f, 3f);
+                p.tethLife = math.lerp(0.6f, 1.6f, rnd.NextFloat());
+            }
             if (root != null)
             {
                 p.body = new AnatBody(g, root, material, p.id, spare) { cull = false, st = p.st };
@@ -103,6 +117,8 @@ namespace VoxProbe
             while (list.Count > MaxPieces || (list.Count > 1 && Cells > MaxCells)) { Kill(list[0]); list.RemoveAt(0); trimmed++; }
         }
 
+        int Tethered() { int n = 0; foreach (var q in list) if (q.teth) n++; return n; }
+
         void Kill(AnatPiece p) { p.body?.Destroy(); p.st.Dispose(); p.g.Dispose(); }
 
         public void Clear() { foreach (var p in list) Kill(p); list.Clear(); }
@@ -112,14 +128,39 @@ namespace VoxProbe
         {
             if (dt <= 0) return;
             int sub = math.max(1, (int)math.ceil(dt / 0.008f)); float h = dt / sub;
+            tethered = 0;
             foreach (var p in list)
             {
                 if (!p.ready && p.body != null) { p.ready = p.body.dirtyCount == 0; if (!p.ready) continue; }
                 p.age += dt;   // с момента, когда сетка готова и кусок полетел
                 if (p.asleep) continue;
+                // точка крепления нити в позе этого кадра (голова и шея двигаются)
+                float3 anc = 0;
+                if (p.teth)
+                {
+                    if (!Tethers || p.age > p.tethLife) p.teth = false;
+                    else { anc = AnatSkin.on ? AnatSkin.Skin(p.anchor, out _) : p.anchor; tethered++; }
+                }
                 for (int s = 0; s < sub; s++)
                 {
                     p.v.y -= 981f * h;
+                    if (p.teth)
+                    {
+                        // нить тянет только при натяжении; затухание вдоль нити; разрыв при перетяжке
+                        float3 d = p.x - anc; float L = math.length(d);
+                        if (L > p.tethLen && L > 1e-4f)
+                        {
+                            float3 u = d / L; float over = L - p.tethLen;
+                            if (over > TearOver) { p.teth = false; tethered--; }
+                            else
+                            {
+                                p.v += (-TetherK * over - TetherC * math.dot(p.v, u)) * u * h;
+                                p.v *= math.exp(-1.5f * h);
+                                p.w *= math.exp(-3f * h);
+                                float vl = math.length(p.v); if (vl > TetherVMax) p.v *= TetherVMax / vl;
+                            }
+                        }
+                    }
                     p.x += p.v * h;
                     float a = math.length(p.w);
                     if (a > 1e-5f) p.q = math.normalize(math.mul(quaternion.AxisAngle(p.w / a, a * h), p.q));
@@ -139,7 +180,7 @@ namespace VoxProbe
                         else { p.v.xz *= math.exp(-6 * h); p.w *= math.exp(-6 * h); }
                     }
                 }
-                bool slow = math.lengthsq(p.v) < 25 && math.lengthsq(p.w) < 0.04f;
+                bool slow = !p.teth && math.lengthsq(p.v) < 25 && math.lengthsq(p.w) < 0.04f;
                 p.still = slow ? p.still + dt : 0;
                 if (p.still > 0.6f || p.age > 12) { p.asleep = true; p.v = 0; p.w = 0; }
                 Place(p);
