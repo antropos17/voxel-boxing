@@ -33,7 +33,8 @@ namespace VoxGame
         // Упал игрок: рефери шагает к камере (в осях камеры по горизонтали: вправо, вперёд)
         const float PlayerDownRight = 0.38f, PlayerDownFwd = 0.70f;
         // Победил соперник: рефери справа от него на экране и поднимает его руку 1 (мир −X). Оси корня соперника.
-        static readonly Vector3 FoeWinStand    = new Vector3(-0.60f, 0f, 0.10f);
+        // Чуть за соперником и ближе к нему: в портрете голова рефери иначе уходит за правый край кадра.
+        static readonly Vector3 FoeWinStand    = new Vector3(-0.44f, 0f, -0.28f);
         static readonly Vector3 FoeWristGuard  = new Vector3(-0.12f, 1.36f, 0.20f);
         static readonly Vector3 FoeWristRaised = new Vector3(-0.30f, 1.95f, 0.05f);
         // Победил игрок: рефери справа от камеры, берёт левую перчатку игрока за запястье (оси камеры).

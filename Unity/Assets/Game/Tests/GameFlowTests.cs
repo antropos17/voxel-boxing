@@ -1,4 +1,5 @@
 // GameFlowTests.cs — машина состояний приложения: переходы, награды, лестница, магазин, сохранение. Без сцены и Play Mode.
+// Победа ведёт сразу к награде, поражение — к экрану итогов.
 using System.IO;
 using NUnit.Framework;
 
@@ -43,7 +44,7 @@ namespace VoxGame.Tests
         static FightStats LossStats(int kds = 0) =>
             new FightStats { time = 30f, knockdowns = kds, hitsThrown = 3, hitsLanded = 1, history = new HitResult[0] };
 
-        // Довести до экрана итогов: загрузка → бой → развязка → итоги.
+        // Довести бой до конца: загрузка → бой → развязка → награда (победа) или итоги (поражение).
         static void PlayOut(GameFlow f, bool won)
         {
             Assert.AreEqual(AppState.Loading, f.State);
@@ -51,7 +52,7 @@ namespace VoxGame.Tests
             Assert.IsTrue(f.FightDecided());
             Assert.AreEqual(AppState.Victory, f.State);
             Assert.IsTrue(f.FightEnded(won, won ? WinStats() : LossStats(1)));
-            Assert.AreEqual(AppState.Result, f.State);
+            Assert.AreEqual(won ? AppState.Reward : AppState.Result, f.State);
         }
 
         // ------------------------------------------------------------------ Переходы
@@ -83,8 +84,7 @@ namespace VoxGame.Tests
             Assert.IsTrue(f.Back());                Assert.AreEqual(AppState.Pause, f.State);
             Assert.IsTrue(f.Resume());              Assert.AreEqual(AppState.Fight, f.State);
             Assert.IsTrue(f.FightDecided());        Assert.AreEqual(AppState.Victory, f.State);
-            Assert.IsTrue(f.FightEnded(true, WinStats())); Assert.AreEqual(AppState.Result, f.State);
-            Assert.IsTrue(f.Continue());            Assert.AreEqual(AppState.Reward, f.State);
+            Assert.IsTrue(f.FightEnded(true, WinStats())); Assert.AreEqual(AppState.Reward, f.State);
             Assert.IsTrue(f.Continue());            Assert.AreEqual(AppState.Roster, f.State);
         }
 
@@ -190,12 +190,18 @@ namespace VoxGame.Tests
             Assert.IsFalse(f.LastReward.won);
             Assert.AreEqual(GameFlow.LossXp, f.LastReward.xp);
 
-            Assert.IsTrue(f.Continue());
-            Assert.AreEqual(AppState.Reward, f.State);
+            // «ЕЩЁ РАЗ» прямо с итогов — тот же соперник
+            Assert.AreEqual(AppState.Result, f.State);
             Assert.IsTrue(f.Rematch());
             Assert.AreEqual(AppState.Loading, f.State);
             Assert.AreEqual(foe, f.Foe.name);
             Assert.AreEqual(0, f.FoeLadderIndex);
+
+            // «В МЕНЮ» с итогов
+            PlayOut(f, false);
+            Assert.IsTrue(f.QuitToMenu());
+            Assert.AreEqual(AppState.MainMenu, f.State);
+            Assert.AreEqual(2, f.Profile.losses);
         }
 
         [Test]
@@ -204,7 +210,7 @@ namespace VoxGame.Tests
             var f = NewFlow();
             f.Play(); f.StartCareer(); f.PickFighter(0);
             PlayOut(f, true);
-            f.Continue(); f.Continue();
+            f.Continue();
             Assert.AreEqual(AppState.Roster, f.State);
 
             Assert.IsTrue(f.PickFighter(0), "побеждённого можно вызвать снова");
@@ -255,7 +261,6 @@ namespace VoxGame.Tests
                 Assert.AreEqual(k, f.TrialIndex);
                 Assert.IsTrue(seen.Add(f.Foe.seed), "соперники испытания разные");
                 PlayOut(f, true);
-                f.Continue();
                 f.Continue();
             }
             Assert.AreEqual(AppState.MainMenu, f.State);
@@ -320,8 +325,7 @@ namespace VoxGame.Tests
             int coinsAfterWin = f.Profile.coins;
             Assert.Greater(coinsAfterWin, 0);
 
-            Assert.IsTrue(f.Continue());                  // итоги → награда
-            Assert.AreEqual(AppState.Reward, f.State);
+            Assert.AreEqual(AppState.Reward, f.State);    // победа → сразу награда
             Assert.IsTrue(f.OpenShop());                  // награда → магазин
             Assert.AreEqual(AppState.Shop, f.State);
             Assert.AreEqual(ShopResult.Ok, f.BuyUpgrade(UpgradeType.Power));
@@ -347,7 +351,7 @@ namespace VoxGame.Tests
             f.Play(); f.StartQuick();
             uint a = f.Foe.seed;
             PlayOut(f, true);
-            f.Continue(); f.Continue();
+            f.Continue();
             Assert.AreEqual(AppState.MainMenu, f.State);
             f.Play(); f.StartQuick();
             Assert.AreNotEqual(a, f.Foe.seed);
@@ -356,29 +360,33 @@ namespace VoxGame.Tests
         // ------------------------------------------------------------------ Настройки
 
         [Test]
-        public void Settings_PersistSeparately_AndResetKeepsThem()
+        public void Settings_PersistInSave_AndResetKeepsThem()
         {
             var f = NewFlow();
             f.Profile.coins = 999;
             f.Save();
-            Assert.IsFalse(f.SetSoundLevel(1), "вне экрана настроек не меняется");
+            Assert.IsFalse(f.SetVolume(VolumeKind.Master, 0.4f), "вне экрана настроек не меняется");
             f.OpenSettings();
-            Assert.IsTrue(f.SetSoundLevel(1));
-            Assert.IsTrue(f.SetCrowdLevel(GameSettings.MaxLevel + 5));
+            Assert.IsTrue(f.SetVolume(VolumeKind.Master, 0.4f));
+            Assert.IsTrue(f.SetVolume(VolumeKind.Sfx, 5f));
+            Assert.IsTrue(f.SetVolume(VolumeKind.Crowd, 0.2f));
+            Assert.IsTrue(f.SetSoundEnabled(false));
             Assert.IsTrue(f.SetVibration(false));
-            Assert.AreEqual(GameSettings.MaxLevel, f.Settings.crowdLevel);
+            Assert.AreEqual(1f, f.Profile.sfxVolume, 1e-5f, "громкость ограничена 0..1");
 
             var g = new GameFlow(_path, 2u);
-            Assert.AreEqual(1, g.Settings.soundLevel);
-            Assert.AreEqual(GameSettings.MaxLevel, g.Settings.crowdLevel);
-            Assert.IsFalse(g.Settings.vibration);
+            Assert.AreEqual(0.4f, g.Profile.masterVolume, 1e-5f);
+            Assert.AreEqual(1f, g.Profile.sfxVolume, 1e-5f);
+            Assert.AreEqual(0.2f, g.Profile.crowdVolume, 1e-5f);
+            Assert.IsFalse(g.Profile.soundEnabled);
             Assert.IsFalse(g.Profile.vibrationEnabled);
 
             Assert.IsTrue(f.CanResetProgress);
             Assert.IsTrue(f.ResetProgress());
             Assert.AreEqual(0, f.Profile.coins);
             Assert.AreEqual(0, SaveService.Load(_path).coins);
-            Assert.AreEqual(1, f.Settings.soundLevel, "сброс прогресса не трогает звук");
+            Assert.AreEqual(0.4f, f.Profile.masterVolume, 1e-5f, "сброс прогресса не трогает звук");
+            Assert.IsFalse(f.Profile.soundEnabled);
         }
 
         [Test]
@@ -389,6 +397,62 @@ namespace VoxGame.Tests
             f.OpenSettings();
             Assert.IsFalse(f.CanResetProgress);
             Assert.IsFalse(f.ResetProgress());
+            Assert.IsTrue(f.Back());
+            Assert.AreEqual(AppState.Pause, f.State);
+        }
+
+        // ------------------------------------------------------------------ Пауза и тренировка
+
+        [Test]
+        public void RestartFromPause_SameFoe_NoCharges()
+        {
+            var f = NewFlow();
+            Assert.IsFalse(f.RestartFight(), "вне паузы перезапуска нет");
+            f.Play(); f.StartCareer(); f.PickFighter(0); f.FightLoaded();
+            string foe = f.Foe.name;
+            int saves = f.SaveCount;
+            Assert.IsTrue(f.Pause());
+            Assert.IsTrue(f.RestartFight());
+            Assert.AreEqual(AppState.Fight, f.State);
+            Assert.AreEqual(1, f.RestartCount);
+            Assert.AreEqual(foe, f.Foe.name);
+            Assert.AreEqual(0, f.Profile.losses);
+            Assert.AreEqual(0, f.Profile.wins);
+            Assert.AreEqual(saves, f.SaveCount, "перезапуск ничего не пишет");
+        }
+
+        [Test]
+        public void Training_WeakFoe_NotCounted_SmallReward()
+        {
+            var f = NewFlow();
+            f.Play();
+            Assert.IsTrue(f.StartTraining());
+            Assert.AreEqual(GameMode.Training, f.Mode);
+            Assert.AreEqual(AppState.Loading, f.State);
+            Assert.AreEqual(-1, f.FightLadderIndex);
+            Assert.Less(f.FoeDamageMult, 1f);
+            PlayOut(f, true);
+            Assert.AreEqual(0, f.Profile.wins, "тренировка не идёт в счёт");
+            Assert.AreEqual(0, f.Profile.ladderIndex);
+            Assert.AreEqual(GameFlow.TrainingCoins, f.LastReward.coins);
+            Assert.AreEqual(GameFlow.TrainingCoins, f.Profile.coins);
+            Assert.AreEqual(GameFlow.TrainingXp, f.LastReward.xp);
+            Assert.IsTrue(f.Continue());
+            Assert.AreEqual(AppState.MainMenu, f.State);
+
+            // поражение и выход из паузы тоже без поражений в счёте
+            f.Play(); f.StartTraining();
+            PlayOut(f, false);
+            Assert.AreEqual(0, f.Profile.losses);
+            Assert.AreEqual(0, f.LastReward.coins);
+            Assert.IsTrue(f.QuitToMenu());
+            f.Play(); f.StartTraining(); f.FightLoaded(); f.Pause();
+            Assert.IsTrue(f.QuitToMenu());
+            Assert.AreEqual(0, f.Profile.losses);
+
+            // в обычном бою урон соперника полный
+            f.Play(); f.StartQuick();
+            Assert.AreEqual(1f, f.FoeDamageMult);
         }
     }
 }

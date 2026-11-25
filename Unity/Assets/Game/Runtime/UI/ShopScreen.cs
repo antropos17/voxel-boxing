@@ -52,7 +52,7 @@ namespace VoxGame {
             string.IsNullOrEmpty(g.description) ? "Свойства — на полосах ниже." : g.description;
 
         public static string UnlockText(int ladder) =>
-            "Откроется после " + ladder + " " + MenuKit.Plural(ladder, "победы", "побед", "побед") + " в карьере";
+            "Откроется после " + ladder + " " + MenuKit.Plural(ladder, "победы", "побед", "побед") + " на лестнице";
 
         // ------------------------------------------------------------------ Элементы
 
@@ -61,6 +61,7 @@ namespace VoxGame {
             public Image bg;
             public RectTransform stripA, stripB;
             public Text name, status;
+            public Outline frame;
         }
 
         class UpgradeRow {
@@ -96,6 +97,12 @@ namespace VoxGame {
         public string SelectedGloveId => GlovesCatalog.All[_selected].id;
         public string ToastText => _toast.gameObject.activeSelf ? _toast.text : "";
         public string CoinsText => _coins.text;
+        public bool BuyEnabled => _buyBtn.gameObject.activeSelf && _buyBtn.interactable;
+        public bool EquipEnabled => _equipBtn.gameObject.activeSelf && _equipBtn.interactable;
+        public bool UpgradeEnabled(UpgradeType t) {
+            foreach (var r in _rows) if (r.type == t) return r.btn.interactable;
+            return false;
+        }
 
         // ------------------------------------------------------------------ Инициализация
 
@@ -153,9 +160,7 @@ namespace VoxGame {
                 t.btn = UIKit.Btn(_glovesRoot, "Tile" + i, "", UIKit.FontSm, UIKit.BgPanel, UIKit.TextMain);
                 t.btn.GetComponentInChildren<Text>().gameObject.SetActive(false);
                 t.bg = t.btn.GetComponent<Image>();
-                var frame = t.btn.gameObject.AddComponent<Outline>();
-                frame.effectColor = new Color(1f, 1f, 1f, 0.18f);
-                frame.effectDistance = new Vector2(2f, -2f);
+                t.frame = t.btn.gameObject.AddComponent<Outline>();
                 var rt = t.btn.GetComponent<RectTransform>();
                 t.stripA = UIKit.Panel(rt, "A", g.colorA);
                 t.stripB = UIKit.Panel(rt, "B", g.colorB);
@@ -165,6 +170,9 @@ namespace VoxGame {
                 t.stripB.offsetMin = new Vector2(0f, 0f); t.stripB.offsetMax = new Vector2(-6f, -6f);
                 t.name = UIKit.Label(rt, "Name", UIKit.FontXs + 1, UIKit.TextMain, semiBold: true);
                 t.name.text = g.displayName;
+                // в одну строку: длинное имя мельче, а не рвётся посреди слова (плитка ~115 px в обеих ориентациях)
+                t.name.horizontalOverflow = HorizontalWrapMode.Overflow;
+                if (g.displayName.Length > 10) t.name.fontSize = UIKit.FontXs - 2;
                 MenuKit.Place(t.name.rectTransform, 0.03f, 0.36f, 0.97f, 0.70f);
                 t.status = UIKit.Label(rt, "Status", UIKit.FontXs, UIKit.TextSub, semiBold: false);
                 MenuKit.Place(t.status.rectTransform, 0.03f, 0.04f, 0.97f, 0.36f);
@@ -254,11 +262,15 @@ namespace VoxGame {
             var g = GlovesCatalog.All[i];
             var t = _tiles[i];
             bool sel = i == _selected;
-            t.bg.color = sel ? UIKit.AccentDim : UIKit.BgPanel;
-            if (_profile.equippedGloveId == g.id) { t.status.text = "надето"; t.status.color = UIKit.HpGreen; }
-            else if (_profile.OwnsGlove(g.id)) { t.status.text = "куплено"; t.status.color = UIKit.HpGreen; }
+            // выбранная — тёмная плитка с рамкой акцента: цена и статус на ней читаются (на заливке AccentDim красный не виден)
+            t.bg.color = sel ? (Color)new Color32(58, 38, 22, 255) : UIKit.BgPanel;
+            t.frame.effectColor = sel ? UIKit.Accent : new Color(1f, 1f, 1f, 0.18f);
+            t.frame.effectDistance = sel ? new Vector2(3f, -3f) : new Vector2(2f, -2f);
+            // надето — зелёным капсом, куплено — белым, цена — золотом или красным, закрыто — серым
+            if (_profile.equippedGloveId == g.id) { t.status.text = "НАДЕТО"; t.status.color = UIKit.HpGreen; }
+            else if (_profile.OwnsGlove(g.id)) { t.status.text = "куплено"; t.status.color = UIKit.TextMain; }
             else if (!GameFlow.IsGloveUnlocked(g, _profile)) { t.status.text = "закрыто"; t.status.color = UIKit.TextSub; }
-            else { t.status.text = MenuKit.Coins(g.price); t.status.color = UIKit.MegaGold; }
+            else { t.status.text = MenuKit.Coins(g.price); t.status.color = _profile.coins >= g.price ? UIKit.MegaGold : UIKit.HpRed; }
         }
 
         void RefreshCard() {
@@ -274,16 +286,22 @@ namespace VoxGame {
             bool equipped = _profile.equippedGloveId == g.id;
             bool unlocked = GameFlow.IsGloveUnlocked(g, _profile);
             if (equipped) { _gStatus.text = "НАДЕТО"; _gStatus.color = UIKit.HpGreen; }
-            else if (owned) { _gStatus.text = "КУПЛЕНО"; _gStatus.color = UIKit.HpGreen; }
+            else if (owned) { _gStatus.text = "КУПЛЕНО · можно надеть"; _gStatus.color = UIKit.TextMain; }
             else if (!unlocked) { _gStatus.text = UnlockText(GameFlow.GloveUnlockLadder(g)); _gStatus.color = UIKit.TextSub; }
+            else if (_profile.coins < g.price) {
+                _gStatus.text = "Цена: " + MenuKit.Coins(g.price) + " · не хватает " + (g.price - _profile.coins);
+                _gStatus.color = UIKit.HpRed;
+            }
             else { _gStatus.text = "Цена: " + MenuKit.Coins(g.price); _gStatus.color = UIKit.MegaGold; }
 
             bool gloves = _tab == Tab.Gloves;
             _buyBtn.gameObject.SetActive(gloves && !owned);
             _equipBtn.gameObject.SetActive(gloves && owned);
             if (!owned) {
-                MenuKit.SetCaption(_buyBtn, unlocked ? "КУПИТЬ · " + g.price : "ЗАКРЫТО");
-                MenuKit.SetActionState(_buyBtn, unlocked);
+                // не хватает монет — кнопка серая и неактивна, цена видна в строке статуса
+                bool afford = _profile.coins >= g.price;
+                MenuKit.SetCaption(_buyBtn, !unlocked ? "ЗАКРЫТО" : afford ? "КУПИТЬ · " + g.price : "НЕ ХВАТАЕТ МОНЕТ");
+                MenuKit.SetActionState(_buyBtn, unlocked && afford);
             } else {
                 MenuKit.SetCaption(_equipBtn, equipped ? "НАДЕТО" : "НАДЕТЬ");
                 MenuKit.SetActionState(_equipBtn, !equipped);
@@ -307,8 +325,11 @@ namespace VoxGame {
                 MenuKit.SetActionState(r.btn, false);
             } else {
                 r.effect.text = "Дальше: " + UpgradeEffect(r.type, GameFlow.UpgradeMult(r.type, lv + 1));
-                MenuKit.SetCaption(r.btn, "УЛУЧШИТЬ\n" + MenuKit.Coins(PlayerProfile.UpgradeCosts[lv]));
-                MenuKit.SetActionState(r.btn, true);
+                int cost = PlayerProfile.UpgradeCosts[lv];
+                // не хватает — видно и цену, и сколько ещё нужно
+                MenuKit.SetCaption(r.btn, _profile.coins >= cost ? "УЛУЧШИТЬ\n" + MenuKit.Coins(cost)
+                                                                 : MenuKit.Coins(cost) + "\nне хватает " + (cost - _profile.coins));
+                MenuKit.SetActionState(r.btn, _profile.coins >= cost);
             }
         }
 
@@ -384,13 +405,13 @@ namespace VoxGame {
                 MenuKit.Place(_toastBox, 0.24f, 0.030f, 0.60f, 0.190f);
 
                 // перчатки: плитки сеткой слева, карточка справа
-                PlaceTiles(0.02f, 0.235f, 0.46f, 0.765f);
-                MenuKit.Place(_card, 0.48f, 0.235f, 0.98f, 0.765f);
-                MenuKit.Place(_previewBox,          0.02f, 0.05f, 0.30f, 0.95f);
-                MenuKit.Place(_gName.rectTransform, 0.33f, 0.80f, 0.98f, 0.97f);
-                MenuKit.Place(_gDesc.rectTransform, 0.33f, 0.58f, 0.98f, 0.80f);
-                MenuKit.Place(_gStatus.rectTransform, 0.33f, 0.48f, 0.98f, 0.58f);
-                MenuKit.Place(_stats.Root,          0.33f, 0.03f, 0.97f, 0.47f);
+                PlaceTiles(0.02f, 0.225f, 0.46f, 0.775f);
+                MenuKit.Place(_card, 0.48f, 0.225f, 0.98f, 0.775f);
+                MenuKit.Place(_previewBox,          0.02f, 0.47f, 0.23f, 0.97f);
+                MenuKit.Place(_gName.rectTransform, 0.26f, 0.84f, 0.98f, 0.98f);
+                MenuKit.Place(_gDesc.rectTransform, 0.26f, 0.57f, 0.98f, 0.84f);
+                MenuKit.Place(_gStatus.rectTransform, 0.26f, 0.46f, 0.98f, 0.57f);
+                MenuKit.Place(_stats.Root,          0.04f, 0.03f, 0.97f, 0.44f);
 
                 // улучшения: пять столбцов
                 for (int i = 0; i < _rows.Count; i++) {

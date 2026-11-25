@@ -6,7 +6,7 @@ namespace VoxGame {
     /// <summary>Данные сохранения. Все поля по умолчанию — корректный стартовый профиль.</summary>
     [Serializable]
     public class SaveData {
-        public int version = 1;
+        public int version = SaveService.CurrentVersion;
         public string playerName = "Игрок";
         public int playerLevel = 1;
         public int xp;
@@ -20,6 +20,10 @@ namespace VoxGame {
         public string[] boughtGloveIds = new string[] { "classic" };
         public bool soundEnabled = true;
         public bool vibrationEnabled = true;
+        // с версии 2: громкости 0..1 (в старых файлах полей нет — SaveService.Migrate ставит 1)
+        public float masterVolume = 1f;
+        public float sfxVolume = 1f;
+        public float crowdVolume = 1f;
     }
 
     /// <summary>Результат боя для экрана итогов.</summary>

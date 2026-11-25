@@ -1,4 +1,4 @@
-// GameSetup.cs — создаёт сцену Game.unity и добавляет её первой в Build Settings.
+// GameSetup.cs — создаёт сцену Game.unity (камера, свет, GameRoot с GameApp) и добавляет её первой в Build Settings.
 // Запуск: VoxGame → Setup Game Scene (или batch -executeMethod VoxGame.Editor.GameSetup.Setup)
 using System.Collections.Generic;
 using System.IO;
@@ -51,15 +51,10 @@ namespace VoxGame.Editor
             RenderSettings.ambientMode  = AmbientMode.Flat;
             RenderSettings.ambientLight = new Color(0.25f, 0.25f, 0.30f);
 
-            // --- GameRoot + FightDirector ---
-            // FightDirector пишется агентом A4 (Presentation); добавляем через рефлексию
-            // чтобы GameSetup компилировался независимо от A4.
+            // --- GameRoot + GameApp ---
+            // GameApp — единственный Update игры: первый кадр Play Mode или сборки сам вызывает Init(Camera.main).
             var gameRoot = new GameObject("GameRoot");
-            var fdType   = System.Type.GetType("VoxGame.FightDirector, Assembly-CSharp");
-            if (fdType != null)
-                gameRoot.AddComponent(fdType);
-            else
-                Debug.LogWarning("VoxGame: FightDirector не найден — добавь вручную после того как A4 запишет файл.");
+            gameRoot.AddComponent<GameApp>();
 
             // --- Проверка шейдеров и материалов ---
             CheckShaders();

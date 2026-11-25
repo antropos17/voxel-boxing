@@ -29,7 +29,10 @@ namespace VoxGame
     // Запястье — на BoxerParts.GloveOff позади центра (z = −8.5 см).
     public static class GloveLooks
     {
-        public const float ForeLenCm = 120f;   // длина предплечья игрока от запястья, см: всегда уходит за нижний край кадра
+        // Рука игрока из двух звеньев (до масштаба PlayerGloves): предплечье запястье → локоть и плечо локоть → плечевой
+        // сустав. Плечо PlayerGloves растягивает по длине до сустава под кадром, предплечье — нет.
+        public const float ForeLenCm  = 30f;
+        public const float UpperLenCm = 40f;
 
         static readonly GloveLook[] Looks =
         {
@@ -105,30 +108,45 @@ namespace VoxGame
             return m.BuildMesh("glove_" + look.id, pal, mn * 0.01f, BoxerParts.GloveCell * 0.01f);
         }
 
-        // Предплечье игрока: запястье в начале координат, рука уходит по −Y на ForeLenCm (локоть и плечо за кадром).
+        // Предплечье игрока: запястье в начале координат, локоть на −ForeLenCm по Y (с округлым локтевым суставом).
         // У бинтов предплечье замотано от запястья.
         public static Mesh BuildForeArmMesh(GloveLook look)
         {
             bool wraps = look.shape == GloveShape.Wraps;
-            var mn = new Vector3(-6f, -ForeLenCm - 5f, -6f);
+            var mn = new Vector3(-6f, -ForeLenCm - 5.6f, -6f);
             var mx = new Vector3(6f, 3.6f, 6f);
             var m = VoxModel.FromSdf(mn, mx, BoxerParts.ArmCell,
                 (x, y, z) =>
                 {
-                    float d = VoxModel.Cap(x, y, z, 0, 0, 0, 0, -26f, 0, 2.9f, 4.2f);
-                    d = VoxModel.Smin(d, VoxModel.Cap(x, y, z, 0, -26f, 0, 0, -ForeLenCm, 0, 4.2f, 4.6f), 2f);
-                    d = VoxModel.Smin(d, VoxModel.Ell(x - 0.6f, y + 20f, z - 0.6f, 3.9f, 7f, 3.5f), 2f);
-                    return wraps && y > -15f ? d - 0.35f : d;
+                    float d = VoxModel.Cap(x, y, z, 0, 0, 0, 0, -ForeLenCm, 0, 2.9f, 4.3f);
+                    d = VoxModel.Smin(d, VoxModel.Ell(x - 0.6f, y + ForeLenCm * 0.7f, z - 0.6f, 3.9f, 7f, 3.5f), 2f);
+                    return wraps && y > -12f ? d - 0.35f : d;
                 },
                 (x, y, z) =>
                 {
-                    if (!wraps || y < -15f) return 1;
-                    if (y < -13.8f) return 4;   // лента по краю бинта
+                    if (!wraps || y < -12f) return 1;
+                    if (y < -10.8f) return 4;   // лента по краю бинта
                     float a = Mathf.Atan2(z, x) / Mathf.PI;
                     return Mathf.Repeat(y * 0.55f + a, 1f) < 0.55f ? (byte)2 : (byte)3;
                 });
             var pal = new Color32[] { default, BoxerParts.HeadSkin, look.main, look.cuff, look.trim };
             return m.BuildMesh("playerForeArm", pal, mn * 0.01f, BoxerParts.ArmCell * 0.01f);
+        }
+
+        // Плечо игрока: локоть в начале координат, плечевой сустав на −UpperLenCm по Y. Одно на все виды перчаток.
+        public static Mesh BuildUpperArmMesh()
+        {
+            var mn = new Vector3(-6.4f, -UpperLenCm - 6f, -6.4f);
+            var mx = new Vector3(6.4f, 5.2f, 6.4f);
+            var m = VoxModel.FromSdf(mn, mx, BoxerParts.ArmCell,
+                (x, y, z) =>
+                {
+                    float d = VoxModel.Cap(x, y, z, 0, 0, 0, 0, -UpperLenCm, 0, 4.4f, 4.9f);
+                    return VoxModel.Smin(d, VoxModel.Ell(x, y + UpperLenCm * 0.5f, z - 1.3f, 4.3f, 8.5f, 4.5f), 2f);
+                },
+                (x, y, z) => 1);
+            var pal = new Color32[] { default, BoxerParts.HeadSkin };
+            return m.BuildMesh("playerUpperArm", pal, mn * 0.01f, BoxerParts.ArmCell * 0.01f);
         }
 
         // ---- Формы (см) -------------------------------------------------------------------------

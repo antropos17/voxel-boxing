@@ -128,6 +128,12 @@ namespace VoxGame
             Banners = new FxBanners(_fxRoot, cam);
         }
 
+        // Показать или спрятать накладки и надписи (экраны поверх боя: пауза, настройки, итоги).
+        public void SetOverlayVisible(bool on)
+        {
+            if (_fxRoot != null && _fxRoot.gameObject.activeSelf != on) _fxRoot.gameObject.SetActive(on);
+        }
+
         // Пропорции кадра (ширина / высота): надписи и звезда удара переставляются сразу.
         public void SetView(float aspect)
         {
@@ -349,11 +355,14 @@ namespace VoxGame
             Banners?.ShowCenter(FxBanners.Blocked, BannerStyle.Info);
         }
 
+        // Без надписи «УКЛОН!»: на снимках эффектов уклоняется бот-защитник, а не игрок.
+        public bool QuietDodge;
+
         // Игрок ушёл от удара соперника: короткое замедление, окно контратаки.
         public void OnDodge()
         {
             HitStop(0f, DodgeSlow);
-            Banners?.ShowCenter(FxBanners.Miss, BannerStyle.Info);
+            if (!QuietDodge) Banners?.ShowCenter(FxBanners.Miss, BannerStyle.Info);
         }
 
         public void OnKnockdown()

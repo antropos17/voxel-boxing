@@ -1,8 +1,8 @@
 // GameFlow.cs — машина состояний приложения: меню, выбор режима, лестница, загрузка, бой, итоги, награда, магазин.
 // Чистая логика без MonoBehaviour: команды возвращают true, если переход допустим, иначе ничего не меняют.
+// Победа ведёт сразу к награде, поражение — к экрану итогов («ЕЩЁ РАЗ» / «В МЕНЮ»).
 using System;
 using System.Collections.Generic;
-using System.IO;
 using UnityEngine;
 
 namespace VoxGame {
@@ -50,18 +50,6 @@ namespace VoxGame {
         public readonly List<RewardLine> lines = new List<RewardLine>(8);
     }
 
-    // Настройки звука и вибрации (отдельный файл рядом с сохранением).
-    [Serializable]
-    public class GameSettings {
-        public const int MaxLevel = 4;
-        public int soundLevel = 3;      // 0..MaxLevel
-        public int crowdLevel = 3;      // 0..MaxLevel
-        public bool vibration = true;
-
-        public float SoundVolume => (float)soundLevel / MaxLevel;
-        public float CrowdVolume => (float)crowdLevel / MaxLevel;
-    }
-
     public class GameFlow {
 
         public const uint RosterSeed = 42u;         // та же лестница, что на принятых снимках
@@ -70,14 +58,15 @@ namespace VoxGame {
         public const int LossXp = 10;
         public const int BeltBonus = 500;           // за пояс лестницы
         public const int TrialBonus = 150;          // за пройденное испытание
-        public const string SettingsFile = "settings.json";
+        public const int TrainingCoins = 25;        // тренировка: немного монет, без фарма
+        public const int TrainingXp = 15;
+        public const float TrainingFoeDamage = 0.2f; // урон соперника на тренировке (доля обычного)
 
         // ------------------------------------------------------------------ Состояние
 
         public AppState State { get; private set; } = AppState.Boot;
         public AppState Previous { get; private set; } = AppState.Boot;
         public PlayerProfile Profile { get; private set; }
-        public GameSettings Settings { get; private set; }
         public RosterDef Roster { get; }
         public ModeManager Modes { get; } = new ModeManager();
         public GameMode Mode => Modes.CurrentMode;
@@ -90,15 +79,20 @@ namespace VoxGame {
         public RewardInfo LastReward { get; private set; }
         public FightStats LastStats { get; private set; }
         public int SaveCount { get; private set; }               // сколько раз писали сохранение (тесты)
+        public bool LastSaveFailed { get; private set; }         // запись не удалась (диск, права) — игра идёт дальше
+        public int RestartCount { get; private set; }            // перезапусков боя из паузы
         public bool HasFoe { get; private set; }
 
         // Шапка боя для FightDirector: титульный ли бой и место в лестнице.
         public int FightLadderIndex => Mode == GameMode.Career ? FoeLadderIndex : -1;
         public int FightLadderCount => Mode == GameMode.Career ? RosterDef.Count : 0;
 
+        // Урон соперника в бою (доля): на тренировке он бьёт слабо.
+        public float FoeDamageMult => Mode == GameMode.Training ? TrainingFoeDamage : 1f;
+
         public event Action<AppState, AppState> OnStateChanged;   // (было, стало)
 
-        readonly string _savePath, _settingsPath;
+        readonly string _savePath;
         uint _rng;
         uint _trialSeed;
         AppState _shopReturn = AppState.MainMenu;
@@ -109,15 +103,14 @@ namespace VoxGame {
         // savePath: null — SaveService.DefaultPath или persistentDataPath. seed — случайные соперники.
         public GameFlow(string savePath = null, uint seed = 0x5EED2027u) {
             _savePath = savePath ?? SaveService.DefaultPath ?? (Application.persistentDataPath + "/save.json");
-            string dir = Path.GetDirectoryName(_savePath);
-            _settingsPath = string.IsNullOrEmpty(dir) ? SettingsFile : Path.Combine(dir, SettingsFile);
             _rng = seed == 0 ? 0x9E3779B9u : seed;
             Roster = new RosterDef(RosterSeed);
 
             Profile = new PlayerProfile();
             Profile.LoadFrom(SaveService.Load(_savePath));
-            Settings = LoadSettings();
         }
+
+        public string SavePath => _savePath;
 
         // ------------------------------------------------------------------ Команды: меню
 
@@ -185,6 +178,14 @@ namespace VoxGame {
             return BeginLoading();
         }
 
+        // Тренировка: соперник первой ступени, бьёт слабо; в счёт побед и поражений не идёт.
+        public bool StartTraining() {
+            if (State != AppState.ModeSelect) return false;
+            Modes.StartMode(GameMode.Training);
+            SetFoe(RosterDef.GenerateQuickFight(NextRand(), 1), -1);
+            return BeginLoading();
+        }
+
         // Драться можно со следующим по лестнице и с уже побеждёнными.
         public bool IsFighterAvailable(int index) =>
             index >= 0 && index < RosterDef.Count && index <= Profile.ladderIndex;
@@ -213,21 +214,28 @@ namespace VoxGame {
             return Go(AppState.Fight);
         }
 
+        // «Заново» из паузы: тот же соперник с начала, без начислений. Сцену перезапускает представление.
+        public bool RestartFight() {
+            if (State != AppState.Pause) return false;
+            RestartCount++;
+            return Go(AppState.Fight);
+        }
+
         // Исход решён (нокаут или остановка): идёт развязка.
         public bool FightDecided() {
             if (State != AppState.Fight) return false;
             return Go(AppState.Victory);
         }
 
-        // Развязка закончилась, показан экран итогов: награда начисляется и сохраняется сразу,
-        // чтобы «Реванш» и «В меню» с экрана итогов её не теряли.
+        // Развязка закончилась: награда начисляется и сохраняется сразу. Победа — экран награды,
+        // поражение — экран итогов («ЕЩЁ РАЗ» / «В МЕНЮ»), утешительный приз уже начислен.
         public bool FightEnded(bool won, FightStats stats) {
             if (State != AppState.Fight && State != AppState.Victory) return false;
             stats.won = won;
             LastStats = stats;
             LastReward = won ? ApplyWin(stats) : ApplyLoss(stats);
             Save();
-            return Go(AppState.Result);
+            return Go(won ? AppState.Reward : AppState.Result);
         }
 
         public bool Continue() {
@@ -322,39 +330,41 @@ namespace VoxGame {
             }
         }
 
-        // ------------------------------------------------------------------ Настройки
+        // ------------------------------------------------------------------ Настройки (в профиле, в том же сохранении)
 
-        public bool SetSoundLevel(int level) {
+        public bool SetSoundEnabled(bool on) {
             if (State != AppState.Settings) return false;
-            Settings.soundLevel = Mathf.Clamp(level, 0, GameSettings.MaxLevel);
-            Profile.soundEnabled = Settings.soundLevel > 0;
-            SaveAll();
+            Profile.soundEnabled = on;
+            Save();
             return true;
         }
 
-        public bool SetCrowdLevel(int level) {
+        public bool SetVolume(VolumeKind kind, float v) {
             if (State != AppState.Settings) return false;
-            Settings.crowdLevel = Mathf.Clamp(level, 0, GameSettings.MaxLevel);
-            SaveAll();
+            Profile.SetVolume(kind, v);
+            Save();
             return true;
         }
 
         public bool SetVibration(bool on) {
             if (State != AppState.Settings) return false;
-            Settings.vibration = on;
             Profile.vibrationEnabled = on;
-            SaveAll();
+            Save();
             return true;
         }
 
-        // Сброс прогресса доступен только из настроек главного меню (не из паузы боя). Настройки звука остаются.
+        // Сброс прогресса доступен только из настроек главного меню (не из паузы боя). Звук и вибрация остаются.
         public bool CanResetProgress => State == AppState.Settings && _settingsReturn == AppState.MainMenu;
 
         public bool ResetProgress() {
             if (!CanResetProgress) return false;
+            var old = Profile;
             Profile = new PlayerProfile {
-                soundEnabled = Settings.soundLevel > 0,
-                vibrationEnabled = Settings.vibration,
+                soundEnabled = old.soundEnabled,
+                vibrationEnabled = old.vibrationEnabled,
+                masterVolume = old.masterVolume,
+                sfxVolume = old.sfxVolume,
+                crowdVolume = old.crowdVolume,
             };
             LastReward = null;
             HasFoe = false;
@@ -367,6 +377,13 @@ namespace VoxGame {
 
         RewardInfo ApplyWin(FightStats s) {
             var info = NewInfo(true);
+            if (Mode == GameMode.Training) {
+                // тренировка: малая награда вместо разбивки за бой
+                info.lines.Add(new RewardLine("Тренировка", TrainingCoins));
+                FinishInfo(info, EconomyState.Apply(Profile, TrainingCoins, TrainingXp));
+                return info;
+            }
+
             var hist = s.history ?? Array.Empty<HitResult>();
             int baseCoins = Modes.ComputeReward(hist, Mode);
             int xp = Mathf.Max(10, baseCoins / 2);
@@ -411,6 +428,10 @@ namespace VoxGame {
         RewardInfo ApplyLoss(FightStats s) {
             var info = NewInfo(false);
             Modes.OnFightLost(Profile);
+            if (Mode == GameMode.Training) {
+                FinishInfo(info, EconomyState.Apply(Profile, 0, LossXp));
+                return info;
+            }
             int coins = ConsolationBase + Mathf.Max(0, s.knockdowns) * ConsolationPerKd;
             info.lines.Add(new RewardLine("Утешительный приз", ConsolationBase));
             if (s.knockdowns > 0)
@@ -524,40 +545,18 @@ namespace VoxGame {
 
         // ------------------------------------------------------------------ Сохранение
 
+        // Ошибка записи (диск, права) не роняет игру: прогресс остаётся в памяти до следующей записи.
         public void Save() {
-            var d = new SaveData();
-            Profile.SaveTo(d);
-            SaveService.Save(d, _savePath);
-            SaveCount++;
-        }
-
-        void SaveAll() {
-            Save();
             try {
-                File.WriteAllText(_settingsPath, JsonUtility.ToJson(Settings));
-            } catch (Exception) {
-                // настройки не записались — останутся в памяти до следующей попытки
+                var d = new SaveData();
+                Profile.SaveTo(d);
+                SaveService.Save(d, _savePath);
+                SaveCount++;
+                LastSaveFailed = false;
+            } catch (Exception e) {
+                LastSaveFailed = true;
+                Debug.LogWarning("VoxGame: сохранение не записано: " + e.Message);
             }
-        }
-
-        GameSettings LoadSettings() {
-            try {
-                if (File.Exists(_settingsPath)) {
-                    var s = JsonUtility.FromJson<GameSettings>(File.ReadAllText(_settingsPath));
-                    if (s != null) {
-                        s.soundLevel = Mathf.Clamp(s.soundLevel, 0, GameSettings.MaxLevel);
-                        s.crowdLevel = Mathf.Clamp(s.crowdLevel, 0, GameSettings.MaxLevel);
-                        return s;
-                    }
-                }
-            } catch (Exception) {
-                // битый файл — настройки по умолчанию
-            }
-            // первого файла нет: взять из профиля
-            return new GameSettings {
-                soundLevel = Profile.soundEnabled ? 3 : 0,
-                vibration = Profile.vibrationEnabled,
-            };
         }
     }
 }

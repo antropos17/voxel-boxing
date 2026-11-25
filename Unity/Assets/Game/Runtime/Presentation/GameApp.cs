@@ -1,6 +1,7 @@
 // GameApp.cs — корень игры: единственный Update. Владеет UIRoot, экранами, GameFlow (профиль, сохранение),
-// фоном меню (пустой ринг с толпой, камера облетает) и FightDirector на время боя.
-// Всё через явные Init(Camera) и Tick(realDt): редактор вне Play Mode может прогнать игру вызовами Tick.
+// фоном меню (пустой ринг с толпой, камера облетает), звуком кнопок и FightDirector на время боя.
+// Всё через явные Init и Tick(realDt): редактор вне Play Mode может прогнать игру вызовами Tick и Press.
+using System;
 using UnityEngine;
 
 namespace VoxGame {
@@ -9,15 +10,17 @@ namespace VoxGame {
 
         // ------------------------------------------------------------------ Настройки (подгонять по снимкам)
 
+        public const uint DefaultSeed = 0x5EED2027u;
         const float OrbitRadius = 4.3f;       // м от центра ринга: за помостом (2.6), перед первым рядом зрителей (4.95)
         const float OrbitHeight = 2.2f;       // м над настилом: выше верхнего каната (1.36)
         const float OrbitLookY  = 0.55f;      // точка взгляда над центром ринга
         const float OrbitSpeed  = 5f;         // град/с
         const float MenuFovPortrait = 68f, MenuFovLandscape = 46f;
+        const float MaxFrameDt = 0.1f;        // длинный кадр (загрузка, сворачивание) не прыгает дальше 0.1 с
         const int   MaxHits = 512;            // как история ударов FightDirector
         static readonly Vector3 LightForward = new Vector3(0.30f, -0.75f, -0.60f);
 
-        // Сколько реальных секунд держать экран загрузки (бой строится на втором тике). Снимкам можно поставить 0.
+        // Сколько реальных секунд держать экран загрузки (бой строится на втором тике). Сквозному проходу можно 0.
         public float LoadingHold = 0.6f;
 
         // ------------------------------------------------------------------ Публичное
@@ -26,6 +29,10 @@ namespace VoxGame {
         public UIRoot UI { get; private set; }
         public FightDirector Fight { get; private set; }
         public Camera Cam => _cam;
+
+        public bool Initialized => Flow != null;
+        public AppState State => Flow != null ? Flow.State : AppState.Boot;
+        public ScreenId ActiveScreen => UI != null ? UI.ActiveScreen : ScreenId.MainMenu;
 
         public MainMenuScreen MainMenu { get; private set; }
         public ModeSelectScreen ModeSelect { get; private set; }
@@ -36,27 +43,30 @@ namespace VoxGame {
         public PauseScreen Pause { get; private set; }
         public RewardScreen Reward { get; private set; }
         public LoadingScreen Loading { get; private set; }
-        public ResultScreen Result => _result;           // экран итогов текущего боя (его строит FightDirector)
+        public ResultScreen Result => Fight != null ? Fight.Result : null;   // экран итогов строит FightDirector
 
-        public float CrowdVolume => Flow != null ? Flow.Settings.CrowdVolume : 1f;   // для звука толпы
-        public bool  Vibration   => Flow != null && Flow.Settings.vibration;
+        public InputReader FightInput => Fight != null ? Fight.GetComponent<InputReader>() : null;   // синтетические удары
+        public SoundPlayer UiSound => _uiSound;
+        public ShopResult LastShopResult { get; private set; } = ShopResult.Unavailable;
+        public bool Vibration => Flow != null && Flow.Profile.vibrationEnabled;
 
         // ------------------------------------------------------------------ Поля
 
         Camera _cam;
         int _viewW, _viewH;
+        bool _bootTried;
 
         Transform _menuScene;
         RingBuilder _menuRing;
         CrowdView _menuCrowd;
         float _orbit;
+        SoundPlayer _uiSound;
 
         GameObject _fightSlot, _resultSlot;   // пустые экраны на место уничтоженных HUD и итогов
-        ResultScreen _result;
         readonly HitResult[] _hits = new HitResult[MaxHits];
         int _hitCount;
         float _fightTime;
-        bool _decidedSent, _endedSent;
+        bool _decidedSent, _endedSent, _resultShown;
 
         int _loadTicks;
         float _loadT;
@@ -64,15 +74,22 @@ namespace VoxGame {
 
         // ------------------------------------------------------------------ Инициализация
 
-        // savePath / seed — для тестов и снимков; по умолчанию сохранение в persistentDataPath.
-        public void Init(Camera cam, string savePath = null, uint seed = 0x5EED2027u) {
+        // Запуск со сцены (Play Mode и сборка): размер окна — Screen, сохранение — persistentDataPath.
+        public void Init(Camera cam) => Init(cam, 0, 0, null, DefaultSeed);
+
+        // viewW/viewH — размер окна вывода, если он не Screen (снимки в текстуру; 0 — Screen).
+        // savePath — файл сохранения (сквозной проход пишет во временный); seed — случайные соперники.
+        public void Init(Camera cam, int viewW, int viewH, string savePath = null, uint seed = DefaultSeed) {
+            if (Flow != null) return;   // повторный Init ничего не делает
             _cam = cam;
+            _viewW = viewW; _viewH = viewH;
             Flow = new GameFlow(savePath, seed);
 
             var uiGO = new GameObject("UIRoot");
             uiGO.transform.SetParent(transform, false);
             UI = uiGO.AddComponent<UIRoot>();
             UI.Init(cam);
+            if (viewW > 0 && viewH > 0) UI.SetViewSize(viewW, viewH);   // до регистрации: экраны сразу в нужной ориентации
 
             _fightSlot = new GameObject("FightSlot", typeof(RectTransform));
             UI.Register(ScreenId.Fight, _fightSlot);
@@ -81,6 +98,11 @@ namespace VoxGame {
 
             BuildScreens();
             BuildMenuScene();
+
+            _uiSound = new SoundPlayer();
+            _uiSound.Init(transform, seed);
+            if (cam.GetComponent<AudioListener>() == null) cam.gameObject.AddComponent<AudioListener>();
+            UIKit.OnButtonClick = OnUiClick;
             ApplyAudio();
 
             Flow.OnStateChanged += OnState;
@@ -98,7 +120,8 @@ namespace VoxGame {
             MainMenu.Init(UI, () => f.Play(), () => f.OpenPlayer(), () => f.OpenShop(), () => f.OpenSettings());
 
             ModeSelect = NewScreen<ModeSelectScreen>("ModeSelect");
-            ModeSelect.Init(UI, () => f.StartCareer(), () => f.StartQuick(), () => f.StartTrial(), () => f.Back());
+            ModeSelect.Init(UI, () => f.StartCareer(), () => f.StartQuick(), () => f.StartTraining(), () => f.StartTrial(),
+                            () => f.Back());
 
             Roster = NewScreen<RosterScreen>("Roster");
             Roster.Init(UI, i => f.PickFighter(i), () => f.Back());
@@ -107,21 +130,22 @@ namespace VoxGame {
             Player.Init(UI, () => f.Back(), () => f.OpenShop());
 
             Shop = NewScreen<ShopScreen>("Shop");
-            Shop.Init(UI, id => f.BuyGlove(id), id => f.EquipGlove(id), t => f.BuyUpgrade(t), () => f.Back());
+            Shop.Init(UI, id => LastShopResult = f.BuyGlove(id), id => LastShopResult = f.EquipGlove(id),
+                      t => LastShopResult = f.BuyUpgrade(t), () => f.Back());
 
             Settings = NewScreen<SettingsScreen>("Settings");
             Settings.Init(UI,
-                v => { f.SetSoundLevel(v); ApplyAudio(); },
-                v => { f.SetCrowdLevel(v); ApplyAudio(); },
+                on => { f.SetSoundEnabled(on); ApplyAudio(); },
+                (k, v) => { f.SetVolume(k, v); ApplyAudio(); },
                 on => f.SetVibration(on),
-                () => { if (f.ResetProgress()) Settings.SetData(f.Settings, f.CanResetProgress); },
+                () => { if (f.ResetProgress()) Settings.SetData(f.Profile, f.CanResetProgress); },
                 () => f.Back());
 
             Pause = NewScreen<PauseScreen>("Pause");
-            Pause.Init(UI, () => f.Resume(), () => f.OpenSettings(), () => f.QuitToMenu());
+            Pause.Init(UI, () => f.Resume(), RestartFromPause, () => f.OpenSettings(), () => f.QuitToMenu());
 
             Reward = NewScreen<RewardScreen>("Reward");
-            Reward.Init(UI, () => f.Continue(), () => f.OpenShop(), () => f.Rematch());
+            Reward.Init(UI, () => f.Continue(), () => f.OpenShop(), () => f.Rematch(), () => f.QuitToMenu());
 
             Loading = NewScreen<LoadingScreen>("Loading");
             Loading.Init(UI);
@@ -139,27 +163,24 @@ namespace VoxGame {
             UpdateOrbit(0f);
         }
 
-        // Запуск в Play Mode и в сборке: сцена Game.unity несёт пустой объект GameRoot — на нём создаётся игра.
-        // Не Awake/Start: вызывается движком после загрузки сцены; в других сценах (нет GameRoot) ничего не делает.
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        static void BootScene() {
-            var root = GameObject.Find("GameRoot");
-            if (root == null || root.GetComponent<FightDirector>() != null) return;
-            var app = root.GetComponent<GameApp>();
-            if (app != null && app.Flow != null) return;
-            var cam = Camera.main;
-            if (cam == null) return;
-            if (app == null) app = root.AddComponent<GameApp>();
-            app.Init(cam);
-        }
-
         // ------------------------------------------------------------------ Tick
 
-        void Update() { Tick(Time.deltaTime); }
+        // Сцена Game.unity несёт GameRoot с этим компонентом: первый кадр Play Mode или сборки создаёт игру
+        // (единственное исключение из правила «Init вызывает создатель»). Вне Play Mode Update не идёт.
+        void Update() {
+            if (Flow == null) {
+                if (_bootTried) return;
+                _bootTried = true;
+                var cam = Camera.main;
+                if (cam == null) { Debug.LogWarning("VoxGame: в сцене нет камеры MainCamera — игра не запущена"); return; }
+                Init(cam);
+            }
+            Tick(Time.deltaTime);
+        }
 
         public void Tick(float realDt) {
             if (Flow == null) return;
-            float udt = realDt;
+            float udt = Mathf.Clamp(realDt, 0f, MaxFrameDt);
 
             switch (Flow.State) {
                 case AppState.Loading:
@@ -170,12 +191,14 @@ namespace VoxGame {
                 case AppState.Result:
                     TickFight(udt);
                     break;
+                // Pause и Settings из паузы: бой не тикает — стоит
             }
 
             if (Fight == null) {
                 UpdateOrbit(udt);
                 _menuCrowd.Tick(udt, udt);
             }
+            _uiSound.Tick(udt);
 
             UI.Tick(udt, udt);
             MainMenu.Tick(udt, udt);
@@ -189,7 +212,8 @@ namespace VoxGame {
             Loading.Tick(udt, udt);
         }
 
-        // Экран загрузки виден хотя бы кадр, на следующем тике строится бой, после выдержки — в бой.
+        // Экран загрузки виден хотя бы кадр, на следующем тике строится бой (голова — здесь, не в бою),
+        // после выдержки — в бой.
         void TickLoading(float udt) {
             _loadT += udt;
             _loadTicks++;
@@ -206,18 +230,24 @@ namespace VoxGame {
                 _decidedSent = true;
                 Flow.FightDecided();
             }
-            // FightDirector сам показывает экран итогов, когда развязка закончилась
-            if (!_endedSent && UI.ActiveScreen == ScreenId.Result
-                && (Flow.State == AppState.Fight || Flow.State == AppState.Victory)) {
+            // развязка закончилась (FightDirector показал итоги): начислить; победа уводит к награде
+            if (_resultShown && !_endedSent && (Flow.State == AppState.Fight || Flow.State == AppState.Victory)) {
                 _endedSent = true;
                 Flow.FightEnded(Fight.Referee.PlayerWon, CollectStats());
             }
         }
 
+        // Вызывается изнутри FightDirector.Tick: только флаг, переход — после Tick.
+        void OnFightResultShown() => _resultShown = true;
+
+        void OnHudPause() => Flow.Pause();
+
         // ------------------------------------------------------------------ Переходы
 
         void OnState(AppState prev, AppState next) {
             var p = Flow.Profile;
+            // надписи и вспышки удара лежат поверх всех экранов: на паузе, в настройках и в итогах их не видно
+            if (Fight != null && Fight.Fx != null) Fight.Fx.SetOverlayVisible(next == AppState.Fight || next == AppState.Victory);
             switch (next) {
                 case AppState.MainMenu:
                     DisposeFight();
@@ -236,18 +266,19 @@ namespace VoxGame {
                 case AppState.Loading:
                     DisposeFight();
                     Loading.Show(Flow.Foe, ModeLine());
-                    UI.ShowScreen(LoadingScreen.Id);
+                    UI.ShowScreen(ScreenId.Loading);
                     _loadT = 0f; _loadTicks = 0; _built = false;
                     break;
                 case AppState.Fight:
                     UI.ShowScreen(ScreenId.Fight);
+                    DrainInput();   // нажатия на экране паузы не должны стать ударами
                     break;
                 case AppState.Pause:
-                    Pause.Show(Flow.Foe.name);
+                    Pause.Show(Flow.Foe.name, Flow.Mode != GameMode.Training);
                     UI.ShowScreen(ScreenId.Pause);
                     break;
                 case AppState.Victory:
-                    break;   // развязку ведёт FightDirector, HUD остаётся
+                    break;   // развязку ведёт FightDirector
                 case AppState.Result:
                     PatchResult();
                     UI.ShowScreen(ScreenId.Result);
@@ -255,7 +286,8 @@ namespace VoxGame {
                 case AppState.Reward:
                     DisposeFight();
                     Reward.Show(Flow.LastReward, p);
-                    UI.ShowScreen(RewardScreen.Id);
+                    UI.ShowScreen(ScreenId.Reward);
+                    if (Flow.LastReward != null && Flow.LastReward.coins > 0) _uiSound.Play(SoundId.Coin);
                     break;
                 case AppState.Shop:
                     DisposeFight();
@@ -264,7 +296,7 @@ namespace VoxGame {
                     UI.ShowScreen(ScreenId.Shop);
                     break;
                 case AppState.Settings:
-                    Settings.SetData(Flow.Settings, Flow.CanResetProgress);
+                    Settings.SetData(p, Flow.CanResetProgress);
                     UI.ShowScreen(ScreenId.Settings);
                     break;
                 case AppState.Player:
@@ -272,16 +304,19 @@ namespace VoxGame {
                     UI.ShowScreen(ScreenId.Player);
                     break;
             }
+            ApplyAudio();
         }
 
         string ModeLine() {
             switch (Flow.Mode) {
                 case GameMode.Career:
                     int step = Flow.FoeLadderIndex + 1;
-                    string s = "Карьера · ступень " + step + " из " + RosterDef.Count;
+                    string s = "Лестница · ступень " + step + " из " + RosterDef.Count;
                     return step == RosterDef.Count ? s + " · бой за пояс" : s;
                 case GameMode.Trial:
                     return "Испытание · бой " + (Flow.TrialIndex + 1) + " из " + Flow.TrialTotal;
+                case GameMode.Training:
+                    return "Тренировка · соперник бьёт слабо";
                 default:
                     return "Быстрый бой";
             }
@@ -295,39 +330,48 @@ namespace VoxGame {
             go.transform.SetParent(transform, false);
             Fight = go.AddComponent<FightDirector>();
             Fight.enabled = false;   // бой тикает только из GameApp.Tick, собственный Update не нужен
+            Fight.FoeDamageMult = Flow.FoeDamageMult;
             // перчатки и улучшения применяются из профиля (PlayerProfile.GetCombatStats внутри FightDirector.Init)
             Fight.Init(Flow.Foe, Flow.Profile, _cam, UI, Flow.Modes, 1f, 1f, Flow.FightLadderIndex, Flow.FightLadderCount);
             if (_viewW > 0 && _viewH > 0) Fight.SetViewSize(_viewW, _viewH);
 
-            Fight.Hud.OnPause = () => Flow.Pause();
+            Fight.Hud.OnPause += OnHudPause;   // += : звук кнопки паузы ставит сам FightDirector
             Fight.OnFoeHit += CollectHit;
-            _hitCount = 0;
-            _fightTime = 0f;
-            _decidedSent = _endedSent = false;
+            Fight.OnResultShown = OnFightResultShown;
+            ResetFightCounters();
 
-            // экран итогов строит FightDirector; кнопки ведём через GameFlow
-            _result = FindResultScreen();
-            if (_result != null) {
-                _result.OnNext = () => Flow.Continue();
-                _result.OnRematch = () => Flow.Rematch();
-                _result.OnMenu = () => Flow.QuitToMenu();
+            // экран итогов строит FightDirector; кнопки ведём через GameFlow (замена его собственного «реванша»)
+            var r = Fight.Result;
+            if (r != null) {
+                r.OnNext = () => Flow.Continue();
+                r.OnRematch = () => Flow.Rematch();
+                r.OnMenu = () => Flow.QuitToMenu();
             }
 
             _menuScene.gameObject.SetActive(false);
-            UI.ShowScreen(LoadingScreen.Id);   // FightDirector.Init показал HUD — загрузка остаётся до FightLoaded
+            UI.ShowScreen(ScreenId.Loading);   // FightDirector.Init показал HUD — загрузка остаётся до FightLoaded
+            ApplyAudio();
         }
 
-        ResultScreen FindResultScreen() {
-            var all = UI.GetComponentsInChildren<ResultScreen>(true);
-            // новейший — последний ребёнок safe-слоя (прежний может ещё ждать отложенного Destroy)
-            ResultScreen best = null;
-            int bestIdx = -1;
-            foreach (var r in all) {
-                if (r == null) continue;
-                int idx = r.transform.GetSiblingIndex();
-                if (idx > bestIdx) { bestIdx = idx; best = r; }
-            }
-            return best;
+        void ResetFightCounters() {
+            _hitCount = 0;
+            _fightTime = 0f;
+            _decidedSent = _endedSent = _resultShown = false;
+        }
+
+        // «Заново» на экране паузы: тот же соперник с начала, голова восстанавливается без пересборки.
+        void RestartFromPause() {
+            if (Fight == null || !Flow.RestartFight()) return;
+            Fight.FoeDamageMult = Flow.FoeDamageMult;
+            Fight.Restart();
+            ResetFightCounters();
+            DrainInput();
+        }
+
+        void DrainInput() {
+            var inp = FightInput;
+            if (inp == null) return;
+            while (inp.Dequeue(out _)) { }
         }
 
         void CollectHit(HitResult r) {
@@ -336,7 +380,7 @@ namespace VoxGame {
 
         FightStats CollectStats() {
             var hist = new HitResult[_hitCount];
-            System.Array.Copy(_hits, hist, _hitCount);
+            Array.Copy(_hits, hist, _hitCount);
             return new FightStats {
                 time = _fightTime,
                 knockdowns = Fight.State != null ? Fight.State.knockdowns : 0,
@@ -346,24 +390,23 @@ namespace VoxGame {
             };
         }
 
-        // Итоги после поражения тоже ведут к награде (утешительной), а строка награды — по начислению GameFlow.
+        // Итоги поражения: строка награды — по начислению GameFlow (утешительный приз и опыт).
         void PatchResult() {
-            if (_result == null || Flow.LastReward == null) return;
-            var next = _result.transform.Find("BtnNext");
-            if (next != null) next.gameObject.SetActive(true);
-            var rew = _result.transform.Find("StatRew");
-            var t = rew != null ? rew.GetComponent<UnityEngine.UI.Text>() : null;
-            if (t != null) t.text = "Награда: " + MenuKit.Coins(Flow.LastReward.coins);
+            var r = Result;
+            var info = Flow.LastReward;
+            if (r == null || info == null) return;
+            string s = info.coins > 0 ? "Утешительный приз: +" + MenuKit.Coins(info.coins) : "Без монет";
+            r.SetRewardLine(s + "\nопыт +" + info.xp);   // две строки: перенос не рвёт «опыт +10»
         }
 
         void DisposeFight() {
             if (Fight == null) return;
             Fight.OnFoeHit -= CollectHit;
+            Fight.OnResultShown = null;
             var go = Fight.gameObject;
             Fight.Dispose();
             GameUtil.Destroy(go);
             Fight = null;
-            _result = null;
             // UIRoot держит ссылки на уничтоженные HUD и итоги — заменить пустышками
             if (UI != null) {
                 UI.Register(ScreenId.Fight, _fightSlot);
@@ -371,6 +414,146 @@ namespace VoxGame {
             }
             if (_menuScene != null) _menuScene.gameObject.SetActive(true);
             UpdateOrbit(0f);
+        }
+
+        // ------------------------------------------------------------------ Звук
+
+        // Громкости и «звук выкл» из профиля; на паузе (и в настройках из паузы) звук боя молчит.
+        void ApplyAudio() {
+            if (Flow == null) return;
+            var p = Flow.Profile;
+            if (_uiSound != null) {
+                _uiSound.SetVolumes(p.sfxVolume, p.crowdVolume, p.masterVolume);
+                if (_uiSound.Muted == p.soundEnabled) _uiSound.Mute(!p.soundEnabled);
+            }
+            var fs = Fight != null ? Fight.Sound : null;
+            if (fs != null) {
+                fs.SetVolumes(p.sfxVolume, p.crowdVolume, p.masterVolume);
+                bool mute = !p.soundEnabled || Flow.State == AppState.Pause || Flow.State == AppState.Settings;
+                if (fs.Muted != mute) fs.Mute(mute);
+            }
+        }
+
+        // Общий обработчик кнопок (UIKit.OnButtonClick). Кнопки боя озвучивает FightDirector.
+        void OnUiClick() {
+            if (Flow == null || _uiSound == null) return;
+            if (Flow.State == AppState.Fight || Flow.State == AppState.Victory) return;
+            _uiSound.Play(SoundId.Ui);
+        }
+
+        // ------------------------------------------------------------------ Программные нажатия (сквозной проход)
+
+        // Эквивалент нажатия кнопки текущего экрана. id — «экран.кнопка[:аргумент]», см. список в ответе писателя
+        // и в switch ниже. Возвращает false, если такой кнопки на текущем экране нет или она неактивна.
+        public bool Press(string id) {
+            if (Flow == null || string.IsNullOrEmpty(id)) return false;
+            string arg = null;
+            int colon = id.IndexOf(':');
+            if (colon >= 0) { arg = id.Substring(colon + 1); id = id.Substring(0, colon); }
+            bool ok = Dispatch(id, arg);
+            if (ok) UIKit.Click();
+            return ok;
+        }
+
+        bool Dispatch(string id, string arg) {
+            var s = Flow.State;
+            switch (id) {
+                // главное меню
+                case "menu.play":     if (s != AppState.MainMenu) return false; MainMenu.PressPlay(); return true;
+                case "menu.player":   if (s != AppState.MainMenu) return false; MainMenu.PressPlayer(); return true;
+                case "menu.shop":     if (s != AppState.MainMenu) return false; MainMenu.PressShop(); return true;
+                case "menu.settings": if (s != AppState.MainMenu) return false; MainMenu.PressSettings(); return true;
+
+                // выбор режима
+                case "mode.ladder":   if (s != AppState.ModeSelect) return false; ModeSelect.PressLadder(); return true;
+                case "mode.quick":    if (s != AppState.ModeSelect) return false; ModeSelect.PressQuick(); return true;
+                case "mode.training": if (s != AppState.ModeSelect) return false; ModeSelect.PressTraining(); return true;
+                case "mode.trial":    if (s != AppState.ModeSelect) return false; ModeSelect.PressTrial(); return true;
+                case "mode.back":     if (s != AppState.ModeSelect) return false; ModeSelect.PressBack(); return true;
+
+                // лестница
+                case "roster.select":
+                    if (s != AppState.Roster || !int.TryParse(arg, out int idx) || idx < 0 || idx >= Roster.Count) return false;
+                    Roster.Select(idx); return true;
+                case "roster.fight":
+                    if (s != AppState.Roster || !Roster.IsAvailable(Roster.Selected)) return false;
+                    Roster.PressFight(); return true;
+                case "roster.back":   if (s != AppState.Roster) return false; Roster.PressBack(); return true;
+
+                // бой (HUD)
+                case "fight.pause":       if (s != AppState.Fight || Fight == null) return false; Fight.Hud.PressPause(); return true;
+                case "fight.block":       if (s != AppState.Fight || Fight == null) return false; Fight.Hud.PressBlock(); return true;
+                case "fight.dodge-left":  if (s != AppState.Fight || Fight == null) return false; Fight.Hud.PressDodgeLeft(); return true;
+                case "fight.dodge-right": if (s != AppState.Fight || Fight == null) return false; Fight.Hud.PressDodgeRight(); return true;
+
+                // пауза; «В МЕНЮ» — два нажатия
+                case "pause.resume":   if (s != AppState.Pause) return false; Pause.PressResume(); return true;
+                case "pause.restart":  if (s != AppState.Pause) return false; Pause.PressRestart(); return true;
+                case "pause.settings": if (s != AppState.Pause) return false; Pause.PressSettings(); return true;
+                case "pause.menu":     if (s != AppState.Pause) return false; Pause.PressMenu(); return true;
+
+                // итоги поражения
+                case "result.again": if (s != AppState.Result || Result == null) return false; Result.PressRematch(); return true;
+                case "result.menu":  if (s != AppState.Result || Result == null) return false; Result.PressMenu(); return true;
+                case "result.next":  if (s != AppState.Result || Result == null) return false; Result.PressNext(); return true;
+
+                // награда
+                case "reward.next":  if (s != AppState.Reward) return false; Reward.PressMain(); return true;
+                case "reward.shop":  if (s != AppState.Reward) return false; Reward.PressShop(); return true;
+                case "reward.menu":  if (s != AppState.Reward) return false; Reward.PressMenu(); return true;
+
+                // магазин
+                case "shop.gloves":   if (s != AppState.Shop) return false; Shop.ShowTab(ShopScreen.Tab.Gloves); return true;
+                case "shop.upgrades": if (s != AppState.Shop) return false; Shop.ShowTab(ShopScreen.Tab.Upgrades); return true;
+                case "shop.glove": {
+                    if (s != AppState.Shop || Shop.CurrentTab != ShopScreen.Tab.Gloves) return false;
+                    int gi = Array.FindIndex(GlovesCatalog.All, g => g.id == arg);
+                    if (gi < 0) return false;
+                    Shop.SelectGlove(gi); return true;
+                }
+                case "shop.buy":
+                    if (s != AppState.Shop || !Shop.BuyEnabled) return false;
+                    Shop.PressBuy(); return true;
+                case "shop.equip":
+                    if (s != AppState.Shop || !Shop.EquipEnabled) return false;
+                    Shop.PressEquip(); return true;
+                case "shop.upgrade": {
+                    if (s != AppState.Shop || Shop.CurrentTab != ShopScreen.Tab.Upgrades) return false;
+                    if (!TryUpgrade(arg, out UpgradeType t) || !Shop.UpgradeEnabled(t)) return false;
+                    Shop.PressUpgrade(t); return true;
+                }
+                case "shop.back":     if (s != AppState.Shop) return false; Shop.PressBack(); return true;
+
+                // экран бойца
+                case "player.back":   if (s != AppState.Player) return false; Player.PressBack(); return true;
+                case "player.shop":   if (s != AppState.Player) return false; Player.PressShop(); return true;
+
+                // настройки
+                case "settings.sound":     if (s != AppState.Settings) return false; Settings.PressSound(); return true;
+                case "settings.vibration": if (s != AppState.Settings) return false; Settings.PressVibration(); return true;
+                case "settings.master-":   if (s != AppState.Settings) return false; Settings.PressVolume(VolumeKind.Master, -1); return true;
+                case "settings.master+":   if (s != AppState.Settings) return false; Settings.PressVolume(VolumeKind.Master, 1); return true;
+                case "settings.sfx-":      if (s != AppState.Settings) return false; Settings.PressVolume(VolumeKind.Sfx, -1); return true;
+                case "settings.sfx+":      if (s != AppState.Settings) return false; Settings.PressVolume(VolumeKind.Sfx, 1); return true;
+                case "settings.crowd-":    if (s != AppState.Settings) return false; Settings.PressVolume(VolumeKind.Crowd, -1); return true;
+                case "settings.crowd+":    if (s != AppState.Settings) return false; Settings.PressVolume(VolumeKind.Crowd, 1); return true;
+                case "settings.reset":     if (s != AppState.Settings || !Settings.ResetVisible) return false; Settings.PressReset(); return true;
+                case "settings.reset-yes": if (s != AppState.Settings || !Settings.ConfirmShown) return false; Settings.PressResetConfirm(); return true;
+                case "settings.reset-no":  if (s != AppState.Settings || !Settings.ConfirmShown) return false; Settings.PressResetCancel(); return true;
+                case "settings.back":      if (s != AppState.Settings) return false; Settings.PressBack(); return true;
+            }
+            return false;
+        }
+
+        static bool TryUpgrade(string arg, out UpgradeType t) {
+            switch (arg) {
+                case "power":   t = UpgradeType.Power; return true;
+                case "speed":   t = UpgradeType.Speed; return true;
+                case "stamina": t = UpgradeType.Stamina; return true;
+                case "defense": t = UpgradeType.Defense; return true;
+                case "mega":    t = UpgradeType.MegaCharge; return true;
+                default:        t = UpgradeType.Power; return false;
+            }
         }
 
         // ------------------------------------------------------------------ Камера меню и вид
@@ -390,20 +573,20 @@ namespace VoxGame {
         // Размер окна вывода, если он не равен Screen (снимки в текстуру). 0 — вернуться к Screen.
         public void SetViewSize(int w, int h) {
             _viewW = w; _viewH = h;
+            if (UI == null) return;
             UI.SetViewSize(w, h);
             if (Fight != null) Fight.SetViewSize(w, h);
             else UpdateOrbit(0f);
-        }
-
-        void ApplyAudio() {
-            AudioListener.volume = Flow.Settings.SoundVolume;
         }
 
         // ------------------------------------------------------------------ Освобождение
 
         public void Dispose() {
             if (Flow != null) Flow.OnStateChanged -= OnState;
+            UIKit.OnButtonClick -= OnUiClick;
             DisposeFight();
+            _uiSound?.Dispose();
+            _uiSound = null;
             _menuCrowd?.Dispose();
             _menuRing?.Dispose();
             _menuCrowd = null;

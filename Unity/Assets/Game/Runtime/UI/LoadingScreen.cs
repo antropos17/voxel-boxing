@@ -6,8 +6,7 @@ namespace VoxGame {
 
     public class LoadingScreen : MonoBehaviour, ILayoutHandler {
 
-        // Своего значения в ScreenId нет (UIRoot.cs чужой): номер вне перечня, словарь UIRoot его принимает.
-        public const ScreenId Id = (ScreenId)101;
+        public const ScreenId Id = ScreenId.Loading;
         const int PipCount = 3;
         const float PipRate = 3f;   // шагов бегущей отметки в секунду
 
@@ -53,7 +52,7 @@ namespace VoxGame {
             Layout(false);
         }
 
-        // modeLine — «Карьера · ступень 3 из 12», «Быстрый бой», «Испытание · бой 1 из 3».
+        // modeLine — «Лестница · ступень 3 из 12», «Быстрый бой», «Тренировка», «Испытание · бой 1 из 3».
         public void Show(in FighterDef foe, string modeLine) {
             _name.text = foe.name;
             _nick.text = "«" + foe.nickname + "»";

@@ -2,11 +2,12 @@ using UnityEngine;
 
 namespace VoxGame {
 
-    public enum GameMode { Career, QuickFight, Trial }
+    public enum GameMode { Career, QuickFight, Trial, Training }
 
     /// <summary>
     /// Правила режимов и расчёт награды.
     /// Trial: 3 боя подряд, HP +5 между боями, монеты ×2, мега запрещена.
+    /// Training: слабый соперник, бой не идёт в счёт побед и поражений.
     /// </summary>
     public class ModeManager {
 
@@ -36,6 +37,9 @@ namespace VoxGame {
                     TrialFightsLeft--;
                     return TrialFightsLeft > 0;
 
+                case GameMode.Training:
+                    return false;
+
                 default: // QuickFight
                     p.wins++;
                     return false;
@@ -44,6 +48,7 @@ namespace VoxGame {
 
         /// <summary>Вызвать после поражения.</summary>
         public void OnFightLost(PlayerProfile p) {
+            if (CurrentMode == GameMode.Training) return;
             p.losses++;
             if (CurrentMode == GameMode.Trial) TrialFightsLeft = 0;
         }

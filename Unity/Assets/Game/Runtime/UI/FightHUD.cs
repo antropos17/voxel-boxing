@@ -299,7 +299,7 @@ namespace VoxGame {
                 _megaReadyLbl.alignment = TextAnchor.MiddleRight;
                 Place(_kdLbl,    0.030f, 0.825f, 0.250f, 0.895f);
                 _kdLbl.alignment = TextAnchor.MiddleLeft;
-                UIKit.SetCorner(_pauseBtn.GetComponent<RectTransform>(), 1f, 1f, 1f, 1f, 84f, 84f, -8f, -8f);
+                UIKit.SetCorner(_pauseBtn.GetComponent<RectTransform>(), 1f, 1f, 1f, 1f, 92f, 92f, -8f, -8f);
                 Place(_telBgL, 0.150f, 0.440f, 0.230f, 0.660f);
                 Place(_telBgR, 0.770f, 0.440f, 0.850f, 0.660f);
                 Place(_comboLbl,   0.640f, 0.520f, 0.820f, 0.660f);

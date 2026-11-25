@@ -36,6 +36,12 @@ namespace VoxGame
 
         public FxDirector  Fx         => _fx;
         public SoundPlayer Sound      => _sound;
+        public ResultScreen Result    => _result;
+
+        // Подключение к GameApp: урон соперника (тренировка — меньше 1; ставить до Init или между боями)
+        // и сигнал «экран итогов показан» (вызывается внутри Tick — обработчик только ставит флаг).
+        public float FoeDamageMult = 1f;
+        public Action OnResultShown;
 
         // Замер кадра удара: весь Tick в кадре, где был v.Hit, и его части (мс).
         public float lastHitFrameMs, maxHitFrameMs;
@@ -713,7 +719,7 @@ namespace VoxGame
             float dmgBase = (9f + 1.6f * (_foeDef.level - 1)) * _aiStyle.d;
             if (_strikeCmd.isHook)    dmgBase *= 1.25f;
             if (_strikeCmd.isCounter) dmgBase *= 1.2f;
-            dmgBase *= st.fightParams.defenseMult;
+            dmgBase *= st.fightParams.defenseMult * FoeDamageMult;
 
             bool blocked = false, broken = false;
             if (st.playerBlocking)
@@ -812,6 +818,7 @@ namespace VoxGame
             _uiRoot.ShowScreen(ScreenId.Result);
             _sound.StopLoop();
             if (reward > 0) _sound.Play(SoundId.Coin);
+            OnResultShown?.Invoke();
         }
 
         // ---- Камера --------------------------------------------------------

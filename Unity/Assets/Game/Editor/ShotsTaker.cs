@@ -97,6 +97,7 @@ namespace VoxGame.Editor
             var director = fdGO.AddComponent<FightDirector>();
             director.Init(def, new PlayerProfile(), cam, ui, null, hpMult, stunMult, foeIdx, RosterDef.Count, forceBelt);
             director.SetViewSize(PortW, PortH);
+            director.Fx.QuietDodge = true;   // автоуклон бота не пишет «УКЛОН!» на снимках
             return director;
         }
 

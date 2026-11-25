@@ -8,6 +8,9 @@ namespace VoxGame {
 
     public enum BuyResult { Ok, NotEnoughCoins, MaxLevel, NotInCatalog, AlreadyOwned }
 
+    // Шины громкости из настроек: общая, эффекты боя и кнопки, толпа.
+    public enum VolumeKind { Master, Sfx, Crowd }
+
     /// <summary>Итоговые боевые параметры = улучшения × перчатки.</summary>
     public struct PlayerCombatStats {
         /// <summary>Множитель урона исходящих ударов.</summary>
@@ -38,6 +41,19 @@ namespace VoxGame {
         public List<string> boughtGloveIds = new List<string> { "classic" };
         public bool soundEnabled = true;
         public bool vibrationEnabled = true;
+        public float masterVolume = 1f;   // 0..1
+        public float sfxVolume = 1f;
+        public float crowdVolume = 1f;
+
+        public float GetVolume(VolumeKind k) =>
+            k == VolumeKind.Master ? masterVolume : k == VolumeKind.Sfx ? sfxVolume : crowdVolume;
+
+        public void SetVolume(VolumeKind k, float v) {
+            v = SaveService.Volume01(v);
+            if (k == VolumeKind.Master) masterVolume = v;
+            else if (k == VolumeKind.Sfx) sfxVolume = v;
+            else crowdVolume = v;
+        }
 
         // Уровни и стоимости улучшений
         public static readonly int[] UpgradeCosts = { 100, 300, 700 };
@@ -149,6 +165,9 @@ namespace VoxGame {
             ladderIndex      = Mathf.Max(0, d.ladderIndex);
             soundEnabled     = d.soundEnabled;
             vibrationEnabled = d.vibrationEnabled;
+            masterVolume     = SaveService.Volume01(d.masterVolume);
+            sfxVolume        = SaveService.Volume01(d.sfxVolume);
+            crowdVolume      = SaveService.Volume01(d.crowdVolume);
             equippedGloveId  = string.IsNullOrEmpty(d.equippedGloveId) ? "classic" : d.equippedGloveId;
 
             if (d.upgradeLevels != null && d.upgradeLevels.Length == 5) {
@@ -181,6 +200,9 @@ namespace VoxGame {
             d.ladderIndex     = ladderIndex;
             d.soundEnabled    = soundEnabled;
             d.vibrationEnabled = vibrationEnabled;
+            d.masterVolume    = masterVolume;
+            d.sfxVolume       = sfxVolume;
+            d.crowdVolume     = crowdVolume;
             d.equippedGloveId = equippedGloveId;
             d.upgradeLevels   = (int[])upgradeLevels.Clone();
             d.boughtGloveIds  = boughtGloveIds.ToArray();

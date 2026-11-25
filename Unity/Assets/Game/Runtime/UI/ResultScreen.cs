@@ -1,4 +1,5 @@
 // ResultScreen.cs — экран итогов боя: победа/поражение, статистика, кнопки действий.
+// В общем потоке игры его видно после поражения: «ЕЩЁ РАЗ» и «В МЕНЮ» (победа ведёт сразу к награде).
 using System;
 using UnityEngine;
 using UnityEngine.UI;
@@ -69,8 +70,8 @@ namespace VoxGame {
             // тёмная надпись на светлой кнопке: тёмная обводка её только мажет
             _nextBtn.GetComponentInChildren<Outline>().enabled = false;
 
-            // РЕВАНШ
-            _rematchBtn = UIKit.Btn(transform, "BtnRematch", "РЕВАНШ",
+            // ЕЩЁ РАЗ
+            _rematchBtn = UIKit.Btn(transform, "BtnRematch", "ЕЩЁ РАЗ",
                 UIKit.FontMd, UIKit.BgPanel, UIKit.TextMain);
             var remRT = _rematchBtn.GetComponent<RectTransform>();
             UIKit.SetAnchors(remRT, 0.10f, 0.093f, 0.90f, 0.188f);
@@ -79,7 +80,7 @@ namespace VoxGame {
 
             // В МЕНЮ
             _menuBtn = UIKit.Btn(transform, "BtnMenu", "В МЕНЮ",
-                UIKit.FontSm, UIKit.BgPanelLt, UIKit.TextSub);
+                UIKit.FontMd, UIKit.BgPanelLt, UIKit.TextMain);
             var menuRT = _menuBtn.GetComponent<RectTransform>();
             UIKit.SetAnchors(menuRT, 0.25f, 0.015f, 0.75f, 0.085f);
             menuRT.offsetMin = menuRT.offsetMax = Vector2.zero;
@@ -118,7 +119,18 @@ namespace VoxGame {
             _nextBtn.gameObject.SetActive(victory);
             _rematchBtn.gameObject.SetActive(true);
             _menuBtn.gameObject.SetActive(true);
+            // после поражения главная кнопка — «ЕЩЁ РАЗ»: оранжевая
+            _rematchBtn.GetComponent<Image>().color = victory ? UIKit.BgPanel : UIKit.Accent;
+            var rl = _rematchBtn.GetComponentInChildren<Text>();
+            rl.color = victory ? UIKit.TextMain : UIKit.BgDark;
+            rl.GetComponent<Outline>().enabled = victory;
         }
+
+        // Строка награды по начислению GameFlow (утешительный приз и опыт).
+        public void SetRewardLine(string text) => _rewardLbl.text = text;
+
+        public string HeaderText => _headerLbl.text;
+        public string RewardText => _rewardLbl.text;
 
         // ------------------------------------------------------------------ Программные нажатия (GameWalk)
 
@@ -139,7 +151,7 @@ namespace VoxGame {
                 Place(_rewardLbl.rectTransform, 0.05f, 0.140f, 0.52f, 0.270f);
                 Place(_nextBtn.GetComponent<RectTransform>(),    0.56f, 0.490f, 0.94f, 0.690f);
                 Place(_rematchBtn.GetComponent<RectTransform>(), 0.56f, 0.275f, 0.94f, 0.465f);
-                Place(_menuBtn.GetComponent<RectTransform>(),    0.62f, 0.070f, 0.88f, 0.250f);
+                Place(_menuBtn.GetComponent<RectTransform>(),    0.56f, 0.070f, 0.94f, 0.250f);
             } else {
                 Place(_headerLbl.rectTransform, 0.05f, 0.710f, 0.95f, 0.920f);
                 Place(_line,                    0.05f, 0.690f, 0.95f, 0.695f);
@@ -147,9 +159,9 @@ namespace VoxGame {
                 Place(_kdLbl.rectTransform,     0.05f, 0.525f, 0.95f, 0.600f);
                 Place(_accLbl.rectTransform,    0.05f, 0.445f, 0.95f, 0.520f);
                 Place(_rewardLbl.rectTransform, 0.05f, 0.365f, 0.95f, 0.440f);
-                Place(_nextBtn.GetComponent<RectTransform>(),    0.10f, 0.195f, 0.90f, 0.308f);
-                Place(_rematchBtn.GetComponent<RectTransform>(), 0.10f, 0.093f, 0.90f, 0.188f);
-                Place(_menuBtn.GetComponent<RectTransform>(),    0.25f, 0.015f, 0.75f, 0.085f);
+                Place(_nextBtn.GetComponent<RectTransform>(),    0.10f, 0.225f, 0.90f, 0.330f);
+                Place(_rematchBtn.GetComponent<RectTransform>(), 0.10f, 0.115f, 0.90f, 0.215f);
+                Place(_menuBtn.GetComponent<RectTransform>(),    0.10f, 0.012f, 0.90f, 0.105f);
             }
         }
 

@@ -1,5 +1,5 @@
 // RewardScreen.cs — награда после итогов: монеты с разбивкой, опыт, новый уровень, пояс, следующий соперник.
-// Победа: ДАЛЕЕ / В МАГАЗИН. Поражение: РЕВАНШ / В МАГАЗИН / ДАЛЕЕ.
+// Главная кнопка: победа — ДАЛЕЕ (следующий соперник или меню), поражение — ЕЩЁ РАЗ. Ниже В МАГАЗИН и В МЕНЮ.
 using System;
 using UnityEngine;
 using UnityEngine.UI;
@@ -8,25 +8,26 @@ namespace VoxGame {
 
     public class RewardScreen : MonoBehaviour, ILayoutHandler {
 
-        // Своего значения в ScreenId нет (UIRoot.cs чужой): номер вне перечня, словарь UIRoot его принимает.
-        public const ScreenId Id = (ScreenId)100;
+        public const ScreenId Id = ScreenId.Reward;
         public const int MaxLines = 6;
 
-        public Action OnNext, OnShop, OnRematch;
+        public Action OnNext, OnShop, OnRematch, OnMenu;
 
         Text _header, _total, _xp, _levelUp, _extra, _next;
         RectTransform _line, _xpBg, _xpFill, _linesBox;
         readonly Text[] _lineL = new Text[MaxLines], _lineR = new Text[MaxLines];
-        Button _mainBtn, _shopBtn, _nextBtn;
-        bool _won = true, _landscape;
+        Button _mainBtn, _shopBtn, _menuBtn;
+        bool _won = true, _land;
+        int _n = MaxLines;   // строк разбивки: рамка под них, без пустого хвоста
         float _pulse;
 
         public string TotalText => _total.text;
         public string NextFoeText => _next.text;
+        public string MainCaption => _mainBtn.GetComponentInChildren<Text>().text;
         public bool Won => _won;
 
-        public void Init(UIRoot root, Action onNext, Action onShop, Action onRematch) {
-            OnNext = onNext; OnShop = onShop; OnRematch = onRematch;
+        public void Init(UIRoot root, Action onNext, Action onShop, Action onRematch, Action onMenu) {
+            OnNext = onNext; OnShop = onShop; OnRematch = onRematch; OnMenu = onMenu;
             BuildUI();
             root.Register(Id, gameObject);
         }
@@ -46,11 +47,6 @@ namespace VoxGame {
             for (int i = 0; i < MaxLines; i++) {
                 _lineL[i] = UIKit.Label(_linesBox, "L" + i, UIKit.FontSm, UIKit.TextMain, semiBold: false, TextAnchor.MiddleLeft);
                 _lineR[i] = UIKit.Label(_linesBox, "R" + i, UIKit.FontSm, UIKit.MegaGold, semiBold: true, TextAnchor.MiddleRight);
-                float y1 = 1f - 0.04f - i * (0.92f / MaxLines), y0 = y1 - 0.92f / MaxLines;
-                UIKit.SetAnchors(_lineL[i].rectTransform, 0f, y0, 0.74f, y1);
-                _lineL[i].rectTransform.offsetMin = new Vector2(16f, 0f); _lineL[i].rectTransform.offsetMax = Vector2.zero;
-                UIKit.SetAnchors(_lineR[i].rectTransform, 0.74f, y0, 1f, y1);
-                _lineR[i].rectTransform.offsetMin = Vector2.zero; _lineR[i].rectTransform.offsetMax = new Vector2(-16f, 0f);
             }
 
             _xp = UIKit.Label(transform, "Xp", UIKit.FontMd, UIKit.TextMain, semiBold: true, TextAnchor.MiddleLeft);
@@ -63,8 +59,8 @@ namespace VoxGame {
             _mainBtn.onClick.AddListener(PressMain);
             _shopBtn = MenuKit.Secondary(transform, "BtnShop", "В МАГАЗИН", UIKit.FontMd);
             _shopBtn.onClick.AddListener(PressShop);
-            _nextBtn = MenuKit.Secondary(transform, "BtnNext", "ДАЛЕЕ", UIKit.FontMd);
-            _nextBtn.onClick.AddListener(PressNext);
+            _menuBtn = MenuKit.Secondary(transform, "BtnMenu", "В МЕНЮ", UIKit.FontMd);
+            _menuBtn.onClick.AddListener(PressMenu);
 
             Layout(false);
         }
@@ -99,6 +95,7 @@ namespace VoxGame {
             else if (r.mode == GameMode.Trial && r.trialDone) extra = "ИСПЫТАНИЕ ПРОЙДЕНО!";
             else if (r.mode == GameMode.Trial && r.won) extra = "Испытание: бой " + r.trialFight + " из " + r.trialTotal + " позади";
             else if (r.mode == GameMode.Trial) extra = "Испытание прервано";
+            else if (r.mode == GameMode.Training) extra = "Тренировка окончена";
             else if (r.ladderAdvanced) extra = "Ступень " + r.ladderIndex + " из " + RosterDef.Count + " взята";
             _extra.text = extra;
             _extra.gameObject.SetActive(extra.Length > 0);
@@ -109,9 +106,16 @@ namespace VoxGame {
                 _next.text = "";
             _next.gameObject.SetActive(_next.text.Length > 0);
 
-            MenuKit.SetCaption(_mainBtn, r.won ? "ДАЛЕЕ" : "РЕВАНШ");
-            _nextBtn.gameObject.SetActive(!r.won);
-            Layout(_landscape);   // раскладка нижних кнопок зависит от их числа
+            MenuKit.SetCaption(_mainBtn, r.won ? MainCaptionFor(r) : "ЕЩЁ РАЗ");
+            _n = Mathf.Max(1, n);
+            Layout(_land);
+        }
+
+        // Куда ведёт «дальше»: следующий бой лестницы или испытания, иначе в меню.
+        static string MainCaptionFor(RewardInfo r) {
+            if (r.mode == GameMode.Career && !string.IsNullOrEmpty(r.nextFoe)) return "К ЛЕСТНИЦЕ";
+            if (r.mode == GameMode.Trial && !r.trialDone) return "СЛЕДУЮЩИЙ БОЙ";
+            return "ДАЛЕЕ";
         }
 
         // ------------------------------------------------------------------ Нажатия
@@ -122,6 +126,7 @@ namespace VoxGame {
         }
 
         public void PressNext()    => OnNext?.Invoke();
+        public void PressMenu()    => OnMenu?.Invoke();
         public void PressShop()    => OnShop?.Invoke();
         public void PressRematch() => OnRematch?.Invoke();
 
@@ -130,15 +135,27 @@ namespace VoxGame {
         public void OnLayout(bool landscape) => Layout(landscape);
 
         public void Layout(bool landscape) {
-            _landscape = landscape;
+            _land = landscape;
             var main = _mainBtn.GetComponent<RectTransform>();
             var shop = _shopBtn.GetComponent<RectTransform>();
-            var next = _nextBtn.GetComponent<RectTransform>();
+            var menu = _menuBtn.GetComponent<RectTransform>();
+            // строки разбивки делят рамку поровну; рамка ровно под их число
+            for (int i = 0; i < MaxLines; i++) {
+                float y1 = 1f - (i + 0.5f) / (_n + 1f), y0 = y1 - 1f / (_n + 1f);
+                UIKit.SetAnchors(_lineL[i].rectTransform, 0f, y0, 0.74f, y1);
+                _lineL[i].rectTransform.offsetMin = new Vector2(16f, 0f); _lineL[i].rectTransform.offsetMax = Vector2.zero;
+                UIKit.SetAnchors(_lineR[i].rectTransform, 0.74f, y0, 1f, y1);
+                _lineR[i].rectTransform.offsetMin = Vector2.zero; _lineR[i].rectTransform.offsetMax = new Vector2(-16f, 0f);
+            }
+            float y;
             if (landscape) {
                 MenuKit.Place(_header.rectTransform, 0.02f, 0.865f, 0.50f, 0.995f);
                 MenuKit.Place(_line,                 0.02f, 0.855f, 0.98f, 0.860f);
-                MenuKit.Place(_total.rectTransform,  0.02f, 0.705f, 0.50f, 0.850f);
-                MenuKit.Place(_linesBox,             0.02f, 0.030f, 0.50f, 0.690f);
+                // левая колонка: сумма и разбивка по центру высоты
+                float box = 0.09f * (_n + 1f), stack = 0.145f + 0.02f + box;
+                y = 0.85f - Mathf.Max(0f, 0.82f - stack) * 0.5f;
+                MenuKit.Place(_total.rectTransform,  0.02f, y - 0.145f, 0.50f, y); y -= 0.165f;
+                MenuKit.Place(_linesBox,             0.02f, y - box, 0.50f, y);
                 MenuKit.Place(_xp.rectTransform,     0.53f, 0.770f, 0.98f, 0.850f);
                 MenuKit.Place(_xpBg,                 0.53f, 0.735f, 0.98f, 0.765f);
                 MenuKit.Place(_levelUp.rectTransform, 0.53f, 0.640f, 0.98f, 0.725f);
@@ -146,24 +163,26 @@ namespace VoxGame {
                 MenuKit.Place(_next.rectTransform,   0.53f, 0.450f, 0.98f, 0.565f);
                 MenuKit.Place(main, 0.53f, 0.235f, 0.98f, 0.440f);
                 MenuKit.Place(shop, 0.53f, 0.020f, 0.75f, 0.215f);
-                MenuKit.Place(next, 0.76f, 0.020f, 0.98f, 0.215f);
+                MenuKit.Place(menu, 0.76f, 0.020f, 0.98f, 0.215f);
             } else {
                 MenuKit.Place(_header.rectTransform, 0.03f, 0.920f, 0.97f, 0.995f);
                 MenuKit.Place(_line,                 0.05f, 0.912f, 0.95f, 0.916f);
                 MenuKit.Place(_total.rectTransform,  0.03f, 0.825f, 0.97f, 0.905f);
-                MenuKit.Place(_linesBox,             0.03f, 0.545f, 0.97f, 0.815f);
-                MenuKit.Place(_xp.rectTransform,     0.05f, 0.495f, 0.95f, 0.540f);
-                MenuKit.Place(_xpBg,                 0.05f, 0.470f, 0.95f, 0.490f);
-                MenuKit.Place(_levelUp.rectTransform, 0.03f, 0.410f, 0.97f, 0.465f);
-                MenuKit.Place(_extra.rectTransform,  0.03f, 0.360f, 0.97f, 0.410f);
-                MenuKit.Place(_next.rectTransform,   0.03f, 0.270f, 0.97f, 0.355f);
+                // от разбивки до строки соперника — блок по центру между суммой и кнопками
+                float box = 0.045f * (_n + 1f);
+                float stack = box + 0.02f + 0.045f + 0.02f + 0.02f
+                              + (_levelUp.gameObject.activeSelf ? 0.06f : 0f) + (_extra.gameObject.activeSelf ? 0.055f : 0f)
+                              + (_next.gameObject.activeSelf ? 0.07f : 0f);
+                y = 0.815f - Mathf.Max(0f, 0.535f - stack) * 0.5f;
+                MenuKit.Place(_linesBox,             0.03f, y - box, 0.97f, y); y -= box + 0.02f;
+                MenuKit.Place(_xp.rectTransform,     0.05f, y - 0.045f, 0.95f, y); y -= 0.045f;
+                MenuKit.Place(_xpBg,                 0.05f, y - 0.02f, 0.95f, y); y -= 0.04f;
+                if (_levelUp.gameObject.activeSelf) { MenuKit.Place(_levelUp.rectTransform, 0.03f, y - 0.06f, 0.97f, y); y -= 0.06f; }
+                if (_extra.gameObject.activeSelf) { MenuKit.Place(_extra.rectTransform, 0.03f, y - 0.055f, 0.97f, y); y -= 0.055f; }
+                MenuKit.Place(_next.rectTransform,   0.03f, y - 0.07f, 0.97f, y);
                 MenuKit.Place(main, 0.05f, 0.140f, 0.95f, 0.260f);
-                if (_nextBtn.gameObject.activeSelf) {
-                    MenuKit.Place(shop, 0.05f, 0.012f, 0.49f, 0.128f);
-                    MenuKit.Place(next, 0.51f, 0.012f, 0.95f, 0.128f);
-                } else {
-                    MenuKit.Place(shop, 0.05f, 0.012f, 0.95f, 0.128f);
-                }
+                MenuKit.Place(shop, 0.05f, 0.012f, 0.49f, 0.128f);
+                MenuKit.Place(menu, 0.51f, 0.012f, 0.95f, 0.128f);
             }
         }
 

@@ -48,6 +48,13 @@ namespace VoxGame {
             }
         }
 
+        // ------------------------------------------------------------------ Общий обработчик нажатий
+
+        // Вызывается каждой кнопкой из Btn до её собственного обработчика (звук Ui). Ставит GameApp.
+        public static System.Action OnButtonClick;
+
+        public static void Click() => OnButtonClick?.Invoke();
+
         // ------------------------------------------------------------------ Фабрика
 
         // Панель: RectTransform + Image (сплошной цвет).
@@ -82,7 +89,7 @@ namespace VoxGame {
             return t;
         }
 
-        // Кнопка: высота ≥ 96 px опорных (пальцевой минимум).
+        // Кнопка: высота ≥ 88 px опорных (пальцевой минимум) — задаёт раскладка экрана.
         // Якоря не устанавливаются — задаются после вызова.
         public static Button Btn(Transform parent, string name, string caption,
                                  int fontSize = FontMd,
@@ -98,6 +105,7 @@ namespace VoxGame {
             lbl.text = caption;
 
             var btn = rt.gameObject.AddComponent<Button>();
+            btn.onClick.AddListener(Click);
             var c = btn.colors;
             c.normalColor      = Color.white;
             c.highlightedColor = new Color(1.3f, 1.3f, 1.1f, 1f);

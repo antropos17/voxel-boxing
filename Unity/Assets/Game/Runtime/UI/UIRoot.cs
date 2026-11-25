@@ -11,7 +11,8 @@ namespace VoxGame {
     public enum ScreenId {
         MainMenu, ModeSelect, FighterSelect,
         Fight, Pause, Result,
-        Shop, Player, Settings
+        Shop, Player, Settings,
+        Loading, Reward
     }
 
     // Интерфейс для экранов, которым нужно знать об изменении ориентации.
@@ -43,6 +44,7 @@ namespace VoxGame {
         bool Landscape => _viewW > 0 ? _viewW > _viewH : Screen.width > Screen.height;
 
         public ScreenId ActiveScreen => _active;
+        public bool IsLandscape => Landscape;
 
         // ------------------------------------------------------------------ Инициализация
 
@@ -113,6 +115,7 @@ namespace VoxGame {
             screenGO.SetActive(false);
         }
 
+        // Показать один экран, остальные скрыть.
         public void ShowScreen(ScreenId id) {
             foreach (var kv in _screens)
                 kv.Value.SetActive(kv.Key == id);
@@ -126,7 +129,7 @@ namespace VoxGame {
 
         // ------------------------------------------------------------------ Tick
 
-        // Вызывается из FightDirector.Update (или GameApp.Update в будущем).
+        // Вызывается из GameApp.Tick (в старых сценах снимков — из FightDirector.Tick).
         // dt — игровое время, udt — реальное.
         public void Tick(float dt, float udt) {
             bool landscape = Landscape;
