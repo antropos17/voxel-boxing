@@ -21,6 +21,8 @@ jobs:
       # build.js без зависимостей: склеивает src/* в dist/index.html и копирует звуки в dist/sounds
       - run: node build.js
       - run: mkdir -p _site && cp -r dist/index.html dist/sounds _site/
+      # макеты интерфейса: docs/mockups/* -> /mockups/*
+      - run: cp -r docs/mockups _site/mockups
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
