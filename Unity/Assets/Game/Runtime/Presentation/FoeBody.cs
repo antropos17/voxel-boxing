@@ -37,6 +37,7 @@ namespace VoxGame
         const float HeadPitchStance = 4f;    // лёгкий наклон головы вперёд в стойке, град (крен в стойке — 0)
         const float HeadYawFollow   = 0.3f;  // доля скрутки корпуса, которую повторяет голова
         const float StaggerRoll = 9f, DownRoll = 8f;
+        const float StrikeSpeed = 13f;       // предел скорости перчатки в ударе, м/с (в осях корня)
         const float RefHeadY = 1.64f;        // высота головы, под которую заданы позы замаха, раскрытия и подъёма
         // центр перчатки от начала координат головы (м): x — наружу от средней линии, y — от уровня ушей, z — вперёд.
         // Перчатка стоит костяшками вверх-вперёд и выступает над центром на ~6 см: верх у скулы, лицо открыто.
@@ -431,8 +432,16 @@ namespace VoxGame
 
             float k = 1f - Mathf.Exp(-rate * sdt);
             holdW = Mathf.MoveTowards(holdW, holdArm >= 0 ? 1f : 0f, sdt / 0.2f);
-            glovePos[0] = Vector3.Lerp(glovePos[0], t0, k);
-            glovePos[1] = Vector3.Lerp(glovePos[1], t1, k);
+            Vector3 g0 = glovePos[0], g1 = glovePos[1];
+            glovePos[0] = Vector3.Lerp(g0, t0, k);
+            glovePos[1] = Vector3.Lerp(g1, t1, k);
+            // удар: с замаха перчатка срывалась на полметра за первый тик (почти телепорт). Скорость ограничена —
+            // до цели она всё равно доходит раньше проверки удара (STRIKE_DUR 0.13 с)
+            if (phase == FightPhase.Strike)
+            {
+                glovePos[0] = Vector3.MoveTowards(g0, glovePos[0], StrikeSpeed * sdt);
+                glovePos[1] = Vector3.MoveTowards(g1, glovePos[1], StrikeSpeed * sdt);
+            }
             float kb = 1f - Mathf.Exp(-Mathf.Min(rate, 10f) * sdt);
             lean = Mathf.Lerp(lean, leanT, kb);
             twist = Mathf.Lerp(twist, twistT, kb);

@@ -356,7 +356,7 @@ namespace VoxGame {
                 UIKit.SetCorner(_pauseBtn.GetComponent<RectTransform>(), 1f, 1f, 1f, 1f, 92f, 92f, -8f, -8f);
                 Place(_telBgL, 0.150f, 0.440f, 0.230f, 0.660f);
                 Place(_telBgR, 0.770f, 0.440f, 0.850f, 0.660f);
-                Place(_hintBg,     0.190f, 0.035f, 0.810f, 0.255f);
+                Place(_hintBg,     0.190f, 0.025f, 0.810f, 0.230f);   // ниже «СЕРИЯ ×N» (центр 0.30)
                 Place(_countLbl,   0.350f, 0.440f, 0.650f, 0.880f);
                 Place(_bannerLbl,  0.200f, 0.280f, 0.800f, 0.440f);
                 // Кнопки под большими пальцами по углам, середина низа свободна; «БЛОК» над «◄»,
