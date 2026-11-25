@@ -3,292 +3,278 @@ using UnityEngine;
 
 namespace VoxGame
 {
-    // Статический ринг ~5×5 м. Всё строится кодом, без ресурсов.
+    // Ринг и зал: помост с настилом, четыре ряда канатов, угловые стойки с подушками, трибуны со зрителями,
+    // лампы зала и ключевой свет. Всё строится кодом один раз, в бою не меняется.
+    // Оси ринга: центр настила в начале координат, настил на высоте 0, пол зала на −PlatH.
+    // Красный угол — (+RopeHalf, −RopeHalf), синий — напротив.
     // НЕ MonoBehaviour — создаётся и управляется из FightDirector.
     public class RingBuilder
     {
-        // ---- Параметры ринга --------------------------------------------
-        const float HALF      = 2.1f;   // полуразмер ринга (внешний холст)
-        const float INNER     = 1.95f;  // полуразмер внутренней области (боксёры)
-        const float APRON     = 0.4f;   // ширина фартука за канатами
-        const float POST_H    = 1.5f;   // высота угловых стоек
-        const float POST_W    = 0.08f;  // ширина стойки
-        const float ROPE_R    = 0.012f; // поперечный размер каната (отображается как плоская полоса)
-        const float ROPE_T    = 0.025f; // толщина каната (полоса)
-        static readonly float[] RopeY = { 0.50f, 0.78f, 1.06f, 1.34f };
+        public const float RopeHalf = 2.1f;    // канаты: квадрат 4.2 м
+        const float PlatHalf = 2.6f;           // помост шире канатов на фартук
+        const float PlatH    = 1.0f;           // высота помоста над полом зала
+        const float RopeT    = 0.036f;         // толщина каната
+        const int   MaxCrowd = 300;            // предел числа зрителей
+        static readonly float[] RopeY = { 0.46f, 0.76f, 1.06f, 1.36f };
 
-        // Цвета
-        static readonly Color32 C_CANVAS  = new Color32(255, 255, 255, 255);
-        static readonly Color32 C_APRON   = new Color32(220, 220, 220, 255);
-        static readonly Color32 C_POST    = new Color32(230, 200, 100, 255);
-        static readonly Color32 C_ROPE_A  = new Color32(220,  40,  40, 255); // 2 нижних
-        static readonly Color32 C_ROPE_B  = new Color32( 40,  40, 220, 255); // 2 верхних
-        static readonly Color32 C_FLOOR   = new Color32( 55,  55,  60, 255);
-        static readonly Color32 C_STEPS   = new Color32(100,  90,  80, 255);
-        static readonly Color32 C_CUSHION = new Color32(220,  40,  40, 255);
+        static readonly Color32 CCanvas   = new Color32( 62, 104, 168, 255);
+        static readonly Color32 CApronTop = new Color32( 46,  80, 134, 255);
+        static readonly Color32 CMark     = new Color32(196, 208, 226, 255);
+        static readonly Color32 CSkirt    = new Color32( 22,  32,  64, 255);
+        static readonly Color32 CTrim     = new Color32(214, 214, 208, 255);
+        static readonly Color32 CPost     = new Color32(150, 154, 165, 255);
+        static readonly Color32 CRed      = new Color32(204,  44,  44, 255);
+        static readonly Color32 CBlue     = new Color32( 44,  78, 190, 255);
+        static readonly Color32 CWhite    = new Color32(226, 226, 220, 255);
+        static readonly Color32 CHall     = new Color32( 34,  34,  42, 255);
+        static readonly Color32 CStand    = new Color32( 28,  28,  36, 255);
+        static readonly Color32 CWall     = new Color32( 20,  20,  28, 255);
+        static readonly Color32 CLamp     = new Color32(255, 244, 214, 255);
+        static readonly Color32[] RopeCol = { CRed, CBlue, CWhite, CRed };   // снизу вверх
 
-        readonly Transform _root;
-        Shader _vertColShader;
-        readonly List<GameObject> _gos = new List<GameObject>();
-        Light _keyLight, _fillLight;
-
-        // ---- Конструктор ------------------------------------------------
-
-        public RingBuilder()
+        static readonly Color32[] Cloth =
         {
-            var go = new GameObject("Ring");
-            _root = go.transform;
-        }
-
-        // Построить всю геометрию и добавить источники света.
-        public void Build(Transform parent)
+            new Color32(96, 52, 52, 255), new Color32(52, 66, 104, 255), new Color32(78, 78, 82, 255),
+            new Color32(104, 90, 54, 255), new Color32(52, 88, 70, 255), new Color32(116, 116, 122, 255),
+            new Color32(88, 58, 96, 255),
+        };
+        static readonly Color32[] Faces =
         {
+            new Color32(176, 132, 104, 255), new Color32(132, 96, 72, 255), new Color32(196, 152, 122, 255),
+        };
+
+        Transform _root;
+        readonly List<Object> _owned = new List<Object>();
+        public int CrowdCount { get; private set; }
+
+        // Построить ринг: center и yawDeg — положение и поворот ринга в осях parent.
+        // lightForward — направление ключевого света в осях parent (свет в осях боя, а не ринга).
+        public void Build(Transform parent, Vector3 center, float yawDeg, Vector3 lightForward)
+        {
+            _root = new GameObject("Ring").transform;
             _root.SetParent(parent, false);
-            _vertColShader = Shader.Find("VoxGame/VertexColor");
+            _root.localPosition = center;
+            _root.localRotation = Quaternion.Euler(0f, yawDeg, 0f);
+
+            var shader = Shader.Find("VoxGame/VertexColor");
+            var ringMat = NewMat(shader, 0.42f, 0f, 1000f, 2000f);
+            var hallMat = NewMat(shader, 0.34f, 0f, 5.5f, 21f);
+            var glowMat = NewMat(shader, 1f, 1f, 1000f, 2000f);
 
             var mb = new MeshBuilder();
+            AddCanvas(mb); AddSkirt(mb); AddPosts(mb); AddRopes(mb);
+            Spawn("ring", mb.Build("ring"), ringMat);
 
-            // Пол ринга (внутри канатов)
-            mb.AddQuad(
-                new Vector3(-INNER, 0f, -INNER), new Vector3( INNER, 0f, -INNER),
-                new Vector3( INNER, 0f,  INNER), new Vector3(-INNER, 0f,  INNER), C_CANVAS);
+            mb = new MeshBuilder();
+            AddHall(mb); AddCrowd(mb);
+            Spawn("hall", mb.Build("hall"), hallMat);
 
-            // Фартук вокруг ринга (от INNER до HALF на каждой стороне)
-            AddApron(mb);
+            mb = new MeshBuilder();
+            AddLamps(mb);
+            Spawn("lamps", mb.Build("lamps"), glowMat);
 
-            // Пол зала (за фартуком, до 7 м)
-            AddHallFloor(mb);
-
-            Spawn("floor", mb.Build());
-
-            // Угловые стойки (отдельный меш для каждой)
-            var mbPosts = new MeshBuilder();
-            AddPosts(mbPosts);
-            Spawn("posts", mbPosts.Build());
-
-            // Канаты
-            var mbRopes = new MeshBuilder();
-            AddRopes(mbRopes);
-            Spawn("ropes", mbRopes.Build());
-
-            // Огни
-            SetupLights();
+            var lightGO = new GameObject("KeyLight");
+            lightGO.transform.SetParent(parent, false);
+            lightGO.transform.localRotation = Quaternion.LookRotation(lightForward.normalized);
+            var light = lightGO.AddComponent<Light>();
+            light.type      = LightType.Directional;
+            light.color     = new Color(1.00f, 0.96f, 0.88f);
+            light.intensity = 1.15f;
+            light.shadows   = LightShadows.None;
+            _owned.Add(lightGO);
         }
 
-        // ---- Геометрия --------------------------------------------------
-
-        static void AddApron(MeshBuilder mb)
+        Material NewMat(Shader shader, float ambient, float glow, float fogStart, float fogEnd)
         {
-            // Четыре полосы фартука (+Z, -Z, +X, -X)
-            mb.AddQuad(
-                new Vector3(-HALF, 0f, -HALF), new Vector3(-INNER, 0f, -HALF),
-                new Vector3(-INNER, 0f,  HALF), new Vector3(-HALF, 0f,  HALF), C_APRON); // -X
-            mb.AddQuad(
-                new Vector3( INNER, 0f, -HALF), new Vector3(HALF, 0f, -HALF),
-                new Vector3( HALF, 0f,  HALF), new Vector3(INNER, 0f,  HALF), C_APRON); // +X
-            mb.AddQuad(
-                new Vector3(-INNER, 0f, -HALF), new Vector3(INNER, 0f, -HALF),
-                new Vector3( INNER, 0f, -INNER), new Vector3(-INNER, 0f, -INNER), C_APRON); // -Z
-            mb.AddQuad(
-                new Vector3(-INNER, 0f, INNER), new Vector3(INNER, 0f, INNER),
-                new Vector3( INNER, 0f,  HALF), new Vector3(-INNER, 0f,  HALF), C_APRON); // +Z
-            // Угловые квадраты (4 угла)
-            foreach (int sx in new[] { -1, 1 })
-            foreach (int sz in new[] { -1, 1 })
+            var m = new Material(shader != null ? shader : Shader.Find("Hidden/InternalErrorShader"));
+            m.SetFloat("_Ambient", ambient);
+            m.SetFloat("_Glow", glow);
+            m.SetFloat("_FogStart", fogStart);
+            m.SetFloat("_FogEnd", fogEnd);
+            _owned.Add(m);
+            return m;
+        }
+
+        void Spawn(string name, Mesh mesh, Material mat)
+        {
+            _owned.Add(mesh);
+            VoxModel.Spawn(name, _root, mesh, mat);
+        }
+
+        // ---- Помост ------------------------------------------------------------------------------
+
+        // Настил клетками 10 см: пятно света в центре, круг разметки, фартук за канатами темнее.
+        static void AddCanvas(MeshBuilder mb)
+        {
+            const int N = 52; float cell = 2f * PlatHalf / N;
+            for (int iz = 0; iz < N; iz++)
+            for (int ix = 0; ix < N; ix++)
             {
-                float x0 = sx > 0 ? INNER : -HALF, x1 = sx > 0 ? HALF : -INNER;
-                float z0 = sz > 0 ? INNER : -HALF, z1 = sz > 0 ? HALF : -INNER;
-                if (x0 > x1) { float t = x0; x0 = x1; x1 = t; }
-                if (z0 > z1) { float t = z0; z0 = z1; z1 = t; }
-                mb.AddQuad(
-                    new Vector3(x0, 0f, z0), new Vector3(x1, 0f, z0),
-                    new Vector3(x1, 0f, z1), new Vector3(x0, 0f, z1), C_APRON);
+                float x0 = -PlatHalf + ix * cell, z0 = -PlatHalf + iz * cell;
+                float cx = x0 + cell * 0.5f, cz = z0 + cell * 0.5f, r = Mathf.Sqrt(cx * cx + cz * cz);
+                bool apron = Mathf.Abs(cx) > RopeHalf || Mathf.Abs(cz) > RopeHalf;
+                Color32 c = apron ? CApronTop : CCanvas;
+                if (!apron && (Mathf.Abs(r - 1.0f) < 0.05f || Mathf.Max(Mathf.Abs(cx), Mathf.Abs(cz)) > RopeHalf - 0.1f)) c = CMark;
+                float k = Mathf.Lerp(0.58f, 1f, Mathf.Exp(-r * r / 5.5f)) * (((ix + iz) & 1) == 0 ? 1f : 0.965f);
+                mb.Quad(new Vector3(x0, 0, z0), new Vector3(x0, 0, z0 + cell), new Vector3(x0 + cell, 0, z0 + cell),
+                        new Vector3(x0 + cell, 0, z0), Vector3.up, Mul(c, k));
             }
         }
 
-        static void AddHallFloor(MeshBuilder mb)
+        // Юбка помоста: тёмные стенки со светлым кантом.
+        static void AddSkirt(MeshBuilder mb)
         {
-            const float HALL = 7f;
-            // Четыре полосы и 4 угла зала (y = -0.02, чуть ниже ринга)
-            float y = -0.02f;
-            // -X
-            mb.AddQuad(new Vector3(-HALL, y, -HALL), new Vector3(-HALF, y, -HALL),
-                        new Vector3(-HALF, y,  HALL), new Vector3(-HALL, y,  HALL), C_FLOOR);
-            // +X
-            mb.AddQuad(new Vector3( HALF, y, -HALL), new Vector3(HALL, y, -HALL),
-                        new Vector3( HALL, y,  HALL), new Vector3(HALF, y,  HALL), C_FLOOR);
-            // -Z
-            mb.AddQuad(new Vector3(-HALF, y, -HALL), new Vector3(HALF, y, -HALL),
-                        new Vector3( HALF, y, -HALF), new Vector3(-HALF, y, -HALF), C_FLOOR);
-            // +Z
-            mb.AddQuad(new Vector3(-HALF, y,  HALF), new Vector3(HALF, y, HALF),
-                        new Vector3( HALF, y,  HALL), new Vector3(-HALF, y, HALL), C_FLOOR);
-            // Углы
-            foreach (int sx in new[] { -1, 1 })
-            foreach (int sz in new[] { -1, 1 })
-            {
-                float x0 = sx > 0 ? HALF : -HALL, x1 = sx > 0 ? HALL : -HALF;
-                float z0 = sz > 0 ? HALF : -HALL, z1 = sz > 0 ? HALL : -HALF;
-                mb.AddQuad(new Vector3(x0, y, z0), new Vector3(x1, y, z0),
-                            new Vector3(x1, y, z1), new Vector3(x0, y, z1), C_FLOOR);
-            }
-
-            // Небольшой скос перед рингом (ступени не делаем, только маркировка)
-            mb.AddBox(new Vector3(-HALF, -0.1f, -HALF - 0.3f),
-                       new Vector3( HALF,  0.0f, -HALF), C_STEPS);
+            float h = PlatHalf;
+            mb.Box(new Vector3(0, -0.04f, 0), new Vector3(h + 0.012f, 0.035f, h + 0.012f), 0f, CTrim, top: false);
+            mb.Box(new Vector3(0, -0.5f * PlatH - 0.04f, 0), new Vector3(h, 0.5f * PlatH - 0.04f, h), 0f, CSkirt, top: false);
         }
 
+        // Стойки по углам и подушки на них, повёрнутые к центру ринга.
         static void AddPosts(MeshBuilder mb)
         {
-            // 4 угловые стойки
-            foreach (int sx in new[] { -1, 1 })
-            foreach (int sz in new[] { -1, 1 })
+            for (int i = 0; i < 4; i++)
             {
-                float x = sx * HALF, z = sz * HALF;
-                float h2 = POST_W * 0.5f;
-                // Вертикальная стойка
-                mb.AddBox(new Vector3(x - h2, 0f,       z - h2),
-                           new Vector3(x + h2, POST_H,  z + h2), C_POST);
-                // Подушка на вершине стойки (чуть шире и цветная)
-                mb.AddBox(new Vector3(x - h2 - 0.02f, POST_H,          z - h2 - 0.02f),
-                           new Vector3(x + h2 + 0.02f, POST_H + 0.07f, z + h2 + 0.02f), C_CUSHION);
+                float sx = (i & 1) == 0 ? 1f : -1f, sz = (i & 2) == 0 ? -1f : 1f;
+                float px = sx * (RopeHalf + 0.17f), pz = sz * (RopeHalf + 0.17f);
+                mb.Box(new Vector3(px, 0.26f, pz), new Vector3(0.055f, 1.26f, 0.055f), 0f, CPost);
+                mb.Box(new Vector3(px, 1.545f, pz), new Vector3(0.07f, 0.025f, 0.07f), 0f, CTrim);
+                Color32 pad = i == 0 ? CRed : i == 3 ? CBlue : CWhite;   // i=0: (+,−) красный, i=3: (−,+) синий
+                float yaw = Mathf.Atan2(sx, sz) * Mathf.Rad2Deg;         // толщина подушки вдоль диагонали
+                var pc = new Vector3(sx * (RopeHalf + 0.03f), 0.91f, sz * (RopeHalf + 0.03f));
+                mb.Box(pc, new Vector3(0.15f, 0.56f, 0.075f), yaw, pad);
+                mb.Box(pc + new Vector3(0, 0.585f, 0), new Vector3(0.155f, 0.025f, 0.08f), yaw, CTrim);
+                mb.Box(pc - new Vector3(0, 0.585f, 0), new Vector3(0.155f, 0.025f, 0.08f), yaw, CTrim);
             }
         }
 
+        // Четыре ряда канатов по периметру и по две стяжки на сторону.
         static void AddRopes(MeshBuilder mb)
         {
-            // 4 каната (горизонтальные полосы по периметру)
-            for (int ri = 0; ri < RopeY.Length; ri++)
+            float half = RopeHalf, len = RopeHalf - 0.02f, t = RopeT * 0.5f;
+            for (int side = 0; side < 4; side++)
             {
-                float y    = RopeY[ri];
-                Color32 c  = ri < 2 ? C_ROPE_A : C_ROPE_B;
-                float h2   = ROPE_T * 0.5f;
-
-                // Одна петля каната вокруг ринга (по 4 стороны)
-                float post = HALF; // от стойки до стойки
-                // -Z сторона
-                mb.AddBox(new Vector3(-post, y - h2, -post - ROPE_T), new Vector3(post, y + h2, -post), c);
-                // +Z сторона
-                mb.AddBox(new Vector3(-post, y - h2,  post), new Vector3(post, y + h2,  post + ROPE_T), c);
-                // -X сторона
-                mb.AddBox(new Vector3(-post - ROPE_T, y - h2, -post), new Vector3(-post, y + h2, post), c);
-                // +X сторона
-                mb.AddBox(new Vector3( post, y - h2, -post), new Vector3( post + ROPE_T, y + h2, post), c);
+                bool alongX = side < 2; float s = (side & 1) == 0 ? -1f : 1f;
+                for (int r = 0; r < RopeY.Length; r++)
+                {
+                    var c = alongX ? new Vector3(0, RopeY[r], s * half) : new Vector3(s * half, RopeY[r], 0);
+                    var e = alongX ? new Vector3(len, t, t) : new Vector3(t, t, len);
+                    mb.Box(c, e, 0f, RopeCol[r]);
+                }
+                for (int k = -1; k <= 1; k += 2)
+                {
+                    float y0 = RopeY[0], y1 = RopeY[RopeY.Length - 1];
+                    var c = alongX ? new Vector3(k * 0.75f, (y0 + y1) * 0.5f, s * half) : new Vector3(s * half, (y0 + y1) * 0.5f, k * 0.75f);
+                    mb.Box(c, new Vector3(0.012f, (y1 - y0) * 0.5f, 0.012f), 0f, CTrim);
+                }
             }
         }
 
-        // ---- Освещение --------------------------------------------------
+        // ---- Зал ---------------------------------------------------------------------------------
 
-        void SetupLights()
+        static void AddHall(MeshBuilder mb)
         {
-            // Ключевой свет: тёплый, сверху/спереди
-            var kGO = new GameObject("KeyLight");
-            kGO.transform.SetParent(_root, false);
-            kGO.transform.position = new Vector3(-1.5f, 4.5f, -4.0f);
-            kGO.transform.LookAt(Vector3.zero);
-            _keyLight = kGO.AddComponent<Light>();
-            _keyLight.type      = LightType.Directional;
-            _keyLight.color     = new Color(1.00f, 0.95f, 0.82f);
-            _keyLight.intensity = 1.1f;
-            _keyLight.shadows   = LightShadows.None;
-            _gos.Add(kGO);
-
-            // Контровой свет: прохладный, сзади/сверху
-            var fGO = new GameObject("FillLight");
-            fGO.transform.SetParent(_root, false);
-            fGO.transform.position = new Vector3(1.5f, 3.0f, 4.5f);
-            fGO.transform.LookAt(Vector3.zero);
-            _fillLight = fGO.AddComponent<Light>();
-            _fillLight.type      = LightType.Directional;
-            _fillLight.color     = new Color(0.72f, 0.82f, 1.00f);
-            _fillLight.intensity = 0.35f;
-            _fillLight.shadows   = LightShadows.None;
-            _gos.Add(fGO);
+            const float R = 15f;
+            mb.Quad(new Vector3(-R, -PlatH, -R), new Vector3(-R, -PlatH, R), new Vector3(R, -PlatH, R),
+                    new Vector3(R, -PlatH, -R), Vector3.up, CHall);
+            for (int side = 0; side < 4; side++)
+            {
+                float yaw = side * 90f;
+                // три ступени трибуны и стена за ними
+                for (int k = 0; k < 3; k++)
+                    mb.Box(Rot(yaw, new Vector3(0, -PlatH + 0.3f * (k + 1), 5.15f + 1.1f * k + 2.2f)),
+                           new Vector3(11.5f, 0.3f * (k + 1), 2.75f), yaw, CStand);
+                mb.Box(Rot(yaw, new Vector3(0, 2.0f, 13.2f)), new Vector3(14f, 3.2f, 0.3f), yaw, CWall);
+            }
         }
 
-        // ---- Вспомогательные методы -------------------------------------
-
-        void Spawn(string name, Mesh mesh)
+        // Зрители: сидят рядами на трёх ступенях с четырёх сторон, не больше MaxCrowd.
+        void AddCrowd(MeshBuilder mb)
         {
-            var go  = new GameObject(name);
-            go.transform.SetParent(_root, false);
-            var mf  = go.AddComponent<MeshFilter>();
-            var mr  = go.AddComponent<MeshRenderer>();
-            mf.sharedMesh = mesh;
-            mr.sharedMaterial = new Material(_vertColShader != null
-                ? _vertColShader
-                : Shader.Find("Hidden/InternalErrorShader"));
-            mr.shadowCastingMode    = UnityEngine.Rendering.ShadowCastingMode.Off;
-            mr.receiveShadows       = false;
-            _gos.Add(go);
+            uint rng = 0x9E3779B9u;
+            float Rnd() { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return (rng & 0xFFFFFF) / 16777216f; }
+            int n = 0;
+            for (int side = 0; side < 4; side++)
+            for (int k = 0; k < 3; k++)
+            {
+                float yaw = side * 90f, dist = 4.95f + 1.1f * k, y = -PlatH + 0.6f * (k + 1), w = 4.6f + 1.1f * k;
+                for (float x = -w; x <= w && n < MaxCrowd; x += 0.62f)
+                {
+                    if (Rnd() < 0.12f) continue;   // пустое место
+                    float jx = (Rnd() - 0.5f) * 0.16f, jh = Rnd() * 0.10f, kc = 0.7f + 0.5f * Rnd();
+                    Color32 cloth = Mul(Cloth[(int)(Rnd() * Cloth.Length) % Cloth.Length], kc);
+                    Color32 face = Mul(Faces[(int)(Rnd() * Faces.Length) % Faces.Length], 0.75f + 0.25f * Rnd());
+                    mb.Box(Rot(yaw, new Vector3(x + jx, y + 0.27f + jh * 0.5f, dist)), new Vector3(0.21f, 0.27f + jh * 0.5f, 0.14f), yaw, cloth);
+                    mb.Box(Rot(yaw, new Vector3(x + jx, y + 0.66f + jh, dist + 0.01f)), new Vector3(0.10f, 0.11f, 0.10f), yaw, face);
+                    n++;
+                }
+            }
+            CrowdCount = n;
         }
 
-        // ---- Tick (ринг статичен — no-op) --------------------------------
+        // Ряд ламп над дальними трибунами с каждой стороны.
+        static void AddLamps(MeshBuilder mb)
+        {
+            for (int side = 0; side < 4; side++)
+                for (int i = -3; i <= 3; i++)
+                    mb.Box(Rot(side * 90f, new Vector3(i * 2.6f, 3.1f, 12.6f)), new Vector3(0.55f, 0.11f, 0.06f), side * 90f, CLamp);
+        }
+
+        static Vector3 Rot(float yaw, Vector3 v) => Quaternion.Euler(0f, yaw, 0f) * v;
+
+        static Color32 Mul(Color32 c, float k) =>
+            new Color32((byte)Mathf.Min(255f, c.r * k), (byte)Mathf.Min(255f, c.g * k), (byte)Mathf.Min(255f, c.b * k), 255);
+
+        // ---- Tick (ринг статичен) ----------------------------------------------------------------
 
         public void Tick(float dt, float udt) { }
 
-        // ---- Dispose ----------------------------------------------------
-
         public void Dispose()
         {
-            foreach (var go in _gos)
-                DestroyObj(go);
-            _gos.Clear();
-            if (_root != null) DestroyObj(_root.gameObject);
+            foreach (var o in _owned) GameUtil.Destroy(o);
+            _owned.Clear();
+            if (_root != null) GameUtil.Destroy(_root.gameObject);
         }
 
-        static void DestroyObj(UnityEngine.Object o)
-        {
-            if (o == null) return;
-#if UNITY_EDITOR
-            if (!Application.isPlaying) { UnityEngine.Object.DestroyImmediate(o); return; }
-#endif
-            UnityEngine.Object.Destroy(o);
-        }
-
-        // ================================================================
-        // Внутренний строитель меша (вершины+цвета+треугольники)
-        // ================================================================
+        // ---- Строитель сетки: грани с нормалями и цветом в вершинах ---------------------------------
         sealed class MeshBuilder
         {
-            readonly List<Vector3> _v = new List<Vector3>(256);
-            readonly List<Color32> _c = new List<Color32>(256);
-            readonly List<int>     _t = new List<int>(512);
+            readonly List<Vector3> _v = new List<Vector3>(4096), _n = new List<Vector3>(4096);
+            readonly List<Color32> _c = new List<Color32>(4096);
+            readonly List<int> _t = new List<int>(6144);
 
-            // Добавить четырёхугольник (a→b→c, a→c→d)
-            public void AddQuad(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Color32 col)
+            // Четырёхугольник a→b→c→d по часовой стрелке, если смотреть со стороны нормали.
+            public void Quad(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 n, Color32 col)
             {
-                int base0 = _v.Count;
+                int i = _v.Count;
                 _v.Add(a); _v.Add(b); _v.Add(c); _v.Add(d);
-                _c.Add(col); _c.Add(col); _c.Add(col); _c.Add(col);
-                _t.Add(base0); _t.Add(base0 + 1); _t.Add(base0 + 2);
-                _t.Add(base0); _t.Add(base0 + 2); _t.Add(base0 + 3);
+                for (int k = 0; k < 4; k++) { _n.Add(n); _c.Add(col); }
+                _t.Add(i); _t.Add(i + 1); _t.Add(i + 2);
+                _t.Add(i); _t.Add(i + 2); _t.Add(i + 3);
             }
 
-            // Добавить параллелепипед по min/max (6 граней, 2 треугольника каждая)
-            public void AddBox(Vector3 min, Vector3 max, Color32 col)
+            // Коробка: центр, полуразмеры, поворот вокруг вертикали (градусы).
+            public void Box(Vector3 center, Vector3 half, float yawDeg, Color32 col, bool top = true)
             {
-                // Порядок граней: нижняя, верхняя, -Z, +Z, -X, +X
-                float x0 = min.x, y0 = min.y, z0 = min.z;
-                float x1 = max.x, y1 = max.y, z1 = max.z;
-
-                AddQuad(new Vector3(x0,y0,z0),new Vector3(x1,y0,z0),new Vector3(x1,y0,z1),new Vector3(x0,y0,z1),col); // низ
-                AddQuad(new Vector3(x0,y1,z1),new Vector3(x1,y1,z1),new Vector3(x1,y1,z0),new Vector3(x0,y1,z0),col); // верх
-                AddQuad(new Vector3(x0,y1,z0),new Vector3(x1,y1,z0),new Vector3(x1,y0,z0),new Vector3(x0,y0,z0),col); // -Z
-                AddQuad(new Vector3(x0,y0,z1),new Vector3(x1,y0,z1),new Vector3(x1,y1,z1),new Vector3(x0,y1,z1),col); // +Z
-                AddQuad(new Vector3(x0,y0,z0),new Vector3(x0,y0,z1),new Vector3(x0,y1,z1),new Vector3(x0,y1,z0),col); // -X
-                AddQuad(new Vector3(x1,y0,z1),new Vector3(x1,y0,z0),new Vector3(x1,y1,z0),new Vector3(x1,y1,z1),col); // +X
+                var q = Quaternion.Euler(0f, yawDeg, 0f);
+                Vector3 P(float x, float y, float z) => center + q * new Vector3(x * half.x, y * half.y, z * half.z);
+                Vector3 N(float x, float y, float z) => q * new Vector3(x, y, z);
+                Quad(P(1, -1, -1), P(1, 1, -1), P(1, 1, 1), P(1, -1, 1), N(1, 0, 0), col);
+                Quad(P(-1, -1, 1), P(-1, 1, 1), P(-1, 1, -1), P(-1, -1, -1), N(-1, 0, 0), col);
+                if (top) Quad(P(-1, 1, -1), P(-1, 1, 1), P(1, 1, 1), P(1, 1, -1), N(0, 1, 0), col);
+                Quad(P(-1, -1, 1), P(-1, -1, -1), P(1, -1, -1), P(1, -1, 1), N(0, -1, 0), col);
+                Quad(P(1, -1, 1), P(1, 1, 1), P(-1, 1, 1), P(-1, -1, 1), N(0, 0, 1), col);
+                Quad(P(-1, -1, -1), P(-1, 1, -1), P(1, 1, -1), P(1, -1, -1), N(0, 0, -1), col);
             }
 
-            // Собрать Mesh
-            public Mesh Build()
+            public Mesh Build(string name)
             {
-                var mesh = new Mesh { name = "RingMesh" };
-                mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+                var mesh = new Mesh { name = name };
+                mesh.indexFormat = _v.Count > 65000 ? UnityEngine.Rendering.IndexFormat.UInt32
+                                                    : UnityEngine.Rendering.IndexFormat.UInt16;
                 mesh.SetVertices(_v);
+                mesh.SetNormals(_n);
                 mesh.SetColors(_c);
                 mesh.SetTriangles(_t, 0);
-                mesh.RecalculateNormals();
                 mesh.RecalculateBounds();
                 return mesh;
             }

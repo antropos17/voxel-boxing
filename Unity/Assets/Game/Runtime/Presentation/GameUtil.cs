@@ -15,15 +15,15 @@ namespace VoxGame
             Object.Destroy(obj);
         }
 
-        // Вертикальный FOV по ширине и высоте экрана.
-        // Портрет: 2*atan(tan(12°)/aspect), clamp [36, 60]; ландшафт: 32°.
+        // Вертикальный FOV по ширине и высоте экрана: соперник виден по пояс, за ним — ринг.
+        // Портрет: по горизонтали 33° (2*atan(tan(16.5°)/aspect)), clamp [40, 66]; ландшафт: 50°.
         public static float CalcFov(float screenWidth, float screenHeight)
         {
-            if (screenHeight <= 0f || screenWidth <= 0f) return 46f;
-            if (screenWidth > screenHeight) return 32f;
+            if (screenHeight <= 0f || screenWidth <= 0f) return 50f;
+            if (screenWidth > screenHeight) return 50f;
             float aspect = screenWidth / screenHeight;
-            float fov = 2f * Mathf.Atan(Mathf.Tan(12f * Mathf.Deg2Rad) / aspect) * Mathf.Rad2Deg;
-            return Mathf.Clamp(fov, 36f, 60f);
+            float fov = 2f * Mathf.Atan(Mathf.Tan(16.5f * Mathf.Deg2Rad) / aspect) * Mathf.Rad2Deg;
+            return Mathf.Clamp(fov, 40f, 66f);
         }
 
         // Порог свайпа в пикселях по правилам web-fight: clamp(min(w,h)*0.065, 22, 40).

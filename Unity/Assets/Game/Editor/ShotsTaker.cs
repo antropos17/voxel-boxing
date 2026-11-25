@@ -1,34 +1,47 @@
 // ShotsTaker.cs — утилита снимков игрового слоя.
-// Shot(...) — статический метод рендера одного кадра в PNG.
-// FightShots() — сквозной сценарий W1: 5 пар портрет/ландшафт без Play Mode.
+// Shot(...) — рендер одного кадра в PNG.
+// FightShots() — сквозной сценарий W1 без Play Mode: настоящий FightDirector, удары только через InputReader.Inject,
+// нокдаун и нокаут — настоящими ударами; пять пар портрет/ландшафт и замер кадра удара.
+// DiagShots() — диагностика: сцена со стороны, без UI.
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
+using Unity.Burst;
+using Unity.Jobs.LowLevel.Unsafe;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 using VoxProbe;
+using Debug = UnityEngine.Debug;
+using Object = UnityEngine.Object;
 
 namespace VoxGame.Editor
 {
     public static class ShotsTaker
     {
-        // ------------------------------------------------------------------ Статический метод снимка
+        const float DT = 1f / 60f;
+        const int PortW = 540, PortH = 1170, LandW = 1170, LandH = 540;
+        const int WarmHits = 3;   // первые удары включают JIT и компиляцию Burst — в статистику не входят
 
-        /// Рендер одного кадра через RenderTexture → PNG.
-        /// Canvas переводится в World Space если вне Play Mode (Screen Space не работает в batch).
-        /// Вызывающий обязан освободить ресурсы сам если создавал объекты.
+        static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+        static string F(double v) => v.ToString("0.00", Inv);
+
+        // ------------------------------------------------------------------ Снимок
+
+        /// Рендер одного кадра через RenderTexture → PNG. ui == null — без интерфейса.
+        /// Canvas переводится в World Space вне Play Mode (Screen Space в пакетном режиме не рисует в текстуру).
         public static void Shot(Camera cam, UIRoot ui, int w, int h, string path)
         {
-            ui.PrepareForShot(w, h);
-
-            // В редакторе / пакетном режиме Screen Space Camera не рисует в RenderTexture.
-            // Переключаем Canvas в World Space перед камерой по frustum.
-            if (!Application.isPlaying)
-                ui.FitToCamera(cam, w, h);
-
-            Canvas.ForceUpdateCanvases();
+            if (ui != null)
+            {
+                ui.PrepareForShot(w, h);
+                if (!Application.isPlaying) ui.FitToCamera(cam, w, h);
+                Canvas.ForceUpdateCanvases();
+            }
 
             var rt = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32);
             cam.targetTexture    = rt;
@@ -40,8 +53,7 @@ namespace VoxGame.Editor
             tex.Apply();
 
             var dir = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             File.WriteAllBytes(path, tex.EncodeToPNG());
 
             Object.DestroyImmediate(tex);
@@ -49,261 +61,353 @@ namespace VoxGame.Editor
             RenderTexture.active = null;
             rt.Release();
 
-            ui.RestoreAfterShot();
+            ui?.RestoreAfterShot();
         }
 
-        // ------------------------------------------------------------------ Сценарий снимков W1
+        // ------------------------------------------------------------------ Сцена
 
-        /// Вне Play Mode: создаёт бой на чистой логике, прогоняет тики с синтетическими
-        /// жестами, снимает пять пар портрет/ландшафт в Unity/Shots/game/,
-        /// выводит в лог GAME_HIT_FRAME_MS.
+        static string ShotsDir()
+        {
+            var d = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Shots", "game"));
+            Directory.CreateDirectory(d);
+            return d;
+        }
+
+        static FightDirector NewFight(out Camera cam, out UIRoot ui, float hpMult = 1f, float stunMult = 1f)
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+
+            var camGO = new GameObject("ShotCam");
+            cam = camGO.AddComponent<Camera>();
+            cam.clearFlags      = CameraClearFlags.SolidColor;
+            cam.backgroundColor = new Color(0.02f, 0.02f, 0.035f, 1f);
+            cam.nearClipPlane   = 0.05f;
+            cam.farClipPlane    = 40f;
+            var camData = camGO.AddComponent<UniversalAdditionalCameraData>();
+            camData.renderShadows = false;
+            camData.antialiasing  = AntialiasingMode.None;
+
+            var uiGO = new GameObject("UIRoot");
+            ui = uiGO.AddComponent<UIRoot>();
+            ui.Init(cam);
+
+            var def = new RosterDef(42u).Get(0);
+            var fdGO = new GameObject("FightDirector");
+            var director = fdGO.AddComponent<FightDirector>();
+            director.Init(def, new PlayerProfile(), cam, ui, null, hpMult, stunMult);
+            director.SetViewSize(PortW, PortH);
+            return director;
+        }
+
+        static void EndFight(FightDirector director)
+        {
+            var go = director.gameObject;
+            director.Dispose();
+            Object.DestroyImmediate(go);
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        }
+
+        // Пара снимков портрет/ландшафт одного и того же момента боя.
+        static void Pair(FightDirector d, Camera cam, UIRoot ui, string dir, string tag)
+        {
+            d.SetViewSize(PortW, PortH);
+            Shot(cam, ui, PortW, PortH, Path.Combine(dir, tag + "-p.png"));
+            d.SetViewSize(LandW, LandH);
+            Shot(cam, ui, LandW, LandH, Path.Combine(dir, tag + "-l.png"));
+            d.SetViewSize(PortW, PortH);
+        }
+
+        // ------------------------------------------------------------------ Замер кадра удара
+
+        struct HitFrame { public double ext, frame, pick, hit, tick, layer, tSim, tBore, tRest, tMesh, tickLastMs; }
+
+        // Что повторить на отдельной голове: игровое время каждого кадра и удар в тех кадрах, где он был.
+        struct Rec { public float sdt; public bool hit; public Ray ray; public float3 pt, dir; public int str; }
+
+        sealed class Run
+        {
+            public FightDirector d;
+            public readonly List<HitFrame> frames = new List<HitFrame>();
+            public readonly List<Rec> recs = new List<Rec>();
+            readonly Stopwatch sw = new Stopwatch();
+
+            bool dodged;
+
+            public void Tick()
+            {
+                // защита игрока — настоящими кнопками HUD: уклон в сторону от летящего удара
+                if (d.State.phase == FightPhase.Strike && !dodged)
+                {
+                    if (d.FoeAttackSide > 0) d.Hud.PressDodgeLeft(); else d.Hud.PressDodgeRight();
+                    dodged = true;
+                }
+                else if (d.State.phase != FightPhase.Strike) dodged = false;
+
+                int seq = d.hitFrameSeq;
+                sw.Restart();
+                d.Tick(DT);
+                double ext = sw.Elapsed.TotalMilliseconds;
+                bool hit = d.hitFrameSeq != seq;
+                recs.Add(new Rec { sdt = d.lastSdt, hit = hit, ray = d.lastHeadRay, pt = d.lastHitPoint, dir = d.lastHitDir, str = d.lastHitStrength });
+                if (!hit) return;
+                var v = d.Head;
+                frames.Add(new HitFrame
+                {
+                    ext = ext, frame = d.lastHitFrameMs, pick = d.lastPickMs, hit = d.lastHitMs, tick = d.lastAnatTickMs,
+                    layer = d.lastLayerMs, tSim = v.tSim, tBore = v.tBore, tRest = v.tRest, tMesh = v.tMesh, tickLastMs = v.lastMs,
+                });
+            }
+
+            public void Ticks(int n) { for (int i = 0; i < n; i++) Tick(); }
+
+            public void Punch(PunchType type, int side, float pw = 1.25f) =>
+                d.GetComponent<InputReader>().Inject(new PunchInput { type = type, side = side, pw = pw, speed = 1.2f });
+
+            // Ждать, пока соперник не в замахе/ударе и не на полу (только чтение состояния).
+            public void WaitOpen(int maxTicks)
+            {
+                for (int i = 0; i < maxTicks && !d.Finished; i++)
+                {
+                    var ph = d.State.phase;
+                    if (ph == FightPhase.Idle || ph == FightPhase.Guard || ph == FightPhase.Recover || ph == FightPhase.Open
+                        || ph == FightPhase.Stagger) return;
+                    Tick();
+                }
+            }
+        }
+
+        static string Stats(List<HitFrame> fs, int from, Func<HitFrame, double> sel, out double avg)
+        {
+            double mx = 0, sum = 0; int n = 0;
+            for (int i = from; i < fs.Count; i++) { double x = sel(fs[i]); mx = Math.Max(mx, x); sum += x; n++; }
+            avg = n > 0 ? sum / n : 0;
+            return "max=" + F(mx) + " avg=" + F(avg) + " n=" + n;
+        }
+
+        // Те же вызовы анатомии на отдельной голове без слоя: AnatSkin.Step → (Pick → Push → Hit) → v.Tick → SetGlobals.
+        static List<HitFrame> BareHead(List<Rec> recs, Vector3 at)
+        {
+            var mat = new Material(Shader.Find("VoxProbe/Anatomy"));
+            AnatSkin.on = true;
+            AnatSkin.Reset();
+            var v = new AnatView(null, at, mat);
+            var res = new List<HitFrame>();
+            var sw = new Stopwatch();
+            foreach (var r in recs)
+            {
+                sw.Restart();
+                double pick = 0, hit = 0;
+                if (r.hit)
+                {
+                    v.Pick(new Ray(v.root.position + r.ray.origin, r.ray.direction), out _, out _, out _);
+                    pick = sw.Elapsed.TotalMilliseconds;
+                    AnatSkin.Push(r.pt, r.dir, r.str);
+                    v.Hit(r.pt, r.dir, r.str);
+                    hit = sw.Elapsed.TotalMilliseconds - pick;
+                }
+                double t0 = sw.Elapsed.TotalMilliseconds;
+                AnatSkin.Step(r.sdt);
+                v.Tick(r.sdt);
+                AnatSkin.SetGlobals(v.root);
+                double tick = sw.Elapsed.TotalMilliseconds - t0;
+                if (r.hit) res.Add(new HitFrame { frame = sw.Elapsed.TotalMilliseconds, pick = pick, hit = hit, tick = tick });
+            }
+            v.Dispose();
+            Object.DestroyImmediate(mat);
+            AnatSkin.Reset();
+            return res;
+        }
+
+        // Настройки Burst и проверок редактора — только чтение.
+        static string BurstInfo()
+        {
+            var o = BurstCompiler.Options;
+            return "EnableBurstCompilation=" + o.EnableBurstCompilation
+                 + " EnableBurstCompileSynchronously=" + o.EnableBurstCompileSynchronously
+                 + " EnableBurstSafetyChecks=" + o.EnableBurstSafetyChecks
+                 + " ForceEnableBurstSafetyChecks=" + o.ForceEnableBurstSafetyChecks
+                 + " JobDebuggerEnabled=" + JobsUtility.JobDebuggerEnabled
+                 + " NativeLeakDetection=" + Unity.Collections.NativeLeakDetection.Mode
+                 + " batch=" + Application.isBatchMode;
+        }
+
+        // ------------------------------------------------------------------ Сценарий W1
+
         [MenuItem("VoxGame/Fight Shots W1")]
         public static void FightShots()
         {
-            var shotsDir = Path.GetFullPath(
-                Path.Combine(Application.dataPath, "..", "Shots", "game"));
-            Directory.CreateDirectory(shotsDir);
+            var dir = ShotsDir();
+            // здоровье ×4 и стойкость ×3: серия для w1-hits (с мегами) не валит соперника, мега не добивает до нокдауна
+            var d = NewFight(out var cam, out var ui, 4f, 3f);
+            var run = new Run { d = d };
+            var log = new StringBuilder();
 
-            // --- Новая пустая сцена ---
-            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            // Разминка: ~1.5 с боя, сетки головы построены
+            run.Ticks(90);
+            Pair(d, cam, ui, dir, "w1-start");
 
-            // --- Определяем бойца заранее (нужен для FoeBody) ---
-            var roster = new RosterDef(42u);
-            var def    = roster.Get(0); // боец уровня 1
-
-            // --- Шейдеры и материалы для воксельных тел ---
-            var voxShader  = Shader.Find("VoxGame/VertexColor");
-            var voxMat     = new Material(voxShader != null ? voxShader : Shader.Find("Hidden/InternalErrorShader"));
-            var anatShader = Shader.Find("VoxProbe/Anatomy");
-            var anatMat    = new Material(anatShader != null ? anatShader : Shader.Find("Hidden/InternalErrorShader"));
-
-            // --- Соперник: воксельное тело ---
-            FoeBody foeBody = null;
-            try
+            // ---- w1-hits: серия разных ударов, между ударами идут тики
+            // (силовой удар при полной шкале сам становится мегой — прямой в переносицу)
+            var series = new (PunchType t, int side)[]
             {
-                foeBody = new FoeBody(null, def, voxMat);
-                foeBody.root.position = new Vector3(0f, 0f, 0.5f);
-                // Euler(0,180,0): тело по умолчанию смотрит грудью в +Z, переворачиваем к камере (-Z)
-                foeBody.root.rotation = Quaternion.Euler(0f, 180f, 0f);
-            }
-            catch { /* продолжаем без тела */ }
-
-            // --- Соперник: анатомическая голова ---
-            // v вынесена наружу try-блока для корректного Dispose (NativeArray/NativeList утечка).
-            AnatView v = null;
-            try
-            {
-                AnatSkin.on = true;
-                AnatSkin.Reset();
-                var headPos = foeBody != null ? foeBody.headMount.position : new Vector3(0f, 1.57f, 0.47f);
-                v = new AnatView(null, headPos, anatMat);
-                // Голова по умолчанию лицом в +Z, камера смотрит в +Z → видна спина.
-                // Вращаем на 180° по Y, чтобы лицо повернулось к камере (-Z).
-                v.root.rotation = Quaternion.Euler(0f, 180f, 0f);
-                // Несколько тиков для инициализации меша
-                for (int i = 0; i < 3; i++) { AnatSkin.Step(0.016f); v.Tick(0.016f, 999); AnatSkin.SetGlobals(v.root); }
-            }
-            catch { /* продолжаем без головы */ }
-
-            // --- Камера (смотрит на лицо соперника, как FightDirector) ---
-            var camGo = new GameObject("ShotCam");
-            var cam   = camGo.AddComponent<Camera>();
-            cam.clearFlags      = CameraClearFlags.SolidColor;
-            cam.backgroundColor = new Color(0.08f, 0.08f, 0.12f, 1f);
-            cam.nearClipPlane   = 0.05f;
-            cam.farClipPlane    = 20f;
-            cam.fieldOfView     = 60f;
-            var camData = camGo.AddComponent<UniversalAdditionalCameraData>();
-            camData.renderShadows = false;
-            camData.antialiasing  = AntialiasingMode.None;
-            // Позиция как в FightDirector: чуть выше головы соперника, смотрим на headMount
-            camGo.transform.position = new Vector3(0f, 1.65f, -0.55f);
-            var lookTarget = foeBody != null ? foeBody.headMount.position : new Vector3(0f, 1.57f, 0.47f);
-            camGo.transform.LookAt(lookTarget);
-
-            // --- Перчатки игрока (вид от первого лица) ---
-            // playerGloves вынесен наружу для корректного Dispose (Material утечка).
-            PlayerGloves playerGloves = null;
-            try
-            {
-                var gloveEntry = GlovesCatalog.Get("classic");
-                playerGloves = new PlayerGloves(camGo.transform, GloveLook.FromEntry(gloveEntry), voxMat);
-            }
-            catch { /* продолжаем без перчаток */ }
-
-            // --- Свет ---
-            var lightGo = new GameObject("Sun");
-            var light   = lightGo.AddComponent<Light>();
-            light.type      = LightType.Directional;
-            light.shadows   = LightShadows.None;
-            light.intensity = 1.1f;
-            lightGo.transform.rotation = Quaternion.Euler(35f, 150f, 0f);
-
-            // --- Ринг (геометрия в фоне, нужен шейдер VoxGame/VertexColor) ---
-            try
-            {
-                var ring = new RingBuilder();
-                ring.Build(null);
-            }
-            catch { /* продолжаем без геометрии если шейдер не найден */ }
-
-            // --- UI ---
-            var uiGo   = new GameObject("UIRoot");
-            var uiRoot = uiGo.AddComponent<UIRoot>();
-            uiRoot.Init(cam);
-
-            var hudGo = new GameObject("FightHUD");
-            var hud   = hudGo.AddComponent<FightHUD>();
-            hud.Init(uiRoot);
-
-            var resultGo = new GameObject("ResultScreen");
-            var result   = resultGo.AddComponent<ResultScreen>();
-            result.Init(uiRoot);
-
-            uiRoot.ShowScreen(ScreenId.Fight);
-
-            // Умеренный dmgMult: достаточно для заметных повреждений, но не мгновенный KO
-            var prms = new FightParams
-            {
-                dmgMult         = 3f,
-                staminaCostMult = 1f,
-                megaGainMult    = 2f,
-                defenseMult     = 1f,
-                speedMult       = 1f,
+                (PunchType.Hook, -1), (PunchType.Jab, -1), (PunchType.Hook, -1), (PunchType.Upper, 1), (PunchType.Jab, 1),
+                (PunchType.Hook, -1), (PunchType.Hook, 1), (PunchType.Jab, -1), (PunchType.Upper, -1), (PunchType.Hook, -1),
+                (PunchType.Jab, 1), (PunchType.Hook, -1), (PunchType.Upper, 1), (PunchType.Jab, -1),
             };
-            var sim = new FightSim(def.level, def.seed, prms);
-            var ai  = new FightAI(FightAI.Styles[def.styleIdx], def.level, def.seed);
-
-            var sw         = new Stopwatch();
-            var hitFrameMs = new List<double>();
-            float gameTime = 0f;
-            const float DT = 1f / 60f;
-
-            // --- Вспомогательные функции ---
-
-            void Tick()
+            int seriesMegas = 0;
+            foreach (var (t, side) in series)
             {
-                var cmd = ai.Tick(DT, sim.State);
-                sim.State.phase = cmd.newPhase;
-                sim.TickRecovery(DT);
-                gameTime += DT;
+                run.WaitOpen(120);
+                if (d.State.megaReady && t != PunchType.Jab) seriesMegas++;
+                run.Punch(t, side);
+                run.Ticks(30);
+            }
+            if (d.State.megaReady)      // накопленную мегу — в переносицу
+            {
+                run.WaitOpen(120);
+                seriesMegas++;
+                run.Punch(PunchType.Hook, 1);
+                run.Ticks(30);
+            }
+            run.Ticks(90);              // кровь стекает, отёк растёт
+            run.WaitOpen(150);
+            // кадр удара: хук сбоку — перчатка у скулы, лицо не закрыто
+            bool hookOk = !d.State.megaReady;
+            run.Punch(hookOk ? PunchType.Hook : PunchType.Jab, -1);
+            run.Ticks(hookOk ? 6 : 3);  // перчатка в крайней точке
+            var v = d.Head;
+            string hitsLine = "GAME_HITS hits=" + d.HeadHits + " landed=" + d.HitsLanded + " removed=" + v.sim.removed
+                              + " wounds=" + v.sim.wounds.Count + " drips=" + v.sim.drips.Count + " trauma=" + F(v.sim.traumaAll)
+                              + " foeHp=" + F(d.State.hp) + "/" + F(d.State.hpMax) + " stun=" + F(d.State.stunAccum) + "/" + F(d.State.stunMax)
+                              + " phase=" + d.State.phase + " seriesMegas=" + seriesMegas + " kd=" + d.State.knockdowns;
+            Pair(d, cam, ui, dir, "w1-hits");
+
+            // ---- w1-telegraph: естественный замах соперника
+            {
+                int w = 0;
+                while (d.State.phase != FightPhase.Windup && w < 600 && !d.Finished) { run.Tick(); w++; }
+                run.Ticks(4);
+                log.AppendLine("GAME_TELEGRAPH phase=" + d.State.phase + " waited=" + w);
+                Pair(d, cam, ui, dir, "w1-telegraph");
             }
 
-            HitResult Punch(int removed, int zoneIdx = 2, int strength = 1, bool mega = false)
+            // ---- w1-knockdown: бить, пока соперник не упадёт; снимок на счёте рефери
+            int punches = 0;
+            var combo = new[] { PunchType.Hook, PunchType.Upper, PunchType.Jab, PunchType.Hook };
+            while (d.State.knockdowns == 0 && !d.Finished && punches < 80)
             {
-                float pw = mega ? 1.35f : 1.1f;
-                sw.Restart();
-                var r = sim.ProcessHit(removed, zoneIdx, removed * 0.5f, 0, strength,
-                                       mega, pw, false, false);
-                hitFrameMs.Add(sw.Elapsed.TotalMilliseconds);
-                return r;
+                run.WaitOpen(120);
+                run.Punch(combo[punches % combo.Length], punches % 2 == 0 ? -1 : 1);
+                punches++;
+                run.Ticks(18);
+            }
+            {
+                int w = 0;
+                while (d.Referee.Count < 2 && w < 400 && !d.Finished) { run.Tick(); w++; }
+                run.Ticks(2);
+                log.AppendLine("GAME_KNOCKDOWN punches=" + punches + " kd=" + d.State.knockdowns + " refCount=" + d.Referee.Count
+                               + " refState=" + d.Referee.State + " phase=" + d.State.phase);
+                Pair(d, cam, ui, dir, "w1-knockdown");
             }
 
-            HudData MakeHud(FightPhase foePhase = FightPhase.Idle,
-                            float telegraphAlpha = 0f, int attackSide = 0) =>
-                new HudData
-                {
-                    playerHp       = sim.State.playerHp,
-                    playerHpMax    = 100f,
-                    foeHp          = sim.State.hp,
-                    foeHpMax       = sim.State.hpMax,
-                    playerStamina  = sim.State.playerStamina,
-                    megaMeter      = sim.State.megaMeter,
-                    megaReady      = sim.State.megaReady,
-                    fightTime      = gameTime,
-                    foeKnockdowns  = sim.State.knockdowns,
-                    foeName        = def.name,
-                    playerName     = "Игрок",
-                    foePhase       = foePhase,
-                    foeAttackSide  = attackSide,
-                    telegraphAlpha = telegraphAlpha,
-                    playerBlocking = sim.State.playerBlocking,
-                    combo          = sim.State.comboCount,
-                };
-
-            void TakeShots(string tag, HudData hudData)
+            // ---- w1-result: соперник встаёт, добить (мега — свайпом при полной шкале)
+            int megas = 0;
+            punches = 0;
+            while (!d.Finished && punches < 200)
             {
-                hud.Refresh(hudData);
-                Shot(cam, uiRoot, 540,  1170, Path.Combine(shotsDir, tag + "-p.png"));
-                Shot(cam, uiRoot, 1170, 540,  Path.Combine(shotsDir, tag + "-l.png"));
+                run.WaitOpen(200);
+                if (d.State.phase == FightPhase.Down || d.State.phase == FightPhase.Rise) { run.Tick(); continue; }
+                if (d.State.megaReady) megas++;
+                run.Punch(combo[punches % combo.Length], punches % 2 == 0 ? 1 : -1, 1.35f);
+                punches++;
+                run.Ticks(18);
+            }
+            {
+                int w = 0;
+                while (d.Referee.State != RefereeState.Done && w < 900) { run.Tick(); w++; }
+                run.Ticks(30);
+                log.AppendLine("GAME_RESULT finished=" + d.Finished + " won=" + d.PlayerWon + " punches=" + punches + " megaSwipes=" + megas
+                               + " kd=" + d.State.knockdowns + " ref=" + d.Referee.State + " playerHp=" + F(d.State.playerHp));
+                Pair(d, cam, ui, dir, "w1-result");
             }
 
-            // ---------------------------------------------------------------- w1-start
-            // Начало боя: свежее состояние
-            TakeShots("w1-start", MakeHud());
+            // ---- Замер
+            var fs = run.frames;
+            var warm = new StringBuilder("GAME_HIT_WARMUP");
+            for (int i = 0; i < Math.Min(WarmHits, fs.Count); i++)
+                warm.Append(" #").Append(i + 1).Append(" frame=").Append(F(fs[i].frame)).Append(" pick=").Append(F(fs[i].pick))
+                    .Append(" hit=").Append(F(fs[i].hit)).Append(" tick=").Append(F(fs[i].tick)).Append(" layer=").Append(F(fs[i].layer));
+            string frameLine = "GAME_HIT_FRAME_MS " + Stats(fs, WarmHits, f => f.frame, out _) + " (warmup excluded: " + WarmHits + ")";
+            Stats(fs, WarmHits, f => f.pick, out double aPick);
+            Stats(fs, WarmHits, f => f.hit, out double aHit);
+            Stats(fs, WarmHits, f => f.tick, out double aTick);
+            string layerStats = Stats(fs, WarmHits, f => f.layer, out double aLayer);
+            Stats(fs, WarmHits, f => f.ext, out double aExt);
+            Stats(fs, WarmHits, f => f.tSim, out double aSim);
+            Stats(fs, WarmHits, f => f.tBore, out double aBore);
+            Stats(fs, WarmHits, f => f.tRest, out double aRest);
+            Stats(fs, WarmHits, f => f.tMesh, out double aMesh);
+            Stats(fs, WarmHits, f => f.tickLastMs, out double aLast);
+            string brk = "GAME_HIT_BREAKDOWN pick=" + F(aPick) + " hit=" + F(aHit) + " tick=" + F(aTick) + " layer=" + F(aLayer)
+                         + " (layer " + layerStats + "; outer Stopwatch avg=" + F(aExt) + ")"
+                         + " hitParts tSim=" + F(aSim) + " tBore=" + F(aBore) + " tRest=" + F(aRest) + " tMesh=" + F(aMesh) + " tick.lastMs=" + F(aLast);
 
-            // ---------------------------------------------------------------- w1-hits: ~10 ударов игрока
-            // Небольшой removed (10–15 ячеек) чтобы показать повреждения без KO
-            for (int i = 0; i < 10; i++)
+            Vector3 headAt = d.Head.root.position;
+            var recs = run.recs;
+            EndFight(d);
+
+            // ---- Та же голова без слоя: те же удары и те же шаги времени
+            var bare = BareHead(recs, headAt);
+            string bareLine = "GAME_BARE_HEAD_MS " + Stats(bare, WarmHits, f => f.frame, out _);
+            Stats(bare, WarmHits, f => f.pick, out double bPick);
+            Stats(bare, WarmHits, f => f.hit, out double bHit);
+            Stats(bare, WarmHits, f => f.tick, out double bTick);
+            bareLine += " pick=" + F(bPick) + " hit=" + F(bHit) + " tick=" + F(bTick);
+
+            Debug.Log(hitsLine);
+            Debug.Log(log.ToString().TrimEnd());
+            Debug.Log(warm.ToString());
+            Debug.Log(frameLine);
+            Debug.Log(brk);
+            Debug.Log(bareLine);
+            Debug.Log("GAME_BURST " + BurstInfo());
+            Debug.Log("GAME_SHOTS_OK " + dir);
+        }
+
+        // ------------------------------------------------------------------ Диагностика (третье лицо, без UI)
+
+        public static void DiagShots()
+        {
+            var dir = ShotsDir();
+            var d = NewFight(out var cam, out _);
+            for (int i = 0; i < 30; i++) d.Tick(DT);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"DIAG cam pos={cam.transform.position} fwd={cam.transform.forward} fov={cam.fieldOfView} head={d.Head.root.position}");
+            foreach (var r in Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
             {
-                Tick();
-                Punch(10 + i, zoneIdx: i % 7, strength: 1);
+                if (r.GetComponentInParent<Canvas>() != null || !r.enabled || r.transform.parent == null || r.transform.parent.name == "head") continue;
+                var b = r.bounds;
+                sb.AppendLine($"DIAG {r.transform.parent.name}/{r.name} min={b.min.ToString("F3")} max={b.max.ToString("F3")}");
             }
-            TakeShots("w1-hits", MakeHud());
+            Debug.Log(sb.ToString());
 
-            // ---------------------------------------------------------------- w1-telegraph: соперник замахивается
-            // Принудительно устанавливаем Windup; HUD покажет подсказку уклона
-            var savedPhase = sim.State.phase;
-            sim.State.phase = FightPhase.Windup;
-            TakeShots("w1-telegraph",
-                MakeHud(FightPhase.Windup, telegraphAlpha: 0.8f, attackSide: 1));
-            sim.State.phase = savedPhase;
-
-            // ---------------------------------------------------------------- w1-knockdown
-            // Принудительно настраиваем состояние первого нокдауна для снимка.
-            // Это надёжнее, чем ждать естественного накопления stun с малым removed.
-            var savedKd    = sim.State.knockdowns;
-            var savedHp    = sim.State.hp;
-            var savedStun  = sim.State.stunAccum;
-            sim.State.knockdowns = 1;
-            sim.State.hp         = sim.State.hpMax * 0.5f; // 50 % HP для реализма
-            sim.State.stunAccum  = 0f;
-            sim.State.phase      = FightPhase.Down;
-            hud.ShowCount(1);
-            TakeShots("w1-knockdown", MakeHud(FightPhase.Down));
-            // Восстановить после снимка
-            sim.State.knockdowns = savedKd;
-            sim.State.hp         = savedHp;
-            sim.State.stunAccum  = savedStun;
-
-            // ---------------------------------------------------------------- w1-result: нокаут и победа
-            // Серия мега-ударов до KO (мега шкала заполнена принудительно)
-            HitResult ko  = default;
-            int attempts = 0;
-            while (!ko.isKO && sim.State.phase != FightPhase.KO && attempts < 500)
+            var dGO = new GameObject("DiagCam");
+            var dc = dGO.AddComponent<Camera>();
+            dc.clearFlags = CameraClearFlags.SolidColor; dc.backgroundColor = new Color(0.25f, 0.25f, 0.3f, 1f);
+            dc.nearClipPlane = 0.05f; dc.farClipPlane = 60f;
+            Vector3 mid = d.Head.root.position + new Vector3(0f, -0.45f, 0f);
+            void D(string name, Vector3 pos, Vector3 look, float fov)
             {
-                attempts++;
-                Tick();
-                sim.State.megaMeter = 100f;
-                sim.State.megaReady = true;
-                ko = Punch(50, zoneIdx: 2, strength: 2, mega: true);
+                dc.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(look - pos, Vector3.up));
+                dc.fieldOfView = fov;
+                Shot(dc, null, 1000, 800, Path.Combine(dir, name + ".png"));
             }
-
-            uiRoot.ShowScreen(ScreenId.Result);
-            result.Show(true, gameTime, Mathf.Max(sim.State.knockdowns, savedKd), 0.75f, 250);
-            Canvas.ForceUpdateCanvases();
-            TakeShots("w1-result", MakeHud());
-
-            // ---------------------------------------------------------------- Метрики
-            hitFrameMs.Sort();
-            double max = hitFrameMs.Count > 0 ? hitFrameMs[hitFrameMs.Count - 1] : 0.0;
-            double avg = 0.0;
-            foreach (var ms in hitFrameMs) avg += ms;
-            avg = hitFrameMs.Count > 0 ? avg / hitFrameMs.Count : 0.0;
-
-            UnityEngine.Debug.Log(
-                $"GAME_HIT_FRAME_MS max={max:0.##} avg={avg:0.##} n={hitFrameMs.Count}");
-
-            // --- Освободить ресурсы (Material и NativeArray/NativeList не удаляются NewScene) ---
-            v?.Dispose();
-            foeBody?.Dispose();
-            playerGloves?.Dispose();
-            if (voxMat  != null) Object.DestroyImmediate(voxMat);
-            if (anatMat != null) Object.DestroyImmediate(anatMat);
-
-            // --- Освободить сцену ---
-            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            UnityEngine.Debug.Log("GAME_SHOTS_OK " + shotsDir);
+            D("diag-side", mid + new Vector3(3.2f, 0.3f, 0f), mid, 40f);
+            D("diag-34", mid + new Vector3(2.2f, 1.2f, 2.6f), mid, 40f);
+            D("diag-front", mid + new Vector3(0f, 0.3f, 2.4f), mid, 40f);
+            EndFight(d);
+            Debug.Log("GAME_DIAG_OK");
         }
     }
 }

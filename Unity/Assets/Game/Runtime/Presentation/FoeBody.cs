@@ -1,394 +1,257 @@
-using System.Collections.Generic;
-using Unity.Collections;
 using UnityEngine;
-using VoxProbe;
 
 namespace VoxGame
 {
-    // Параметры внешности соперника. Директор заполняет из FighterDef.
-    public struct FoeLook
-    {
-        public Color skin, trunks, accent, gloveA, gloveB;
-        public float shoulderWidth; // множитель ширины плеч: 0.85–1.15
-        public float neckThickness; // множитель толщины шеи: 0.85–1.15
-        public float scale;         // масштаб корня: 0.90–1.10
-
-        public static FoeLook FromDef(FighterDef def) => new FoeLook
-        {
-            skin          = def.colors.skin,
-            trunks        = def.colors.trunks,
-            accent        = def.colors.accent,
-            gloveA        = def.colors.gloveA,
-            gloveB        = def.colors.gloveB,
-            shoulderWidth = def.build.shoulderMult,
-            neckThickness = def.build.neckMult,
-            scale         = def.scale,
-        };
-    }
-
-    // Воксельное тело соперника: шея, торс, плечи, руки, перчатки.
+    // Воксельное тело соперника по пояс и ниже: торс с трусами, плечи, предплечья, перчатки.
+    // Соперник стоит в начале координат корня лицом в +Z. Голова (AnatView) телу не принадлежит:
+    // директор каждый кадр ставит её в headMount.
     // НЕ MonoBehaviour — создаётся и управляется из FightDirector.
     public class FoeBody
     {
-        // Корень соперника (масштаб = look.scale). FightDirector управляет позицией корня.
-        public readonly Transform root;
-        // Точка крепления AnatView.root (+0.046Y +0.026Z от основания анатомической головы).
-        public readonly Transform headMount;
+        public readonly Transform root;       // корень соперника (масштаб тела = FighterDef.scale)
+        public readonly Transform headMount;  // сюда ставится начало координат головы (уровень ушей)
 
-        // ---- Константы --------------------------------------------------
-        const float VS_T = 0.0055f; // торс: 5.5 мм
-        const float VS_N = 0.0065f; // шея:  6.5 мм
-        const float VS_A = 0.0085f; // рука: 8.5 мм
-        const float VS_G = 0.0052f; // перч: 5.2 мм
+        // ---- Размеры (метры, от корня при масштабе 1) -------------------------------------------
+        const float WaistY  = 0.98f;   // пояс: начало координат формы торса
+        const float HipDrop = 0.10f;   // ось наклона корпуса ниже пояса
+        const float HeadY   = 0.66f;   // от пояса до начала координат головы: низ шеи головы (−19.95 см) уходит в трапеции
+        const float HeadZ   = 0.02f;
+        const float NeckLen = 0.1995f; // от начала координат головы до низа её шеи
+        const float ShoulderX = 0.195f, ShoulderY = 0.415f;
+        const float TorsoCell = 0.7f;  // см
 
-        // Высоты ключевых точек (метры, от root)
-        const float Y_TORSO   = 0.86f;  // нижний срез торса (верх шорт)
-        const float Y_NECK    = 1.38f;  // низ шеи
-        const float Y_SHOULDER = 1.37f; // высота плечевого сустава
-        const float UPPER_LEN = 0.26f;  // плечо → локоть
-        const float FORE_LEN  = 0.26f;  // локоть → запястье
+        // Номера цветов торса
+        const byte CSkin = 1, CTrunks = 2, CAccent = 3, CTrunksDark = 4;
 
-        // Индексы палитры тела
-        const byte B_SKIN   = 1; // кожа
-        const byte B_SHADOW = 2; // тень кожи
-        const byte B_TRUNK  = 3; // трусы
-        const byte B_ACCENT = 4; // акцент
+        // ---- Объекты -----------------------------------------------------------------------------
+        readonly Transform torsoJoint;
+        readonly Transform[] upper = new Transform[2], fore = new Transform[2], glove = new Transform[2];
+        readonly Vector3[] shoulderLocal = new Vector3[2];   // в осях torsoJoint
+        readonly Mesh[] meshes;
+        readonly float scale, shoulderK;
 
-        // Индексы палитры перчаток
-        const byte G_MAIN = 1;
-        const byte G_SEC  = 2;
+        // ---- Состояние анимации ------------------------------------------------------------------
+        readonly Vector3[] glovePos = new Vector3[2];   // центры перчаток в осях корня (до масштаба)
+        float lean, twist, drop, lunge, anim;
+        float impLean, impLeanV, impTwist, impTwistV;
+        FightPhase phase = FightPhase.Idle;
 
-        // ---- Тела -------------------------------------------------------
-        VoxBody torsoBody, neckBody;
-        readonly VoxBody[] shoulderBodies  = new VoxBody[2];
-        readonly VoxBody[] upperArmBodies  = new VoxBody[2];
-        readonly VoxBody[] foreArmBodies   = new VoxBody[2];
-        readonly VoxBody[] gloveBodies     = new VoxBody[2];
-        Material bodyMat, gloveMat;
+        // Рука 0 — на экране слева (мир +X, правая рука соперника), рука 1 — справа.
+        static float ArmSign(int s) => s == 0 ? 1f : -1f;
 
-        // ---- Иерархия IK-суставов (дочерние root) -----------------------
-        readonly Transform[] upperArmRoot  = new Transform[2];
-        readonly Transform[] foreArmRoot   = new Transform[2];
-        readonly Transform[] gloveRoot     = new Transform[2];
-        // Позиции плеч в локальных координатах root
-        readonly Vector3[] shoulderLocal   = new Vector3[2];
-        float shoulderHalfW;
-
-        // ---- Пружинное состояние (без аллокаций в Tick) -----------------
-        float swayY, swayYVel;
-        float impX, impXVel;
-        readonly Vector3[] glovePos = new Vector3[2];
-        readonly Vector3[] gloveVel = new Vector3[2];
-
-        // ---- Поза -------------------------------------------------------
-        enum Pose { Guard, WindupL, WindupR, StrikeL, StrikeR, Stagger, Down, Rise, Victory, Defeat }
-        static readonly Vector3[,] PoseTgt = new Vector3[10, 2]
+        public FoeBody(Transform parent, FighterDef def, Material mat)
         {
-            { new Vector3(-0.14f, 1.32f, 0.14f), new Vector3( 0.14f, 1.32f, 0.14f) }, // Guard
-            { new Vector3(-0.28f, 1.26f,-0.08f), new Vector3( 0.14f, 1.32f, 0.14f) }, // WindupL
-            { new Vector3(-0.14f, 1.32f, 0.14f), new Vector3( 0.28f, 1.26f,-0.08f) }, // WindupR
-            { new Vector3( 0.04f, 1.38f, 0.56f), new Vector3( 0.14f, 1.32f, 0.14f) }, // StrikeL
-            { new Vector3(-0.14f, 1.32f, 0.14f), new Vector3(-0.04f, 1.38f, 0.56f) }, // StrikeR
-            { new Vector3(-0.22f, 1.08f, 0.05f), new Vector3( 0.22f, 1.08f, 0.05f) }, // Stagger
-            { new Vector3(-0.28f, 0.28f, 0.10f), new Vector3( 0.28f, 0.28f, 0.10f) }, // Down
-            { new Vector3(-0.18f, 1.14f, 0.10f), new Vector3( 0.18f, 1.14f, 0.10f) }, // Rise
-            { new Vector3(-0.30f, 1.80f, 0.00f), new Vector3( 0.30f, 1.80f, 0.00f) }, // Victory
-            { new Vector3(-0.20f, 0.78f, 0.00f), new Vector3( 0.20f, 0.78f, 0.00f) }, // Defeat
-        };
-        Pose currentPose = Pose.Guard;
+            scale = Mathf.Clamp(def.scale <= 0f ? 1f : def.scale, 0.9f, 1.1f);
+            // ширина плеч: 0.85–1.15 из генератора сжимается, чтобы плечи оставались 2.2–2.8 ширины головы
+            shoulderK = 0.90f * Mathf.Lerp(0.94f, 1.06f, Mathf.InverseLerp(0.85f, 1.15f, def.build.shoulderMult));
 
-        // ---- Конструктор ------------------------------------------------
+            root = new GameObject("FoeBody").transform;
+            root.SetParent(parent, false);
+            root.localScale = Vector3.one * scale;
 
-        public FoeBody(Transform parent, FighterDef def, Material voxMat)
-        {
-            var look = FoeLook.FromDef(def);
-            shoulderHalfW = 0.195f * look.shoulderWidth;
+            torsoJoint = new GameObject("torsoJoint").transform;
+            torsoJoint.SetParent(root, false);
+            torsoJoint.localPosition = new Vector3(0f, WaistY - HipDrop, 0f);
 
-            var rootGO = new GameObject("FoeBody");
-            rootGO.transform.SetParent(parent, false);
-            root = rootGO.transform;
-            root.localScale = Vector3.one * look.scale;
+            headMount = new GameObject("headMount").transform;
+            headMount.SetParent(torsoJoint, false);
 
-            bodyMat  = new Material(voxMat);
-            gloveMat = new Material(voxMat);
-            SetPalettes(look);
+            Color32 skin = BoxerParts.HeadSkin;
+            var torsoMesh = BuildTorso(skin, def.colors.trunks, def.colors.accent);
+            var t = VoxModel.Spawn("torso", torsoJoint, torsoMesh, mat);
+            t.localPosition = new Vector3(0f, HipDrop, 0f);
 
-            BuildAllParts(look);
-
-            // Позиции плеч (локальные, от root) — наружный сустав плеча
-            shoulderLocal[0] = new Vector3(-(shoulderHalfW + 0.17f), Y_SHOULDER, 0f);
-            shoulderLocal[1] = new Vector3(+(shoulderHalfW + 0.17f), Y_SHOULDER, 0f);
-
-            // Начальное положение перчаток из позы Guard
-            for (int i = 0; i < 2; i++)
-                glovePos[i] = PoseTgt[(int)Pose.Guard, i];
-
-            // headMount: локальная позиция = низ шеи + высота шеи + смещение PIV
-            float neckH = 22 * VS_N; // 0.143 м
-            var hmGO = new GameObject("headMount");
-            hmGO.transform.SetParent(root, false);
-            hmGO.transform.localPosition = new Vector3(0f, Y_NECK + neckH + 0.046f, 0.026f);
-            headMount = hmGO.transform;
-        }
-
-        // ---- Построение тела --------------------------------------------
-
-        void BuildAllParts(FoeLook look)
-        {
-            var builds = new List<(VoxBody, VoxModel)>(10);
-
-            // Торс: 92×100×46, VS=5.5мм
+            var upperMesh = BoxerParts.UpperArmMesh(skin);
+            var foreMesh = BoxerParts.ForeArmMesh(skin);
+            var gloveMeshes = new[]
             {
-                int sx = 92, sy = 100, sz = 46;
-                var pRoot = Part("torso", root,
-                    new Vector3(-sx * 0.5f * VS_T, Y_TORSO, -sz * 0.5f * VS_T));
-                torsoBody = new VoxBody(pRoot, bodyMat, VS_T);
-                var m = new VoxModel(sx, sy, sz);
-                float cx = sx * .5f, cy = sy * .5f, cz = sz * .5f;
-                m.FillRoundBox(cx, cy + 2f, cz, 40f, 46f, 18f, 6f, B_SKIN);
-                m.FillEllipsoid(cx - 36f, cy + 42f, cz, 12f, 10f, 10f, B_SKIN);
-                m.FillEllipsoid(cx + 36f, cy + 42f, cz, 12f, 10f, 10f, B_SKIN);
-                m.FillBox(0, 0, 0, sx, 18, sz, B_TRUNK);
-                m.FillBox(0, 16, 0, sx, 20, sz, B_ACCENT);
-                builds.Add((torsoBody, m));
-            }
+                BoxerParts.GloveMesh(-1, def.colors.gloveA, def.colors.gloveB),
+                BoxerParts.GloveMesh(+1, def.colors.gloveA, def.colors.gloveB),
+            };
+            meshes = new[] { torsoMesh, upperMesh, foreMesh, gloveMeshes[0], gloveMeshes[1] };
 
-            // Шея: 18×22×18, VS=6.5мм
-            {
-                int sx = 18, sy = 22, sz = 18;
-                float nt = look.neckThickness;
-                var pRoot = Part("neck", root,
-                    new Vector3(-sx * 0.5f * VS_N, Y_NECK, -sz * 0.5f * VS_N));
-                neckBody = new VoxBody(pRoot, bodyMat, VS_N);
-                var m = new VoxModel(sx, sy, sz);
-                m.FillCapsule(sx * .5f, 3f, sz * .5f, sx * .5f, 19f, sz * .5f, 6f * nt, B_SKIN);
-                builds.Add((neckBody, m));
-            }
-
-            // Плечи: 42×14×14, VS=8.5мм; ориентация вдоль +Y → ±X через поворот
             for (int s = 0; s < 2; s++)
             {
-                int gx = 42, gy = 14, gz = 14;
-                float sign = s == 0 ? 1f : -1f; // s=0 Left(+Z=−90→-X), s=1 Right(−90→+X)
-                var pRoot = Part($"shoulder{s}", root,
-                    new Vector3(0f, Y_SHOULDER, -gz * 0.5f * VS_A));
-                // Поворот: +Y → ±X
-                // s=0 Left: Euler(0,0,90) → Y→-X; s=1 Right: Euler(0,0,-90) → Y→+X
-                pRoot.localRotation = Quaternion.Euler(0f, 0f, sign * 90f);
-                shoulderBodies[s] = new VoxBody(pRoot, bodyMat, VS_A);
-                var m = new VoxModel(gx, gy, gz);
-                m.FillCapsule(gx * .5f, 3f, gz * .5f, gx * .5f - 4f, gz * .5f, gz * .5f, 5f, B_SKIN);
-                builds.Add((shoulderBodies[s], m));
+                upper[s] = VoxModel.Spawn("upperArm" + s, root, upperMesh, mat);
+                fore[s]  = VoxModel.Spawn("foreArm" + s, root, foreMesh, mat);
+                glove[s] = VoxModel.Spawn("glove" + s, root, gloveMeshes[s], mat);
+                shoulderLocal[s] = new Vector3(ArmSign(s) * ShoulderX * shoulderK, HipDrop + ShoulderY, 0f);
+                glovePos[s] = IdleGlove(s, 0f);
+            }
+            Pose(Vector3.zero);
+        }
+
+        // ---- Форма торса (см; начало — пояс, +Z — грудь) -------------------------------------------
+
+        float Body(float x, float y, float z)
+        {
+            x /= shoulderK;
+            float ax = Mathf.Abs(x), d;
+            d = VoxModel.Ell(x, y - 29, z + 1, 15.0f, 16.5f, 10.8f);
+            d = VoxModel.Smin(d, VoxModel.Ell(x, y - 12, z - 1.5f, 13.2f, 13.5f, 9.6f), 5);
+            d = VoxModel.Smin(d, VoxModel.Ell(x, y - 2, z, 14.4f, 7.5f, 10.4f), 4);
+            d = VoxModel.Smin(d, VoxModel.Ell(ax - 7.4f, y - 33.8f, z - 6.4f, 8.8f, 5.8f, 3.5f), 2.2f);   // грудные
+            d = VoxModel.Smin(d, VoxModel.Ell(ax - 10.5f, y - 27, z + 3.5f, 6.5f, 13, 7), 4);            // широчайшие
+            d = VoxModel.Smin(d, VoxModel.Ell(x, y - 34, z + 4.5f, 15.5f, 13, 8.6f), 4);                 // спина
+            d = VoxModel.Smin(d, VoxModel.Ell(x, y - 45.5f, z + 3.0f, 11.5f, 4.8f, 6.0f), 4);            // надплечья
+            d = VoxModel.Smin(d, VoxModel.Ell(ax - 18.6f, y - 41.2f, z + 0.3f, 5.8f, 6.8f, 5.9f), 3);    // дельты
+            d = VoxModel.Smin(d, VoxModel.Cap(ax, y, z, 2, 45, 3.5f, 16, 46.5f, 0, 1.8f), 2);            // ключицы
+            // основание шеи под шею головы (у головы низ шеи — эллипс 8.6 × 5.8 см) и скаты трапеций
+            d = VoxModel.Smin(d, VoxModel.Ell(x, y - 47.0f, z + 0.3f, 9.4f, 5.2f, 6.6f), 3);
+            d = VoxModel.Smin(d, VoxModel.Cap(ax, y, z, 4.0f, 50.5f, -1.4f, 14.5f, 46.8f, -0.8f, 3.3f, 3.0f), 3);
+            // пресс: три ряда выпуклостей на передней стенке живота
+            if (z > 3f && y > 10.5f && y < 27.9f && ax < 6.6f)
+                d -= 0.6f * Mathf.Pow(Mathf.Sin(Mathf.PI * ax / 6.6f), 0.6f)
+                          * Mathf.Pow(Mathf.Abs(Mathf.Sin(Mathf.PI * (y - 10.5f) / 5.8f)), 0.6f);
+            return d;
+        }
+
+        // Трусы: оболочка поверх низа корпуса с поясом, штанины до середины бедра.
+        float Trunks(float x, float y, float z)
+        {
+            x /= shoulderK;
+            float ax = Mathf.Abs(x);
+            float lower = VoxModel.Smin(VoxModel.Ell(x, y - 12, z - 1.5f, 13.2f, 13.5f, 9.6f),
+                                        VoxModel.Ell(x, y - 2, z, 14.4f, 7.5f, 10.4f), 4);
+            float d = lower - (y > 8.2f ? 1.5f : 1.0f);
+            d = VoxModel.Smin(d, VoxModel.Ell(x, y + 9, z, 17.2f, 12.5f, 11.8f), 4);
+            d = VoxModel.Smin(d, VoxModel.Cap(ax, y, z, 9.0f, -8, 0, 10.6f, -26, 0.8f, 10.0f, 10.6f), 3);
+            return Mathf.Max(d, Mathf.Max(y - 12.4f, -26f - y));
+        }
+
+        static float Thighs(float x, float y, float z) =>
+            VoxModel.Cap(Mathf.Abs(x), y, z, 9.0f, -8, 0, 10.2f, -44, 1.0f, 8.6f, 7.6f);
+
+        Mesh BuildTorso(Color32 skin, Color trunks, Color accent)
+        {
+            var mn = new Vector3(-28f, -36.4f, -15.4f); var mx = new Vector3(28f, 54.6f, 14f);
+            var m = VoxModel.FromSdf(mn, mx, TorsoCell,
+                (x, y, z) => Mathf.Min(Mathf.Min(Body(x, y, z), Trunks(x, y, z)), Thighs(x / shoulderK, y, z)),
+                (x, y, z) =>
+                {
+                    if (y > 12.4f || y < -26f || Trunks(x, y, z) > 0.35f) return CSkin;
+                    if (y > 8.2f) return CAccent;                                         // пояс
+                    if (y > 7.4f) return CTrunksDark;                                     // шов под поясом
+                    if (Mathf.Abs(x / shoulderK) > 11.5f && Mathf.Abs(z) < 3.2f) return CAccent;   // лампасы
+                    if (y < -23.5f) return CAccent;                                       // кант штанин
+                    return CTrunks;
+                });
+            Color32 tr = trunks, ac = accent;
+            // чёрные трусы на тёмном фоне не читаются — приподнять до тёмно-серого
+            if (tr.r + tr.g + tr.b < 90) tr = new Color32(44, 44, 52, 255);
+            Color32 dark = Color.Lerp(tr, Color.black, 0.45f);
+            return m.BuildMesh("torso", new[] { default, skin, tr, ac, dark }, mn * 0.01f, TorsoCell * 0.01f, 0.3f,
+                               new[] { 1f, 1f, 0.35f, 0.5f, 0.5f });
+        }
+
+        // ---- Позы (в осях корня, метры; z — к игроку) -----------------------------------------------
+
+        Vector3 IdleGlove(int s, float bob) =>
+            new Vector3(ArmSign(s) * 0.13f, 1.43f + (s == 0 ? bob : -bob), 0.27f);
+
+        // Тик: cmd — команда ИИ, strikeTarget — куда летит бьющая перчатка (мир, у камеры игрока).
+        public void Tick(AICommand cmd, float sdt, Vector3 strikeTarget)
+        {
+            phase = cmd.newPhase;
+            anim += sdt;
+            float bob = Mathf.Sin(anim * 5f) * 0.008f;
+            Vector3 t0 = IdleGlove(0, bob), t1 = IdleGlove(1, bob);
+            float leanT = 0f, twistT = Mathf.Sin(anim * 1.4f) * 1.5f, dropT = 0f, lungeT = 0f, rate = 12f;
+            int hand = cmd.side < 0 ? 0 : 1;   // сторона удара на экране: слева — рука 0
+            float hs = ArmSign(hand);
+
+            switch (phase)
+            {
+                case FightPhase.Guard:
+                    t0 = new Vector3(0.115f, 1.47f, 0.28f); t1 = new Vector3(-0.115f, 1.47f, 0.28f); leanT = 3f; break;
+                case FightPhase.Windup:
+                {
+                    Vector3 g = cmd.isHook ? new Vector3(hs * 0.36f, 1.50f, 0.12f) : new Vector3(hs * 0.22f, 1.55f, 0.13f);
+                    if (hand == 0) t0 = g; else t1 = g;
+                    twistT = hs * 16f; leanT = -3f; break;
+                }
+                case FightPhase.Strike:
+                {
+                    Vector3 g = root.InverseTransformPoint(strikeTarget);
+                    if (hand == 0) t0 = g; else t1 = g;
+                    twistT = -hs * 18f; leanT = 9f; lungeT = 0.16f; rate = 30f; break;
+                }
+                case FightPhase.Recover: leanT = 4f; lungeT = 0.05f; break;
+                case FightPhase.Open:
+                    t0 = new Vector3(0.27f, 1.24f, 0.26f); t1 = new Vector3(-0.26f, 1.20f, 0.25f); leanT = 12f; lungeT = 0.08f; break;
+                case FightPhase.Stagger:
+                    t0 = new Vector3(0.23f, 1.34f, 0.20f); t1 = new Vector3(-0.23f, 1.34f, 0.20f); leanT = -7f; break;
+                case FightPhase.Down:
+                    // на коленях, руки упёрты в настил
+                    t0 = new Vector3(0.24f, 0.07f, 0.36f); t1 = new Vector3(-0.24f, 0.07f, 0.36f);
+                    leanT = 30f; dropT = 0.60f; rate = 6f; break;
+                case FightPhase.Rise:
+                    t0 = new Vector3(0.20f, 1.22f, 0.24f); t1 = new Vector3(-0.20f, 1.22f, 0.24f);
+                    leanT = 10f; dropT = 0f; rate = 2.2f; break;
+                case FightPhase.KO:
+                    // лицом в настил
+                    t0 = new Vector3(0.30f, 0.07f, 0.62f); t1 = new Vector3(-0.30f, 0.07f, 0.62f);
+                    leanT = 78f; dropT = 0.80f; rate = 5f; break;
             }
 
-            // Плечевые кости + предплечья + перчатки: 14×32×14, VS=8.5мм
-            // (Позиция/поворот обновляются в Tick через IK)
+            float k = 1f - Mathf.Exp(-rate * sdt);
+            glovePos[0] = Vector3.Lerp(glovePos[0], t0, k);
+            glovePos[1] = Vector3.Lerp(glovePos[1], t1, k);
+            float kb = 1f - Mathf.Exp(-Mathf.Min(rate, 10f) * sdt);
+            lean = Mathf.Lerp(lean, leanT, kb);
+            twist = Mathf.Lerp(twist, twistT, kb);
+            drop = Mathf.Lerp(drop, dropT, kb);
+            lunge = Mathf.Lerp(lunge, lungeT, k);
+
+            // отклик корпуса на удар: пружина с затуханием, шаг не больше 1/60 с
+            for (float left = Mathf.Min(sdt, 0.1f); left > 1e-5f; left -= 1f / 60f)
+            {
+                float h = Mathf.Min(left, 1f / 60f);
+                impLeanV += (-90f * impLean - 11f * impLeanV) * h; impLean += impLeanV * h;
+                impTwistV += (-90f * impTwist - 11f * impTwistV) * h; impTwist += impTwistV * h;
+            }
+            Pose(new Vector3(0f, -drop, lunge - drop * 0.25f));
+        }
+
+        // Расставить корпус и руки по текущему состоянию. offset — смещение корпуса в осях корня.
+        void Pose(Vector3 offset)
+        {
+            torsoJoint.localPosition = new Vector3(0f, WaistY - HipDrop, 0f) + offset;
+            torsoJoint.localRotation = Quaternion.Euler(lean + Mathf.Clamp(impLean, -14f, 14f),
+                                                        twist + Mathf.Clamp(impTwist, -18f, 18f), 0f);
+            // голова не масштабируется вместе с телом: к масштабу привязан низ её шеи (он утоплен в трапеции),
+            // а сама шея остаётся своей длины
+            headMount.localPosition = new Vector3(0f, HipDrop + HeadY - NeckLen + NeckLen / scale, HeadZ / scale);
+
+            bool low = phase == FightPhase.Down || phase == FightPhase.KO;
             for (int s = 0; s < 2; s++)
             {
-                // Плечевая кость
-                {
-                    int gx = 14, gy = 32, gz = 14;
-                    var pRoot = Part($"upperArm{s}", root, Vector3.zero);
-                    upperArmRoot[s] = pRoot;
-                    // Смещение mesh в локальных: от (0,0,0) вдоль +Y (поворот joint вдоль +Y→вниз)
-                    var mesh = Part($"upperArmMesh{s}", pRoot,
-                        new Vector3(-gx * 0.5f * VS_A, 0f, -gz * 0.5f * VS_A));
-                    upperArmBodies[s] = new VoxBody(mesh, bodyMat, VS_A);
-                    var m = new VoxModel(gx, gy, gz);
-                    m.FillCapsule(gx * .5f, 4f, gz * .5f, gx * .5f, 28f, gz * .5f, 5f, B_SKIN);
-                    builds.Add((upperArmBodies[s], m));
-                }
-
-                // Предплечье
-                {
-                    int gx = 14, gy = 32, gz = 14;
-                    var pRoot = Part($"foreArm{s}", root, Vector3.zero);
-                    foreArmRoot[s] = pRoot;
-                    var mesh = Part($"foreArmMesh{s}", pRoot,
-                        new Vector3(-gx * 0.5f * VS_A, 0f, -gz * 0.5f * VS_A));
-                    foreArmBodies[s] = new VoxBody(mesh, bodyMat, VS_A);
-                    var m = new VoxModel(gx, gy, gz);
-                    m.FillCapsule(gx * .5f, 4f, gz * .5f, gx * .5f, 28f, gz * .5f, 4.5f, B_SKIN);
-                    builds.Add((foreArmBodies[s], m));
-                }
-
-                // Перчатка: 30×24×52, VS=5.2мм
-                {
-                    int gx = 30, gy = 24, gz = 52;
-                    var pRoot = Part($"glove{s}", root, Vector3.zero);
-                    gloveRoot[s] = pRoot;
-                    // Mesh: X/Y центрированы, Z начинается от pRoot (вперёд)
-                    var mesh = Part($"gloveMesh{s}", pRoot,
-                        new Vector3(-gx * 0.5f * VS_G, -gy * 0.5f * VS_G, 0f));
-                    gloveBodies[s] = new VoxBody(mesh, gloveMat, VS_G);
-                    var m = new VoxModel(gx, gy, gz);
-                    m.FillRoundBox(gx * .5f, gy * .5f, gz * .5f + 4f, 11f, 9f, 16f, 4f, G_MAIN);
-                    m.FillRoundBox(gx * .5f, gy * .5f, 10f, 9f, 7.5f, 8f, 3f, G_SEC);
-                    builds.Add((gloveBodies[s], m));
-                }
-            }
-
-            VoxModel.BuildAll(builds);
-        }
-
-        static Transform Part(string name, Transform parent, Vector3 localPos)
-        {
-            var go = new GameObject(name);
-            go.transform.SetParent(parent, false);
-            go.transform.localPosition = localPos;
-            return go.transform;
-        }
-
-        void SetPalettes(FoeLook look)
-        {
-            var bp = new Color[16];
-            bp[0] = Color.clear;
-            bp[B_SKIN]   = look.skin;
-            bp[B_SHADOW] = look.skin * 0.78f;
-            bp[B_TRUNK]  = look.trunks;
-            bp[B_ACCENT] = look.accent;
-            VoxModel.SetPalette(bodyMat, bp);
-
-            var gp = new Color[16];
-            gp[0] = Color.clear;
-            gp[G_MAIN] = look.gloveA;
-            gp[G_SEC]  = look.gloveB;
-            VoxModel.SetPalette(gloveMat, gp);
-        }
-
-        // ---- Tick -------------------------------------------------------
-
-        public void Tick(AICommand cmd, float sdt)
-        {
-            currentPose = AIPose(cmd);
-
-            // Пружинная анимация перчаток (без new)
-            const float K = 55f, C = 11f;
-            for (int i = 0; i < 2; i++)
-                VecSpring(ref glovePos[i], ref gloveVel[i], PoseTgt[(int)currentPose, i], K, C, sdt);
-
-            // Раскачка торса
-            float swayTgt = Mathf.Sin(Time.time * 1.4f) *
-                            (currentPose == Pose.Guard ? 2f : 0.5f);
-            FloatSpring(ref swayY, ref swayYVel, swayTgt, 18f, 7f, sdt);
-            FloatSpring(ref impX, ref impXVel, 0f, 10f, 9f, sdt);
-
-            if (torsoBody?.root?.parent != null)
-                torsoBody.root.parent.localRotation = Quaternion.Euler(impX * 14f, swayY, 0f);
-
-            // IK рук
-            SolveArms();
-        }
-
-        void SolveArms()
-        {
-            for (int s = 0; s < 2; s++)
-            {
-                Vector3 shoulder = root.TransformPoint(shoulderLocal[s]);
-                Vector3 wristW   = root.TransformPoint(glovePos[s]);
-                Vector3 pole     = root.up;
-                Vector3 elbow    = Solve2BoneIK(shoulder, wristW, UPPER_LEN, FORE_LEN, pole);
-
-                // Плечевая кость: от shoulder к elbow
-                AimJoint(upperArmRoot[s], shoulder, elbow);
-
-                // Предплечье: от elbow к wrist
-                AimJoint(foreArmRoot[s], elbow, wristW);
-
-                // Перчатка: позиция = запястье, ориентация = направление удара
-                if (gloveRoot[s] != null)
-                {
-                    gloveRoot[s].position = wristW;
-                    gloveRoot[s].rotation = root.rotation;
-                }
+                float sg = ArmSign(s);
+                Vector3 sh = torsoJoint.TransformPoint(shoulderLocal[s]);
+                Vector3 gt = root.TransformPoint(glovePos[s]);
+                Vector3 fwd = root.forward, up = root.up, right = root.right;
+                // костяшки: в стойке вверх и вперёд, в ударе — по линии плечо → цель, на настиле — вниз
+                Vector3 kn = phase == FightPhase.Strike ? (gt - sh).normalized
+                           : low ? (fwd * 0.4f - up).normalized
+                           : (up * 0.6f + fwd * 0.8f - right * sg * 0.15f).normalized;
+                Vector3 pole = low ? right * sg * 0.9f - fwd * 0.4f : right * sg * 0.75f - up - fwd * 0.2f;
+                Vector3 back = right * sg * 0.85f + fwd * 0.5f;
+                BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale);
             }
         }
 
-        // Поворачивает joint так, чтобы +Y смотрел от from к to.
-        static void AimJoint(Transform t, Vector3 from, Vector3 to)
-        {
-            if (t == null) return;
-            t.position = from;
-            Vector3 dir = to - from;
-            if (dir.sqrMagnitude > 1e-9f)
-                t.rotation = Quaternion.FromToRotation(Vector3.up, dir.normalized);
-        }
-
-        static Vector3 Solve2BoneIK(Vector3 sh, Vector3 wr, float la, float lb, Vector3 pole)
-        {
-            float d = Vector3.Distance(sh, wr);
-            d = Mathf.Clamp(d, Mathf.Abs(la - lb) + 0.001f, la + lb - 0.001f);
-            float cosA = Mathf.Clamp((la * la + d * d - lb * lb) / (2f * la * d), -1f, 1f);
-            float a    = Mathf.Acos(cosA);
-            Vector3 fw = (wr - sh).normalized;
-            Vector3 cr = Vector3.Cross(pole - sh, fw);
-            Vector3 bd = cr.sqrMagnitude > 1e-6f
-                ? Vector3.Cross(fw, cr.normalized).normalized
-                : Vector3.up;
-            return sh + fw * (la * Mathf.Cos(a)) + bd * (la * Mathf.Sin(a));
-        }
-
-        static Pose AIPose(AICommand cmd) => cmd.newPhase switch
-        {
-            FightPhase.Windup  => cmd.side < 0 ? Pose.WindupL : Pose.WindupR,
-            FightPhase.Strike  => cmd.side < 0 ? Pose.StrikeL : Pose.StrikeR,
-            FightPhase.Stagger => Pose.Stagger,
-            FightPhase.Down    => Pose.Down,
-            FightPhase.Rise    => Pose.Rise,
-            FightPhase.KO      => Pose.Defeat,
-            _                  => Pose.Guard,
-        };
-
-        // ---- Импульс от удара (нагибает торс) ---------------------------
-
+        // Импульс от удара игрока (мир): корпус отклоняется назад и скручивается.
         public void AddImpulse(Vector3 worldImpulse)
         {
             Vector3 loc = root.InverseTransformDirection(worldImpulse);
-            impXVel  += loc.z * 7f;
-            swayYVel += loc.x * 4f;
+            impLeanV  += loc.z * 60f;    // удар в лицо (−Z в осях соперника) — корпус назад
+            impTwistV += loc.x * 80f;
         }
-
-        // ---- Пружины (без аллокаций) ------------------------------------
-
-        static void FloatSpring(ref float v, ref float vel, float tgt, float k, float c, float dt)
-        {
-            vel += (tgt - v) * k * dt;
-            vel *= 1f - c * dt;
-            v   += vel * dt;
-        }
-
-        static void VecSpring(ref Vector3 v, ref Vector3 vel, Vector3 tgt, float k, float c, float dt)
-        {
-            vel += (tgt - v) * k * dt;
-            vel *= 1f - c * dt;
-            v   += vel * dt;
-        }
-
-        // ---- Dispose ----------------------------------------------------
 
         public void Dispose()
         {
-            torsoBody?.Dispose();
-            neckBody?.Dispose();
-            for (int i = 0; i < 2; i++)
-            {
-                shoulderBodies[i]?.Dispose();
-                upperArmBodies[i]?.Dispose();
-                foreArmBodies[i]?.Dispose();
-                gloveBodies[i]?.Dispose();
-            }
-            DestroyObj(bodyMat);
-            DestroyObj(gloveMat);
-            if (root != null) DestroyObj(root.gameObject);
-        }
-
-        static void DestroyObj(UnityEngine.Object o)
-        {
-            if (o == null) return;
-#if UNITY_EDITOR
-            if (!Application.isPlaying) { UnityEngine.Object.DestroyImmediate(o); return; }
-#endif
-            UnityEngine.Object.Destroy(o);
+            foreach (var m in meshes) GameUtil.Destroy(m);
+            if (root != null) GameUtil.Destroy(root.gameObject);
         }
     }
 }

@@ -38,6 +38,9 @@ namespace VoxGame {
         bool       _inShotMode;
 
         bool _prevLandscape;
+        int  _viewW, _viewH;   // размер окна вывода, если он не равен Screen (снимки в текстуру); 0 — Screen
+
+        bool Landscape => _viewW > 0 ? _viewW > _viewH : Screen.width > Screen.height;
 
         public ScreenId ActiveScreen => _active;
 
@@ -71,7 +74,16 @@ namespace VoxGame {
 
             EnsureEventSystem();
 
-            _prevLandscape = Screen.width > Screen.height;
+            _prevLandscape = Landscape;
+        }
+
+        // Размер окна вывода вместо Screen (0 — вернуться к Screen): по нему выбирается раскладка экранов.
+        public void SetViewSize(int w, int h) {
+            _viewW = w; _viewH = h;
+            bool landscape = Landscape;
+            if (landscape == _prevLandscape) return;
+            _prevLandscape = landscape;
+            BroadcastLayout(landscape);
         }
 
         static void EnsureEventSystem() {
@@ -94,6 +106,9 @@ namespace VoxGame {
                 rt.offsetMax = Vector2.zero;
             }
             _screens[id] = screenGO;
+            // экран уже собран: разложить под текущую ориентацию (иначе в ландшафте он остался бы портретным до первого поворота)
+            foreach (var h in screenGO.GetComponentsInChildren<ILayoutHandler>(true))
+                h.OnLayout(_prevLandscape);
             screenGO.SetActive(false);
         }
 
@@ -113,10 +128,10 @@ namespace VoxGame {
         // Вызывается из FightDirector.Update (или GameApp.Update в будущем).
         // dt — игровое время, udt — реальное.
         public void Tick(float dt, float udt) {
-            bool landscape = Screen.width > Screen.height;
+            bool landscape = Landscape;
             if (landscape != _prevLandscape) {
                 _prevLandscape = landscape;
-                _safeArea.Refresh();
+                if (_viewW == 0) _safeArea.Refresh();
                 BroadcastLayout(landscape);
             }
         }
@@ -152,6 +167,7 @@ namespace VoxGame {
             _savedRes   = _scaler.referenceResolution;
             _savedMatch = _scaler.matchWidthOrHeight;
 
+            SetViewSize(w, h);
             bool landscape = w > h;
             _scaler.referenceResolution = landscape
                 ? new Vector2(1170f, 540f)

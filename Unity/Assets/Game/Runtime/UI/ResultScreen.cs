@@ -10,6 +10,7 @@ namespace VoxGame {
         // ------------------------------------------------------------------ Элементы
 
         Text _headerLbl;
+        RectTransform _line;
         Text _timeLbl, _kdLbl, _accLbl, _rewardLbl;
 
         Button _nextBtn, _rematchBtn, _menuBtn;
@@ -23,8 +24,8 @@ namespace VoxGame {
         // ------------------------------------------------------------------ Инициализация
 
         public void Init(UIRoot root) {
-            root.Register(ScreenId.Result, gameObject);
             BuildUI();
+            root.Register(ScreenId.Result, gameObject);
         }
 
         void BuildUI() {
@@ -37,12 +38,12 @@ namespace VoxGame {
             // Тёмный фон-панель
             var bg = UIKit.Panel(transform, "Bg", UIKit.BgDark);
             UIKit.SetAnchors(bg, 0f, 0f, 1f, 1f);
-            bg.offsetMin = bg.offsetMax = Vector2.zero;
+            // фон шире safe-area: закрывает экран до краёв, под вырезом и полосой жестов
+            bg.offsetMin = new Vector2(-400f, -400f);
+            bg.offsetMax = new Vector2(400f, 400f);
 
             // Декоративная горизонтальная линия под заголовком
-            var line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
-            UIKit.SetAnchors(line, 0.05f, 0.69f, 0.95f, 0.695f);
-            line.offsetMin = line.offsetMax = Vector2.zero;
+            _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
 
             // Заголовок «ПОБЕДА!» / «ПОРАЖЕНИЕ»
             _headerLbl = UIKit.Label(transform, "Header", UIKit.FontLg + 20,
@@ -65,6 +66,8 @@ namespace VoxGame {
             UIKit.SetAnchors(nextRT, 0.10f, 0.195f, 0.90f, 0.308f);
             nextRT.offsetMin = nextRT.offsetMax = Vector2.zero;
             _nextBtn.onClick.AddListener(() => OnNext?.Invoke());
+            // тёмная надпись на светлой кнопке: тёмная обводка её только мажет
+            _nextBtn.GetComponentInChildren<Outline>().enabled = false;
 
             // РЕВАНШ
             _rematchBtn = UIKit.Btn(transform, "BtnRematch", "РЕВАНШ",
@@ -81,6 +84,8 @@ namespace VoxGame {
             UIKit.SetAnchors(menuRT, 0.25f, 0.015f, 0.75f, 0.085f);
             menuRT.offsetMin = menuRT.offsetMax = Vector2.zero;
             _menuBtn.onClick.AddListener(() => OnMenu?.Invoke());
+
+            OnLayout(false);
         }
 
         Text StatLine(string name, string defaultText, float yMin, float yMax) {
@@ -124,17 +129,33 @@ namespace VoxGame {
         // ------------------------------------------------------------------ ILayoutHandler
 
         public void OnLayout(bool landscape) {
-            if (!landscape) return;
-            // В ландшафте safe-area высота ~519px; каждая кнопка должна быть ≥96px (≥0.185 from height).
-            var nextRT  = _nextBtn.GetComponent<RectTransform>();
-            var remRT   = _rematchBtn.GetComponent<RectTransform>();
-            var menuRT  = _menuBtn.GetComponent<RectTransform>();
-            UIKit.SetAnchors(nextRT,  0.10f, 0.60f, 0.90f, 0.80f); // height=0.20×519≈104px
-            UIKit.SetAnchors(remRT,   0.10f, 0.38f, 0.90f, 0.57f); // height=0.19×519≈99px
-            UIKit.SetAnchors(menuRT,  0.25f, 0.15f, 0.75f, 0.33f); // height=0.18×519≈93px
-            nextRT.offsetMin  = nextRT.offsetMax  = Vector2.zero;
-            remRT.offsetMin   = remRT.offsetMax   = Vector2.zero;
-            menuRT.offsetMin  = menuRT.offsetMax  = Vector2.zero;
+            if (landscape) {
+                // Ландшафт: заголовок сверху, статистика слева, кнопки справа (каждая не ниже ~96 px)
+                Place(_headerLbl.rectTransform, 0.05f, 0.745f, 0.95f, 0.965f);
+                Place(_line,                    0.05f, 0.725f, 0.95f, 0.735f);
+                Place(_timeLbl.rectTransform,   0.05f, 0.560f, 0.52f, 0.690f);
+                Place(_kdLbl.rectTransform,     0.05f, 0.420f, 0.52f, 0.550f);
+                Place(_accLbl.rectTransform,    0.05f, 0.280f, 0.52f, 0.410f);
+                Place(_rewardLbl.rectTransform, 0.05f, 0.140f, 0.52f, 0.270f);
+                Place(_nextBtn.GetComponent<RectTransform>(),    0.56f, 0.490f, 0.94f, 0.690f);
+                Place(_rematchBtn.GetComponent<RectTransform>(), 0.56f, 0.275f, 0.94f, 0.465f);
+                Place(_menuBtn.GetComponent<RectTransform>(),    0.62f, 0.070f, 0.88f, 0.250f);
+            } else {
+                Place(_headerLbl.rectTransform, 0.05f, 0.710f, 0.95f, 0.920f);
+                Place(_line,                    0.05f, 0.690f, 0.95f, 0.695f);
+                Place(_timeLbl.rectTransform,   0.05f, 0.605f, 0.95f, 0.675f);
+                Place(_kdLbl.rectTransform,     0.05f, 0.525f, 0.95f, 0.600f);
+                Place(_accLbl.rectTransform,    0.05f, 0.445f, 0.95f, 0.520f);
+                Place(_rewardLbl.rectTransform, 0.05f, 0.365f, 0.95f, 0.440f);
+                Place(_nextBtn.GetComponent<RectTransform>(),    0.10f, 0.195f, 0.90f, 0.308f);
+                Place(_rematchBtn.GetComponent<RectTransform>(), 0.10f, 0.093f, 0.90f, 0.188f);
+                Place(_menuBtn.GetComponent<RectTransform>(),    0.25f, 0.015f, 0.75f, 0.085f);
+            }
+        }
+
+        static void Place(RectTransform rt, float x0, float y0, float x1, float y1) {
+            UIKit.SetAnchors(rt, x0, y0, x1, y1);
+            rt.offsetMin = rt.offsetMax = Vector2.zero;
         }
 
         // ------------------------------------------------------------------ Tick (на будущее)

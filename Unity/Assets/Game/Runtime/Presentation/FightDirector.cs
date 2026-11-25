@@ -8,6 +8,10 @@ namespace VoxGame
 {
     // Главный MonoBehaviour боя: строит сцену, тикает все системы, читает ввод.
     // Никакой логики в Awake/Start — только через Init().
+    //
+    // Оси боя (мир): соперник стоит в начале координат лицом в +Z, игрок смотрит на него из точки _eye в сторону −Z.
+    // Правая сторона экрана — мир −X. Анатомическая голова стоит без поворота: AnatView.Pick переводит луч в оси головы
+    // только сдвигом, поэтому наклон головы вместе с корпусом учитывается здесь (луч поворачивается в оси головы).
     public class FightDirector : MonoBehaviour
     {
         // ---- Публичные свойства --------------------------------------------
@@ -16,16 +20,40 @@ namespace VoxGame
         public FighterDef  Foe        => _foeDef;
         public bool        Finished   { get; private set; }
         public bool        PlayerWon  { get; private set; }
+        public AnatView    Head       => _v;
+        public FightHUD    Hud        => _hud;
+        public RefereeLogic Referee   => _referee;
+        public int         HitsThrown => _hitsTotal;    // ударов игрока
+        public int         HitsLanded => _hitsLanded;   // из них попало (по логике боя)
+        public int         HeadHits   { get; private set; }   // ударов, дошедших до головы (Pick попал)
+        public int         FoeAttackSide => _strikeCmd.side;
 
-        // Замер кадра удара (Stopwatch вокруг всего Tick в кадре, где был v.Hit).
-        public float lastHitFrameMs;
-        public float maxHitFrameMs;
+        // Замер кадра удара: весь Tick в кадре, где был v.Hit, и его части (мс).
+        public float lastHitFrameMs, maxHitFrameMs;
+        public float lastPickMs, lastHitMs, lastAnatTickMs, lastLayerMs;
+        public int   hitFrameSeq; // растёт на каждый Tick с ударом по голове
+        // Последний удар по голове (для повторения тех же ударов на отдельной голове в замере) и игровое время кадра.
+        public Ray    lastHeadRay;
+        public float3 lastHitPoint, lastHitDir;
+        public int    lastHitStrength;
+        public float  lastSdt;
 
         // Точки расширения для FxDirector (W5).
         public event Action<HitResult> OnFoeHit;
         public event Action            OnPlayerHit;
         public event Action            OnKnockdown;
         public event Action            OnKnockout;
+
+        // ---- Постановка сцены ----------------------------------------------
+
+        // Глаза игрока: на высоте головы соперника (её начало — уровень ушей), в EyeDist от его оси.
+        const float EyeDist = 1.20f;
+        Vector3 _eye = new Vector3(0f, 1.62f, EyeDist);
+        const float PortPitch = 14.5f, LandPitch = 9.5f;                    // наклон взгляда вниз, градусы
+        // Красный угол ринга виден за соперником справа: в 3 м от игрока, 9.5° от оси взгляда;
+        // диагональ ринга повёрнута к оси взгляда на 12°.
+        const float CornerDist = 3.0f, CornerOff = 9.5f, CornerDiag = 12f;
+        static readonly Vector3 LightForward = new Vector3(0.30f, -0.75f, -0.60f);
 
         // ---- Поля ----------------------------------------------------------
 
@@ -60,10 +88,11 @@ namespace VoxGame
         FightPhase _prevAIPhase;
 
         // Камера
-        Vector3 _camBasePos;
-        Vector3 _headTarget;
-        float   _camShakeAmt;
-        float   _camShakeDecay = 10f;
+        int   _viewW, _viewH;       // размер окна вывода; 0 — брать Screen
+        float _camShakeAmt;
+        float _camShakeDecay = 10f;
+        float _camFollow;           // 0 — взгляд по стойке, 1 — за головой упавшего соперника
+        float _camDodge;            // сглаженный уход камеры при уклоне
 
         // Статистика
         float _fightTime;
@@ -71,6 +100,7 @@ namespace VoxGame
         bool  _resultShown;
         int   _restartCount;
         bool  _blockFromButton;
+        uint  _aimSeq;              // разброс точки прицеливания
 
         // История ударов для ComputeReward
         readonly HitResult[] _hitHistory = new HitResult[512];
@@ -82,6 +112,7 @@ namespace VoxGame
         // Замер кадра удара
         readonly Stopwatch _tickSw = new Stopwatch();
         bool _hitThisFrame;
+        double _pickMs, _hitMs;
 
         // HUD данные (кэш без аллокаций)
         HudData _hudData;
@@ -89,8 +120,9 @@ namespace VoxGame
         // ---- Инициализация -------------------------------------------------
 
         // Строит сцену, головы и соперника. Вызывается создателем после AddComponent.
+        // foeHpMult / foeStunMult — запас здоровья и стойкость соперника (1 — по уровню; меньше — быстрее нокдаун и нокаут).
         public void Init(FighterDef foe, PlayerProfile profile, Camera cam, UIRoot ui,
-                         ModeManager modeManager = null)
+                         ModeManager modeManager = null, float foeHpMult = 1f, float foeStunMult = 1f)
         {
             _foeDef      = foe;
             _profile     = profile;
@@ -102,7 +134,6 @@ namespace VoxGame
             var anatShader = Shader.Find("VoxProbe/Anatomy");
             _anatMat = new Material(anatShader != null ? anatShader
                                                        : Shader.Find("Hidden/InternalErrorShader"));
-
             var voxShader = Shader.Find("VoxGame/VertexColor");
             _voxMat = new Material(voxShader != null ? voxShader
                                                      : Shader.Find("Hidden/InternalErrorShader"));
@@ -112,23 +143,24 @@ namespace VoxGame
             sg.transform.SetParent(transform, false);
             _sceneRoot = sg.transform;
 
-            // Ринг
-            _ring = new RingBuilder();
-            _ring.Build(_sceneRoot);
-
-            // Соперник (тело + крепление головы)
+            // Соперник (тело + крепление головы); глаза игрока — на высоте его головы в стойке
             _foeBody = new FoeBody(_sceneRoot, foe, _voxMat);
-            _foeBody.root.position = new Vector3(0f, 0f, 0.5f);
-            _foeBody.root.rotation = Quaternion.Euler(0f, 180f, 0f);
+            _eye.y = _foeBody.headMount.position.y;
 
-            // Анатомия головы (строится здесь как "экран загрузки")
+            // Ринг: красный угол — за соперником справа от него на экране
+            float off = CornerOff * Mathf.Deg2Rad, diag = CornerDiag * Mathf.Deg2Rad;
+            var corner = new Vector3(_eye.x - Mathf.Sin(off) * CornerDist, 0f, _eye.z - Mathf.Cos(off) * CornerDist);
+            float cornerR = RingBuilder.RopeHalf * 1.41421356f;
+            var ringCenter = corner + new Vector3(Mathf.Sin(diag), 0f, Mathf.Cos(diag)) * cornerR;
+            _ring = new RingBuilder();
+            _ring.Build(_sceneRoot, ringCenter, 45f + CornerDiag, LightForward);
+
+            // Анатомия головы (строится здесь как «экран загрузки»)
             AnatSkin.on = true;
             AnatSkin.Reset();
-            _v = new AnatView(null, _foeBody.headMount.position, _anatMat);
-            // Голова по умолчанию лицом в +Z, камера смотрит в +Z → видна спина; поворот на 180°.
-            _v.root.rotation = Quaternion.Euler(0f, 180f, 0f);
+            _v = new AnatView(_sceneRoot, _foeBody.headMount.position, _anatMat);
 
-            // Перчатки игрока
+            // Руки игрока
             var glove = GlovesCatalog.Get(profile.equippedGloveId);
             _playerGloves = new PlayerGloves(cam.transform, GloveLook.FromEntry(glove), _voxMat);
 
@@ -145,6 +177,7 @@ namespace VoxGame
 
             // Симулятор и ИИ
             _sim = new FightSim(foe.level, foe.seed, prms);
+            ApplyFoeTuning(foeHpMult, foeStunMult);
             int styleIdx = Mathf.Clamp(foe.styleIdx, 0, FightAI.Styles.Length - 1);
             _aiStyle = FightAI.Styles[styleIdx];
             _ai = new FightAI(_aiStyle, foe.level, foe.seed);
@@ -166,12 +199,7 @@ namespace VoxGame
             _result.Init(_uiRoot);
             _result.OnRematch += Restart;
 
-            // Камера
-            _camBasePos  = new Vector3(0f, 1.65f, -0.55f);
-            _headTarget  = _foeBody.headMount.position;
-            cam.transform.position = _camBasePos;
-            cam.transform.LookAt(_headTarget);
-            cam.fieldOfView = GameUtil.CalcFov(Screen.width, Screen.height);
+            UpdateCamera(0f);
 
             // Строки HUD кэшируем один раз
             _hudData.foeName    = foe.name;
@@ -181,6 +209,23 @@ namespace VoxGame
 
             _uiRoot.ShowScreen(ScreenId.Fight);
             _hud.ShowBanner("БОЙ!", 1.5f);
+        }
+
+        float _foeHpMult = 1f, _foeStunMult = 1f;
+
+        void ApplyFoeTuning(float hpMult, float stunMult)
+        {
+            _foeHpMult = Mathf.Max(0.05f, hpMult); _foeStunMult = Mathf.Max(0.05f, stunMult);
+            var st = _sim.State;
+            st.hpMax *= _foeHpMult; st.hp = st.hpMax; st.stunMax *= _foeStunMult;
+        }
+
+        // Размер окна вывода, если он не равен Screen (снимки в текстуру). 0 — вернуться к Screen.
+        public void SetViewSize(int w, int h)
+        {
+            _viewW = w; _viewH = h;
+            _uiRoot?.SetViewSize(w, h);
+            if (_cam != null) { UpdateCamera(0f); _playerGloves.Tick(0f); }
         }
 
         // ---- Tick / Update -------------------------------------------------
@@ -194,6 +239,7 @@ namespace VoxGame
 
             // Замер полного кадра удара
             _hitThisFrame = false;
+            _pickMs = _hitMs = 0;
             _tickSw.Restart();
 
             // Масштабированное игровое время
@@ -201,17 +247,15 @@ namespace VoxGame
             if (_freezeTimer > 0f) { _freezeTimer -= realDt; sdt = 0f; }
             else if (_slowTimer  > 0f) { _slowTimer  -= realDt; sdt = realDt * _slowSpeed; }
             else sdt = realDt;
+            lastSdt = sdt;
 
             // Счётчик времени боя
             if (!Finished) _fightTime += sdt;
 
-            // Порядок кадра головы: AnatSkin.Step(realDt) → v.Tick(sdt) → AnatSkin.SetGlobals(root)
-            AnatSkin.Step(realDt);
+            // Ввод игрока (луч идёт в голову в её положении прошлого кадра)
+            if (!Finished) ProcessInput();
 
-            // Ввод игрока
-            if (!Finished) ProcessInput(sdt);
-
-            // ИИ: TickAI продвигает _gameTime и TickRecovery; реальный ИИ переопределяет фазу
+            // ИИ: TickAI продвигает игровое время и восстановление; настоящий ИИ задаёт фазу
             _sim.TickAI(sdt);
             AICommand cmd = _ai.Tick(sdt, _sim.State);
             _sim.State.phase = cmd.newPhase;
@@ -220,13 +264,19 @@ namespace VoxGame
             ProcessFoeStrike(realDt, cmd);
             _prevAIPhase = cmd.newPhase;
 
-            // Анимация тел
-            _foeBody.Tick(cmd, sdt);
-            _playerGloves.Tick(sdt);
+            // Тело соперника; бьющая перчатка летит в лицо игроку, а при блоке — в его перчатки
+            Vector3 strikeAt = _sim.State.playerBlocking
+                ? _eye + new Vector3(0f, -0.13f, -0.36f)
+                : _eye + new Vector3(-cmd.side * 0.04f, -0.06f, -0.16f);
+            _foeBody.Tick(cmd, sdt, strikeAt);
 
-            // Анатомия головы
+            // Голова: стоит на креплении тела. Порядок кадра головы: AnatSkin.Step → v.Tick → AnatSkin.SetGlobals
+            double t0 = _tickSw.Elapsed.TotalMilliseconds;
+            _v.root.SetPositionAndRotation(_foeBody.headMount.position, _foeBody.headMount.rotation);
+            AnatSkin.Step(sdt);
             _v.Tick(sdt);
             AnatSkin.SetGlobals(_v.root);
+            double anatMs = _tickSw.Elapsed.TotalMilliseconds - t0;
 
             // Рефери (реальное время)
             _referee.Tick(realDt);
@@ -237,11 +287,12 @@ namespace VoxGame
             if (!_resultShown && _referee.State == RefereeState.RaiseHand)
                 ShowResult();
 
-            // Камера
+            // Камера и руки игрока (руки — в осях камеры, поэтому после неё)
             UpdateCamera(realDt);
+            _playerGloves.Tick(sdt);
 
             // HUD
-            FillHudData(sdt);
+            FillHudData();
             _hud.Refresh(_hudData);
             _hud.Tick(sdt, realDt);
             _uiRoot.Tick(sdt, realDt);
@@ -253,47 +304,75 @@ namespace VoxGame
             {
                 lastHitFrameMs = (float)_tickSw.Elapsed.TotalMilliseconds;
                 if (lastHitFrameMs > maxHitFrameMs) maxHitFrameMs = lastHitFrameMs;
+                lastPickMs     = (float)_pickMs;
+                lastHitMs      = (float)_hitMs;
+                lastAnatTickMs = (float)anatMs;
+                lastLayerMs    = lastHitFrameMs - lastPickMs - lastHitMs - lastAnatTickMs;
+                hitFrameSeq++;
             }
         }
 
         // ---- Ввод игрока ---------------------------------------------------
 
-        void ProcessInput(float sdt)
+        void ProcessInput()
         {
             var st = _sim.State;
 
             // Блок из жеста удержания низа или кнопки HUD
             st.playerBlocking = _inputReader.IsBlocking || _blockFromButton;
-
-            // Перчатки отражают состояние блока
             _playerGloves.SetBlock(st.playerBlocking);
 
             while (_inputReader.Dequeue(out PunchInput p))
             {
                 if (st.phase == FightPhase.KO) break;
+                // лежачего и встающего не бьют
+                if (st.phase == FightPhase.Down || st.phase == FightPhase.Rise) continue;
 
                 // Мега: любой свайп при полной шкале
                 p.isMega    = st.megaReady && p.type != PunchType.Jab;
                 p.isFlurry  = false;
 
                 int strength = p.type == PunchType.Jab ? 0 : (p.isMega ? 2 : 1);
-                Vector3 target = ComputePunchTarget(p.type, p.side);
-                Ray ray = new Ray(_cam.transform.position, target - _cam.transform.position);
+                PunchLine(p.type, p.side, out Vector3 from, out Vector3 aim);
 
+                // Луч в осях покоя головы: AnatView.Pick учитывает только сдвиг корня, поворот снимаем сами.
+                // Pick шагает по 0,4 мм от входа в рамку головы (при изгибе шеи рамка шире на 15 см), поэтому луч
+                // начинается за PickLead до точки прицеливания: та же первая ячейка, а шагов в разы меньше.
+                Vector3 hp = _v.root.position;
+                Quaternion hr = _v.root.rotation, inv = Quaternion.Inverse(hr);
+                Vector3 dirW = (aim - from).normalized;
+                Vector3 start = (aim - from).sqrMagnitude > PickLead * PickLead ? aim - dirW * PickLead : from;
+                var ray = new Ray(hp + inv * (start - hp), inv * dirW);
+
+                double t0 = _tickSw.Elapsed.TotalMilliseconds;
                 bool hitPick = _v.Pick(ray, out float3 hitPt, out byte mat, out AnatGrid grid);
+                double t1 = _tickSw.Elapsed.TotalMilliseconds;
+                _pickMs += t1 - t0;
                 int removed = 0;
+                Vector3 contact = aim;
                 if (hitPick)
                 {
                     AnatSkin.Push(hitPt, _v.pickDir, strength);
                     removed = _v.Hit(hitPt, _v.pickDir, strength);
-                    if (removed > 0) _hitThisFrame = true;
+                    _hitMs += _tickSw.Elapsed.TotalMilliseconds - t1;
+                    _hitThisFrame = true;
+                    lastHeadRay = new Ray(ray.origin - hp, ray.direction);
+                    lastHitPoint = hitPt; lastHitDir = _v.pickDir; lastHitStrength = strength;
+                    HeadHits++;
+                    contact = hp + hr * ((Vector3)hitPt * 0.01f);
+                    _foeBody.AddImpulse(hr * (Vector3)_v.pickDir * (strength == 0 ? 0.25f : strength == 1 ? 0.6f : 1f));
                 }
 
                 bool counter = st.phase == FightPhase.Windup;
                 bool open    = st.phase == FightPhase.Open;
 
+                // Сила попадания для логики боя. Лёгкий и средний удар анатомия чаще не пробивает (синяк, отёк без
+                // убранных ячеек), а пробой мегой убирает тысячи ячеек, поэтому основа — база по силе удара (урон как
+                // в веб-версии), а убранные ячейки дают ограниченную добавку.
+                float bse = ImpactBase[strength];
+                int impact = hitPick ? Mathf.RoundToInt(bse * p.pw + Mathf.Min(removed, bse) * 0.5f) : 0;
                 var result = _sim.ProcessHit(
-                    removed, (int)_v.sim.lastZone, _v.sim.traumaAll,
+                    impact, (int)_v.sim.lastZone, _v.sim.traumaAll,
                     _v.detachedBodies, strength, p.isMega, p.pw, counter, open);
 
                 _hitsTotal++;
@@ -339,29 +418,46 @@ namespace VoxGame
                 }
 
                 float gloveDur = p.type == PunchType.Jab ? 0.085f : (p.isMega ? 0.4f : 0.2f);
-                _playerGloves.Punch(p.side, p.type, gloveDur);
+                _playerGloves.Punch(p.side, p.isMega ? PunchType.Mega : p.type, gloveDur, contact);
 
                 // Один удар за тик
                 break;
             }
         }
 
-        // Вычислить мировую точку прицеливания по типу и стороне удара.
-        Vector3 ComputePunchTarget(PunchType type, int side)
+        const float PickLead = 0.05f;                       // м: начало луча Pick перед точкой прицеливания
+        static readonly float[] ImpactBase = { 10f, 28f, 28f }; // джеб, силовой, мега — в «ячейках» FightState.TakeHit
+
+        // Линия удара: откуда летит перчатка и в какую точку головы целит (мир).
+        // Точки заданы в осях головы (см от уровня ушей: +Y вверх, +Z — лицо); левая рука игрока бьёт в правую
+        // от соперника половину лица (мир +X). Каждый удар чуть смещён, чтобы серия не шла в одну ячейку.
+        void PunchLine(PunchType type, int side, out Vector3 from, out Vector3 aim)
         {
-            Vector3 c = _headTarget;
+            _aimSeq = _aimSeq * 1664525u + 1013904223u;
+            float jx = ((_aimSeq >> 8) & 0xFF) / 255f - 0.5f, jy = ((_aimSeq >> 16) & 0xFF) / 255f - 0.5f;
+            float s = -side;   // сторона руки в мире: левая рука игрока — +X
+            Vector3 local, start;
             switch (type)
             {
-                case PunchType.Hook:
-                    // side=-1 → лев. скула (мир +X), side=+1 → пр. скула (мир -X)
-                    return c + new Vector3(-side * 0.065f, 0f, 0f);
-                case PunchType.Upper:
-                    return c + new Vector3(-side * 0.03f, -0.09f, 0.02f);
-                case PunchType.Mega:
-                    return c + new Vector3(0f, 0.07f, -0.01f);
-                default: // Jab
-                    return c;
+                case PunchType.Hook:   // сбоку в скулу или челюсть
+                    local = new Vector3(s * 5.6f, -3.2f + jy * 4.5f, 5.0f + jx * 2f);
+                    start = _eye + new Vector3(s * 0.34f, -0.06f, -0.38f);
+                    break;
+                case PunchType.Upper:  // снизу в подбородок
+                    local = new Vector3(s * 1.4f + jx * 2f, -9.4f, 6.4f + jy * 1.5f);
+                    start = _eye + new Vector3(s * 0.07f, -0.46f, -0.45f);
+                    break;
+                case PunchType.Mega:   // прямой в переносицу
+                    local = new Vector3(jx * 2f, 0.5f + jy * 2f, 9f);
+                    start = _eye + new Vector3(s * 0.04f, -0.04f, 0f);
+                    break;
+                default:               // джеб: нос, губы, глаз со стороны руки
+                    local = new Vector3(s * 1.6f + jx * 3.2f, -2.6f + jy * 5.5f, 9f);
+                    start = _eye + new Vector3(s * 0.05f, -0.05f, 0f);
+                    break;
             }
+            from = start;
+            aim = _v.root.TransformPoint(local * 0.01f);
         }
 
         void DoDodge(int side)
@@ -489,28 +585,37 @@ namespace VoxGame
 
         void UpdateCamera(float realDt)
         {
+            float w = _viewW > 0 ? _viewW : Screen.width, h = _viewH > 0 ? _viewH : Screen.height;
+            bool land = w > h;
+            _cam.fieldOfView = GameUtil.CalcFov(w, h);
+            _playerGloves.SetView(_cam.fieldOfView, h > 0f ? w / h : 0.46f);
+
+            Vector3 eye = _eye;
             if (_camShakeAmt > 0.0001f)
             {
                 float s = _camShakeAmt;
-                Vector3 off = new Vector3(
-                    UnityEngine.Random.Range(-s, s),
-                    UnityEngine.Random.Range(-s, s),
-                    0f);
-                _cam.transform.position = _camBasePos + off;
+                eye += new Vector3(UnityEngine.Random.Range(-s, s), UnityEngine.Random.Range(-s, s), 0f);
                 _camShakeAmt = Mathf.Max(0f, _camShakeAmt - _camShakeDecay * realDt);
             }
-            else
-            {
-                _cam.transform.position = _camBasePos;
-                _camShakeAmt = 0f;
-            }
-            _cam.transform.LookAt(_headTarget);
-            _cam.fieldOfView = GameUtil.CalcFov(Screen.width, Screen.height);
+            else _camShakeAmt = 0f;
+
+            // Уклон: игрок уходит в сторону (вправо на экране — мир −X)
+            var st = _sim.State;
+            float dodgeT = st.playerDodge > 0f ? -st.playerDodgeSide * 0.14f * Mathf.Sin(Mathf.PI * Mathf.Clamp01(st.playerDodge)) : 0f;
+            _camDodge = Mathf.Lerp(_camDodge, dodgeT, 1f - Mathf.Exp(-18f * realDt));
+            eye.x += _camDodge;
+
+            // Взгляд: по стойке, а за упавшим соперником — вниз, к его голове
+            bool low = st.phase == FightPhase.Down || st.phase == FightPhase.KO;
+            _camFollow = Mathf.Lerp(_camFollow, low ? 0.8f : 0f, 1f - Mathf.Exp(-3.5f * realDt));
+            Quaternion stand = Quaternion.Euler(land ? LandPitch : PortPitch, 180f, _camDodge * -25f);
+            Vector3 look = Vector3.Lerp(eye + stand * Vector3.forward * 1.1f, _foeBody.headMount.position, _camFollow);
+            _cam.transform.SetPositionAndRotation(eye, Quaternion.LookRotation(look - eye, stand * Vector3.up));
         }
 
         // ---- HUD -----------------------------------------------------------
 
-        void FillHudData(float sdt)
+        void FillHudData()
         {
             var st = _sim.State;
             _hudData.playerHp       = st.playerHp;
@@ -537,6 +642,7 @@ namespace VoxGame
             float prevMega = _sim.State.megaMeter;
             var prms = _sim.State.fightParams;
             _sim = new FightSim(_foeDef.level, _foeDef.seed + (uint)(_restartCount + 1), prms);
+            ApplyFoeTuning(_foeHpMult, _foeStunMult);
             _sim.CarryMegaMeter(prevMega);
             _ai  = new FightAI(_aiStyle, _foeDef.level, _foeDef.seed);
             _referee.Reset();
@@ -547,6 +653,7 @@ namespace VoxGame
             _fightTime    = 0f;
             _hitsTotal    = 0;
             _hitsLanded   = 0;
+            HeadHits      = 0;
             _hitCount     = 0;
             _blockFromButton = false;
             _strikePending   = false;
@@ -575,6 +682,8 @@ namespace VoxGame
             _foeBody?.Dispose();
             _v?.Dispose();
             _playerGloves?.Dispose();
+            if (_hud       != null) GameUtil.Destroy(_hud.gameObject);
+            if (_result    != null) GameUtil.Destroy(_result.gameObject);
             if (_sceneRoot != null) GameUtil.Destroy(_sceneRoot.gameObject);
             if (_anatMat   != null) GameUtil.Destroy(_anatMat);
             if (_voxMat    != null) GameUtil.Destroy(_voxMat);
@@ -582,6 +691,9 @@ namespace VoxGame
             _foeBody      = null;
             _v            = null;
             _playerGloves = null;
+            _hud          = null;
+            _result       = null;
+            _sim          = null;
         }
 
         void OnDestroy() => Dispose();

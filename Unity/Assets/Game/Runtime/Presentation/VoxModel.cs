@@ -1,16 +1,18 @@
 using System.Collections.Generic;
-using Unity.Collections;
-using Unity.Mathematics;
 using UnityEngine;
-using VoxProbe;
 
 namespace VoxGame
 {
-    // Вспомогательный строитель: заполнять байтовую решётку примитивами (индексами палитры)
-    // и строить из неё VoxBody. Индекс 0 — пусто, 1–15 — позиции в _VoxPalette материала.
-    // Координаты всех примитивов — в пространстве вокселей (0..SX/SY/SZ).
+    // Статическая воксельная модель игрового слоя (тело соперника, руки, перчатки).
+    // Решётка байтов (0 — пусто, 1..N — номер цвета в палитре) заполняется по функции расстояния в сантиметрах,
+    // затем один раз строится обычная сетка Unity: грань на каждую открытую сторону ячейки, цвет в вершинах,
+    // нормаль — смесь нормали грани и сглаженной нормали поверхности (объём читается, грани вокселей видны).
+    // Такие тела не разрушаются, поэтому решётка после сборки сетки не хранится.
     public class VoxModel
     {
+        public delegate float Sdf(float x, float y, float z);   // расстояние до поверхности, см (< 0 — внутри)
+        public delegate byte Paint(float x, float y, float z);  // номер цвета ячейки у поверхности
+
         public readonly int SX, SY, SZ;
         readonly byte[] cells;
 
@@ -20,165 +22,176 @@ namespace VoxGame
             cells = new byte[sx * sy * sz];
         }
 
-        // ---- Примитивы --------------------------------------------------
-
-        public void Clear() => System.Array.Clear(cells, 0, cells.Length);
-
-        public void Set(int x, int y, int z, byte mat)
+        // Модель по рамке в сантиметрах: mn..mx, шаг cell. Ячейка (i,j,k) имеет центр mn + (i+0.5, j+0.5, k+0.5)·cell.
+        public static VoxModel FromSdf(Vector3 mn, Vector3 mx, float cell, Sdf sdf, Paint paint)
         {
-            if ((uint)x >= (uint)SX || (uint)y >= (uint)SY || (uint)z >= (uint)SZ) return;
-            cells[x + SX * (y + SY * z)] = mat;
+            var m = new VoxModel(Mathf.CeilToInt((mx.x - mn.x) / cell), Mathf.CeilToInt((mx.y - mn.y) / cell),
+                                 Mathf.CeilToInt((mx.z - mn.z) / cell));
+            m.Fill(mn, cell, sdf, paint);
+            return m;
         }
 
-        public void FillBox(int x0, int y0, int z0, int x1, int y1, int z1, byte mat)
+        // Заполнить по функции расстояния. Вдоль строки ячейки, далёкие от поверхности, пропускаются без вычисления
+        // (функции расстояния здесь приближённые, поэтому шаг пропуска берётся с запасом).
+        void Fill(Vector3 mn, float cell, Sdf sdf, Paint paint)
         {
-            x0 = Mathf.Max(x0, 0); y0 = Mathf.Max(y0, 0); z0 = Mathf.Max(z0, 0);
-            x1 = Mathf.Min(x1, SX); y1 = Mathf.Min(y1, SY); z1 = Mathf.Min(z1, SZ);
-            for (int z = z0; z < z1; z++)
-            for (int y = y0; y < y1; y++)
+            float inv = 0.55f / cell;
+            for (int z = 0; z < SZ; z++)
+            for (int y = 0; y < SY; y++)
             {
+                float py = mn.y + (y + 0.5f) * cell, pz = mn.z + (z + 0.5f) * cell;
                 int row = SX * (y + SY * z);
-                for (int x = x0; x < x1; x++)
-                    cells[x + row] = mat;
-            }
-        }
-
-        // Эллипсоид: центр и радиусы в пространстве вокселей.
-        public void FillEllipsoid(float cx, float cy, float cz, float rx, float ry, float rz, byte mat)
-        {
-            int x0 = Mathf.Max(0, Mathf.FloorToInt(cx - rx - 1));
-            int y0 = Mathf.Max(0, Mathf.FloorToInt(cy - ry - 1));
-            int z0 = Mathf.Max(0, Mathf.FloorToInt(cz - rz - 1));
-            int x1 = Mathf.Min(SX, Mathf.CeilToInt(cx + rx + 1));
-            int y1 = Mathf.Min(SY, Mathf.CeilToInt(cy + ry + 1));
-            int z1 = Mathf.Min(SZ, Mathf.CeilToInt(cz + rz + 1));
-            float irx2 = 1f / (rx * rx), iry2 = 1f / (ry * ry), irz2 = 1f / (rz * rz);
-            for (int z = z0; z < z1; z++)
-            for (int y = y0; y < y1; y++)
-            {
-                float dy = y - cy, dz = z - cz;
-                float rem = 1f - dy * dy * iry2 - dz * dz * irz2;
-                if (rem < 0) continue;
-                float rx2i = rem / irx2; // max dx² allowed
-                float xLo = cx - Mathf.Sqrt(rx2i), xHi = cx + Mathf.Sqrt(rx2i);
-                int xa = Mathf.Max(x0, Mathf.CeilToInt(xLo));
-                int xb = Mathf.Min(x1, Mathf.FloorToInt(xHi) + 1);
-                int row = SX * (y + SY * z);
-                for (int x = xa; x < xb; x++)
-                    cells[x + row] = mat;
-            }
-        }
-
-        // Капсула: концы A/B и радиус в пространстве вокселей.
-        public void FillCapsule(float ax, float ay, float az, float bx, float by, float bz,
-                                 float r, byte mat)
-        {
-            float lx = bx - ax, ly = by - ay, lz = bz - az;
-            float lenSq = lx * lx + ly * ly + lz * lz;
-            float r2 = r * r;
-            int x0 = Mathf.Max(0, Mathf.FloorToInt(Mathf.Min(ax, bx) - r - 1));
-            int y0 = Mathf.Max(0, Mathf.FloorToInt(Mathf.Min(ay, by) - r - 1));
-            int z0 = Mathf.Max(0, Mathf.FloorToInt(Mathf.Min(az, bz) - r - 1));
-            int x1 = Mathf.Min(SX, Mathf.CeilToInt(Mathf.Max(ax, bx) + r + 1));
-            int y1 = Mathf.Min(SY, Mathf.CeilToInt(Mathf.Max(ay, by) + r + 1));
-            int z1 = Mathf.Min(SZ, Mathf.CeilToInt(Mathf.Max(az, bz) + r + 1));
-            float invLen = lenSq > 1e-9f ? 1f / lenSq : 0f;
-            for (int z = z0; z < z1; z++)
-            for (int y = y0; y < y1; y++)
-            {
-                int row = SX * (y + SY * z);
-                for (int x = x0; x < x1; x++)
+                for (int x = 0; x < SX;)
                 {
-                    float dx = x - ax, dy = y - ay, dz = z - az;
-                    float t = Mathf.Clamp01((dx * lx + dy * ly + dz * lz) * invLen);
-                    float qx = dx - t * lx, qy = dy - t * ly, qz = dz - t * lz;
-                    if (qx * qx + qy * qy + qz * qz <= r2)
-                        cells[x + row] = mat;
+                    float px = mn.x + (x + 0.5f) * cell;
+                    float d = sdf(px, py, pz);
+                    int skip = Mathf.Max(1, (int)(Mathf.Abs(d) * inv));
+                    if (d <= 0f)
+                    {
+                        // глубоко внутри цвет не нужен: грани есть только у ячеек рядом с пустотой
+                        byte c = skip > 1 ? (byte)1 : paint(px, py, pz);
+                        int x1 = Mathf.Min(SX, x + skip);
+                        for (int i = x; i < x1; i++) cells[row + i] = c == 0 ? (byte)1 : c;
+                    }
+                    x += skip;
                 }
             }
         }
 
-        // Скруглённый бокс: центр, полуразмеры и радиус скругления в пространстве вокселей.
-        public void FillRoundBox(float cx, float cy, float cz,
-                                  float hx, float hy, float hz, float r, byte mat)
+        bool Solid(int x, int y, int z) =>
+            (uint)x < (uint)SX && (uint)y < (uint)SY && (uint)z < (uint)SZ && cells[x + SX * (y + SY * z)] != 0;
+
+        static readonly Vector3[] FaceN =
         {
-            float r2 = r * r;
-            int x0 = Mathf.Max(0, Mathf.FloorToInt(cx - hx - r - 1));
-            int y0 = Mathf.Max(0, Mathf.FloorToInt(cy - hy - r - 1));
-            int z0 = Mathf.Max(0, Mathf.FloorToInt(cz - hz - r - 1));
-            int x1 = Mathf.Min(SX, Mathf.CeilToInt(cx + hx + r + 1));
-            int y1 = Mathf.Min(SY, Mathf.CeilToInt(cy + hy + r + 1));
-            int z1 = Mathf.Min(SZ, Mathf.CeilToInt(cz + hz + r + 1));
-            for (int z = z0; z < z1; z++)
-            for (int y = y0; y < y1; y++)
+            new Vector3(1, 0, 0), new Vector3(-1, 0, 0), new Vector3(0, 1, 0),
+            new Vector3(0, -1, 0), new Vector3(0, 0, 1), new Vector3(0, 0, -1),
+        };
+
+        // Четыре угла грани (в долях ячейки), обход по часовой стрелке, если смотреть снаружи.
+        static readonly Vector3[,] FaceV =
+        {
+            { new Vector3(1, 0, 0), new Vector3(1, 1, 0), new Vector3(1, 1, 1), new Vector3(1, 0, 1) },
+            { new Vector3(0, 0, 1), new Vector3(0, 1, 1), new Vector3(0, 1, 0), new Vector3(0, 0, 0) },
+            { new Vector3(0, 1, 0), new Vector3(0, 1, 1), new Vector3(1, 1, 1), new Vector3(1, 1, 0) },
+            { new Vector3(0, 0, 1), new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(1, 0, 1) },
+            { new Vector3(1, 0, 1), new Vector3(1, 1, 1), new Vector3(0, 1, 1), new Vector3(0, 0, 1) },
+            { new Vector3(0, 0, 0), new Vector3(0, 1, 0), new Vector3(1, 1, 0), new Vector3(1, 0, 0) },
+        };
+
+        // Построить сетку. org — положение угла ячейки (0,0,0) в метрах в осях объекта, cellM — шаг в метрах.
+        // faceBlend: 0 — гладкие нормали, 1 — нормали граней. aoScale — сила затенения складок по номеру цвета
+        // (ткань гладкая: на светлых трусах ступенчатое затенение рисует полосы-горизонтали).
+        public Mesh BuildMesh(string name, Color32[] palette, Vector3 org, float cellM, float faceBlend = 0.3f,
+                              float[] aoScale = null)
+        {
+            var vs = new List<Vector3>(8192);
+            var ns = new List<Vector3>(8192);
+            var cs = new List<Color32>(8192);
+            var ts = new List<int>(12288);
+
+            for (int z = 0; z < SZ; z++)
+            for (int y = 0; y < SY; y++)
+            for (int x = 0; x < SX; x++)
             {
-                float dy = Mathf.Max(Mathf.Abs(y - cy) - hy, 0f);
-                float dz = Mathf.Max(Mathf.Abs(z - cz) - hz, 0f);
-                float edge = dy * dy + dz * dz;
-                if (edge > r2) continue;
-                int row = SX * (y + SY * z);
-                for (int x = x0; x < x1; x++)
+                byte m = cells[x + SX * (y + SY * z)];
+                if (m == 0) continue;
+                bool px = !Solid(x + 1, y, z), nx = !Solid(x - 1, y, z), py = !Solid(x, y + 1, z),
+                     ny = !Solid(x, y - 1, z), pz = !Solid(x, y, z + 1), nz = !Solid(x, y, z - 1);
+                if (!(px || nx || py || ny || pz || nz)) continue;
+
+                // сглаженная нормаль и «вогнутость» по занятости окрестности 5×5×5
+                Vector3 g = Vector3.zero; int filled = 0;
+                for (int dz = -2; dz <= 2; dz++)
+                for (int dy = -2; dy <= 2; dy++)
+                for (int dx = -2; dx <= 2; dx++)
+                    if (Solid(x + dx, y + dy, z + dz)) { g.x -= dx; g.y -= dy; g.z -= dz; filled++; }
+                Vector3 sn = g.sqrMagnitude > 1e-6f ? g.normalized : Vector3.up;
+                // плоская поверхность ≈ 0.6 занятых, складка больше, выступ меньше
+                float aoK = aoScale != null && m < aoScale.Length ? aoScale[m] : 1f;
+                float ao = Mathf.Clamp(1f - 1.5f * aoK * (filled / 125f - 0.6f), 0.58f, 1.08f);
+                // лёгкий разброс тона по ячейке, как у кожи головы
+                uint h = (uint)(x * 73856093) ^ (uint)(y * 19349663) ^ (uint)(z * 83492791);
+                h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
+                float k = ao * (0.975f + 0.05f * ((h & 0xFFFF) / 65535f));
+                Color32 pc = palette[Mathf.Min(m, palette.Length - 1)];
+                var col = new Color32((byte)Mathf.Min(255f, pc.r * k), (byte)Mathf.Min(255f, pc.g * k),
+                                      (byte)Mathf.Min(255f, pc.b * k), 255);
+
+                var basePos = new Vector3(x, y, z);
+                for (int f = 0; f < 6; f++)
                 {
-                    float dx = Mathf.Max(Mathf.Abs(x - cx) - hx, 0f);
-                    if (dx * dx + edge <= r2)
-                        cells[x + row] = mat;
+                    bool open = f == 0 ? px : f == 1 ? nx : f == 2 ? py : f == 3 ? ny : f == 4 ? pz : nz;
+                    if (!open) continue;
+                    Vector3 n = Vector3.Lerp(sn, FaceN[f], faceBlend).normalized;
+                    int b = vs.Count;
+                    for (int c = 0; c < 4; c++)
+                    {
+                        vs.Add(org + (basePos + FaceV[f, c]) * cellM);
+                        ns.Add(n); cs.Add(col);
+                    }
+                    ts.Add(b); ts.Add(b + 1); ts.Add(b + 2);
+                    ts.Add(b); ts.Add(b + 2); ts.Add(b + 3);
                 }
             }
+
+            var mesh = new Mesh { name = name };
+            mesh.indexFormat = vs.Count > 65000 ? UnityEngine.Rendering.IndexFormat.UInt32
+                                                : UnityEngine.Rendering.IndexFormat.UInt16;
+            mesh.SetVertices(vs);
+            mesh.SetNormals(ns);
+            mesh.SetColors(cs);
+            mesh.SetTriangles(ts, 0);
+            mesh.RecalculateBounds();
+            mesh.UploadMeshData(true);
+            return mesh;
         }
 
-        // ---- Палитра ----------------------------------------------------
+        // ---- Функции расстояния (как sdEll / sdCap / smin веб-версии, см) ----------------------------
 
-        // Задать _VoxPalette[16] на материал из массива Color (sRGB).
-        public static void SetPalette(Material mat, Color[] palette)
+        public static float Ell(float px, float py, float pz, float rx, float ry, float rz)
         {
-            var v = new Vector4[16];
-            int n = Mathf.Min(palette.Length, 16);
-            for (int i = 0; i < n; i++)
-                v[i] = new Vector4(palette[i].r, palette[i].g, palette[i].b, 1f);
-            mat.SetVectorArray("_VoxPalette", v);
+            float a = px / rx, b = py / ry, c = pz / rz;
+            float k0 = Mathf.Sqrt(a * a + b * b + c * c);
+            a /= rx; b /= ry; c /= rz;
+            float k1 = Mathf.Sqrt(a * a + b * b + c * c);
+            return k1 < 1e-9f ? -Mathf.Min(rx, Mathf.Min(ry, rz)) : k0 * (k0 - 1f) / k1;
         }
 
-        // ---- Сборка VoxBody ---------------------------------------------
-
-        // Передать решётку в VoxBody и синхронно построить меш.
-        // После вызова этот VoxModel можно менять — VoxBody владеет своей копией NativeArray.
-        // parent — Transform, к которому прикрепляются чанки (обычно смещённый дочерний GO).
-        public VoxBody ToVoxBody(Transform parent, Material mat, float voxelSize)
+        // Капсула от A к B, радиус r у A и r2 у B.
+        public static float Cap(float px, float py, float pz, float ax, float ay, float az,
+                                float bx, float by, float bz, float r, float r2)
         {
-            var body = new VoxBody(parent, mat, voxelSize);
-            int total = SX * SY * SZ;
-            var na = new NativeArray<byte>(total, Allocator.Persistent,
-                                           NativeArrayOptions.UninitializedMemory);
-            na.CopyFrom(cells);
-            body.SetGrid(na, new int3(SX, SY, SZ));
-            body.visibleOnApply = true;
-            // Синхронная сборка меша через MeshScheduler
-            var sched = new MeshScheduler();
-            var list = new List<VoxBody>(1) { body };
-            sched.Schedule(list, 0.0);
-            sched.Flush(0.0);
-            sched.Dispose();
-            return body;
+            float pax = px - ax, pay = py - ay, paz = pz - az, bax = bx - ax, bay = by - ay, baz = bz - az;
+            float h = Mathf.Clamp01((pax * bax + pay * bay + paz * baz) / (bax * bax + bay * bay + baz * baz));
+            pax -= bax * h; pay -= bay * h; paz -= baz * h;
+            return Mathf.Sqrt(pax * pax + pay * pay + paz * paz) - (r + (r2 - r) * h);
         }
 
-        // Версия для нескольких тел в одном проходе (экономит пересоздание планировщика).
-        public static void BuildAll(List<(VoxBody body, VoxModel model)> pairs)
+        public static float Cap(float px, float py, float pz, float ax, float ay, float az,
+                                float bx, float by, float bz, float r) =>
+            Cap(px, py, pz, ax, ay, az, bx, by, bz, r, r);
+
+        // Плавное объединение.
+        public static float Smin(float a, float b, float k)
         {
-            var sched = new MeshScheduler();
-            var bodies = new List<VoxBody>(pairs.Count);
-            foreach (var (body, model) in pairs)
-            {
-                int total = model.SX * model.SY * model.SZ;
-                var na = new NativeArray<byte>(total, Allocator.Persistent,
-                                               NativeArrayOptions.UninitializedMemory);
-                na.CopyFrom(model.cells);
-                body.SetGrid(na, new int3(model.SX, model.SY, model.SZ));
-                body.visibleOnApply = true;
-                bodies.Add(body);
-            }
-            sched.Schedule(bodies, 0.0);
-            sched.Flush(0.0);
-            sched.Dispose();
+            float h = k - Mathf.Abs(a - b);
+            return h > 0f ? Mathf.Min(a, b) - h * h * 0.25f / k : Mathf.Min(a, b);
+        }
+
+        // ---- Объект с сеткой ---------------------------------------------------------------------
+
+        public static Transform Spawn(string name, Transform parent, Mesh mesh, Material mat)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = mat;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            mr.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+            mr.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            return go.transform;
         }
     }
 }
