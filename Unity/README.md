@@ -121,6 +121,19 @@ unity command script eval --timeout 590 --code 'VoxGame.Editor.ShotsTaker.AllocP
 
 Шрифт интерфейса — Inter (SIL OFL 1.1), файлы и лицензия в `Assets/Game/Resources/Fonts/`; запись в `CREDITS.md` в корне.
 
+## Игра в браузере (Web)
+
+Сборка `Game.unity` под Web (модуль WebGL Build Support для 6000.3.21f1 установлен). Настройки Web ставит сам метод сборки (`Assets/Game/Editor/WebBuild.cs`, только для Web): Brotli + Decompression Fallback, stripping High, `RuntimeSpeedLTO`, Wasm 2023, куча 256/2048 МБ, шаблон `Assets/WebGLTemplates/VoxFull`. Сборка с нуля ~50 мин (компоновка wasm с LTO).
+
+```bash
+"$U" -batchmode -quit -projectPath "$P" -buildTarget WebGL -executeMethod VoxGame.Editor.WebBuild.BuildWebGL -logFile Logs/web.log   # Builds/Web/
+rm -rf ../web/unity && cp -r Builds/Web ../web/unity     # выкладка: pages.yml копирует web/unity -> https://antropos17.github.io/voxel-boxing/unity/
+node ../tests/unity-web.js Unity/Builds/Web               # из корня репозитория: Chrome с окном, меню -> бой -> удары, цифры в Unity/Shots/web/result.json
+node ../tests/unity-web.js Unity/Builds/Web --mobile --mode training   # эмуляция телефона (касания, ANAT_LITE)
+```
+
+Скрипт ищет Playwright в `node_modules` репозитория (в worktree — `NODE_PATH=<основная папка>/node_modules`), браузер — установленный Chrome (`channel: 'chrome'`). Цифры замера и ограничения — `docs/STATUS.md`, «Unity: игра в браузере».
+
 ## Просмотр головы
 
 Интерактивный режим той же сборки: `-anatView`. Без флага сборка, как раньше, делает замерный облёт.

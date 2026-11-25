@@ -1,0 +1,51 @@
+{
+ "url": "http://127.0.0.1:47966/",
+ "mobile": true,
+ "headless": false,
+ "ua": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
+ "gpu": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Laptop GPU (0x000028E0) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+ "download": {
+  "Build/Web.loader.js": 118133,
+  "Build/Web.framework.js.unityweb": 68755,
+  "Build/Web.wasm.unityweb": 7562375,
+  "Build/Web.data.unityweb": 3744507
+ },
+ "downloadTotal": 11493770,
+ "readyMs": 1803,
+ "menuMs": 2078,
+ "punches": 12,
+ "fightSec": 7,
+ "endState": "Fight",
+ "raf": {
+  "frames": 1966,
+  "avgMs": 5.92,
+  "p50": 5.7,
+  "p99": 6.6,
+  "worst": 189.4,
+  "over33": 2,
+  "over50": 2
+ },
+ "wasmHeapPeakMB": 369,
+ "jsHeapMB": 62,
+ "unityStats": [
+  "WEB_STATE MainMenu\n",
+  "WEB_STATE ModeSelect\n",
+  "WEB_STATE Loading\n",
+  "WEB_STATE Fight\n",
+  "WEB_STAT run frames=839 avgMs=6,0 worstMs=189,0 slow33=1 hits=4 hitFrameWorstMs=21,0 hitTickAvgMs=12,3 hitTickWorstMs=16,0 monoMB=15 allocMB=100\n",
+  "WEB_STATE Victory\n",
+  "WEB_STAT end frames=1614 avgMs=5,9 worstMs=189,0 slow33=1 hits=11 hitFrameWorstMs=25,0 hitTickAvgMs=12,4 hitTickWorstMs=21,0 monoMB=16 allocMB=137\n",
+  "WEB_STATE Reward\n",
+  "WEB_STATE MainMenu\n",
+  "WEB_STATE ModeSelect\n",
+  "WEB_STATE Loading\n",
+  "WEB_STATE Fight\n",
+  "WEB_STAT run frames=870 avgMs=5,8 worstMs=14,0 slow33=0 hits=4 hitFrameWorstMs=14,0 hitTickAvgMs=8,9 hitTickWorstMs=9,3 monoMB=15 allocMB=99\n",
+  "WEB_STAT run frames=1733 avgMs=5,8 worstMs=24,0 slow33=0 hits=8 hitFrameWorstMs=24,0 hitTickAvgMs=12,5 hitTickWorstMs=19,8 monoMB=17 allocMB=99\n"
+ ],
+ "errors": [
+  "Failed to load resource: the server responded with a status of 404 (Not Found)",
+  "NotSupportedError: screen.orientation.lock() is not available on this device.",
+  "Failed to load resource: the server responded with a status of 404 (Not Found)"
+ ]
+}
