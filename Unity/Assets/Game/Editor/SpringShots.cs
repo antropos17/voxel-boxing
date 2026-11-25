@@ -119,6 +119,81 @@ namespace VoxGame.Editor
             EndFight(d);
         }
 
+        // Парный замер кадра удара: бои «без» и «с» по очереди (без, с, без, с), в каждом 3 удара на прогрев (JIT, Burst)
+        // и hits ударов в зачёт; кадр удара — FightDirector.lastHitFrameMs. Вклад пружин — отдельно: толчок и шаг тела.
+        public static void SpringBench(int hits = 40)
+        {
+            bool was = FoeSpring.Enabled;
+            var log = new StringBuilder();
+            var all = new Dictionary<bool, List<double>> { { false, new List<double>() }, { true, new List<double>() } };
+            var anat = new Dictionary<bool, List<double>> { { false, new List<double>() }, { true, new List<double>() } };
+            var pieces = new Dictionary<bool, List<double>> { { false, new List<double>() }, { true, new List<double>() } };
+            try
+            {
+                foreach (bool on in new[] { false, true, false, true })
+                {
+                    FoeSpring.Enabled = on; AnatPieces.Tethers = on;
+                    var d = NewFight(out var cam, out var ui, 6f, 4f);
+                    var run = new Run { d = d };
+                    run.Ticks(90);
+                    var combo = new[] { PunchType.Hook, PunchType.Jab, PunchType.Upper, PunchType.Jab };
+                    int got = 0, tries = 0;
+                    while (got < hits + WarmHits && tries < hits * 4 && !d.Finished)
+                    {
+                        tries++;
+                        run.WaitOpen(150);
+                        int seq = d.hitFrameSeq;
+                        run.Punch(combo[tries % combo.Length], tries % 2 == 0 ? 1 : -1);
+                        run.Tick();
+                        if (d.hitFrameSeq != seq)
+                        {
+                            if (got >= WarmHits) { all[on].Add(d.lastHitFrameMs); anat[on].Add(d.lastAnatTickMs + d.lastHitMs + d.lastPickMs); }
+                            got++;
+                        }
+                        for (int i = 0; i < 20; i++) { run.Tick(); pieces[on].Add(d.Head.pieceMs); }
+                    }
+                    log.AppendLine("SPRING_BENCH run on=" + on + " hits=" + (got - WarmHits) + " finished=" + d.Finished);
+                    EndFight(d);
+                }
+                // вклад пружин: толчок и тик тела (с пружинами минус без) на одном теле, 2000 повторов
+                var mat = new Material(Shader.Find("Hidden/InternalErrorShader"));
+                var root = new GameObject("bench");
+                var body = new FoeBody(root.transform, FighterGen.Generate(42u, 1), mat);
+                var cmd = new AICommand { newPhase = FightPhase.Guard, side = -1 };
+                double[] ms = new double[2];
+                for (int pass = 0; pass < 3; pass++)
+                    foreach (bool on in new[] { false, true })
+                    {
+                        FoeSpring.Enabled = on;
+                        var sw = System.Diagnostics.Stopwatch.StartNew();
+                        for (int i = 0; i < 2000; i++)
+                        {
+                            body.AddHit(body.headMount.position + body.root.forward * 0.1f, -body.root.forward, i % 3, 1.2f);
+                            body.Tick(cmd, 1f / 60f, Vector3.forward);
+                        }
+                        if (pass > 0) ms[on ? 1 : 0] += sw.Elapsed.TotalMilliseconds / 4000.0;
+                    }
+                body.Dispose(); Object.DestroyImmediate(root); Object.DestroyImmediate(mat);
+                log.AppendLine("SPRING_BENCH body_tick_plus_hit_ms off=" + ms[0].ToString("0.0000") + " on=" + ms[1].ToString("0.0000")
+                               + " spring_contrib_ms=" + (ms[1] - ms[0]).ToString("0.0000"));
+            }
+            finally { FoeSpring.Enabled = was; AnatPieces.Tethers = true; }
+            foreach (bool on in new[] { false, true })
+                log.AppendLine("SPRING_BENCH hitFrame on=" + on + " " + Dist(all[on]) + " | anat(pick+hit+tick) " + Dist(anat[on])
+                               + " | piecesStep " + Dist(pieces[on]));
+            SpringLog = log.ToString();
+            Debug.Log(SpringLog);
+        }
+
+        static string Dist(List<double> x)
+        {
+            if (x.Count == 0) return "n=0";
+            var s = new List<double>(x); s.Sort();
+            double sum = 0; foreach (var v in s) sum += v;
+            return "n=" + s.Count + " avg=" + (sum / s.Count).ToString("0.000") + " med=" + s[s.Count / 2].ToString("0.000")
+                 + " p90=" + s[(int)(s.Count * 0.9)].ToString("0.000") + " max=" + s[s.Count - 1].ToString("0.000");
+        }
+
         // Два снимка в один: портрет — рядом (слева a), ландшафт — друг под другом (сверху a); между ними светлая полоса.
         static void Combine(string a, string b, string outPath, bool sideBySide)
         {

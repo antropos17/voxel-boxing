@@ -101,6 +101,7 @@ unity close "$P"
 - `Setup Game Scene` — пересоздать сцену, добавить её первой в Build Settings, создать материалы `Resources/Shaders/*.mat` (держат шейдеры в сборке плеера; отдельно — `Ensure Shader Materials`);
 - `Game Walk W4` — сквозной проход без Play Mode: 36 шагов через `GameApp.Press` и синтетические удары, снимки всех экранов; итоговая строка `GAME_WALK ok …`;
 - `Fight Shots W1` — снимки боя и замер кадра удара (`GAME_HIT_FRAME_MS`, `GAME_HIT_BREAKDOWN`, `GAME_LAYER_PARTS`);
+- `Spring Shots` — пары снимков «без | с» пружинности и рук (`Shots/spring/`, `SPRING-PHYSICS.md`); замер кадра удара без/с — `ShotsTaker.SpringBench(40)` через `script eval`;
 - `Referee Shots W2`, `Roster Sheet W2`, `Roster Screen Shots W2`, `Fx Shots W3`, `Gloves Sheet W3`, `Portraits Sheet W5` — снимки по темам.
 
 Снимки — `Shots/game/` (портрет 540×1170 `-p`, ландшафт 1170×540 `-l`). Сохранение прохода и замеров — во временной папке, не в профиле игрока.
