@@ -44,6 +44,10 @@ Shader "VoxProbe/Anatomy"
             float4 _BodyDim;
             // волокна мышцы (номер − 32): xyz — направление в см тела (x зеркалится по стороне), w = 1 — круговые вокруг _AnatFibC[0] (глаз), 2 — вокруг _AnatFibC[1] (рот), 3 — веером к точке xyz (AnatPalette.Fib)
             float4 _AnatFib[32], _AnatFibC[2];
+            // часть 9: переломы §5 — вес отломков в 3D-текстурах тела (тексель = 2 ячейки, канал = отломок; A — 0–3, B — 4–7),
+            // смещение каждого отломка в ячейках тела (_FragD, w — время), _FragPar: x = 1 — есть отломки, y — число текстур; сдвиг тела целиком (глаз, зубы)
+            TEXTURE3D(_AnatFragA); SAMPLER(sampler_AnatFragA); TEXTURE3D(_AnatFragB); SAMPLER(sampler_AnatFragB);
+            float4 _FragPar, _FragDim, _FragD[8], _BodyShift;
             CBUFFER_START(UnityPerMaterial)
             float _Ambient;
             CBUFFER_END
@@ -60,6 +64,7 @@ Shader "VoxProbe/Anatomy"
                 float4 c : TEXCOORD5;
                 float4 t : TEXCOORD6;
                 float sw : TEXCOORD7;   // отёк в вершине, см (для рельефа и цвета)
+                float fw : TEXCOORD8;   // часть 9: вес отломка в вершине (трещина на кости по краю, синяк над отломком)
             };
 
             float3 Rod(float3 v, float3 k, float a) { float c = cos(a), s = sin(a); return v * c + cross(k, v) * s + k * dot(k, v) * (1.0 - c); }
@@ -99,9 +104,35 @@ Shader "VoxProbe/Anatomy"
                 // часть 8: на экране — с насыщением до 0,9 см (модельный отёк одного удара 0,5–1,5 мм давал на экране 1–3 мм и не читался
                 // с расстояния боя): лёгкий удар ≈ 5 мм, мощный ≈ 9 мм, повторные — до 14 мм (рельеф отёка виден только при сантиметре)
                 float swv = 1.4 * (1.0 - exp(-sw / 0.09)) * grow;
-                float3 p = i.p.xyz + normalize(i.n.xyz) * (swv / max(_BodyPar.x, 0.01));
+                float3 pn = normalize(i.n.xyz), fd = 0; float fwv = 0;
+                if (_FragPar.x > 0.5)
+                {
+                    // часть 9: отломок сдвигается вместе с мягкими тканями над ним; нормаль наклоняется по градиенту веса: n' = n − Σ ∇w_k (d_k·n)
+                    float3 du = 1.0 / _FragDim.xyz, uv = (i.p.xyz + _ChunkOrg.xyz) * 0.5 * du;
+                    float4 wa = SAMPLE_TEXTURE3D_LOD(_AnatFragA, sampler_AnatFragA, uv, 0), wb = 0;
+                    if (_FragPar.y > 1.5) wb = SAMPLE_TEXTURE3D_LOD(_AnatFragB, sampler_AnatFragB, uv, 0);
+                    fd = wa.x * _FragD[0].xyz + wa.y * _FragD[1].xyz + wa.z * _FragD[2].xyz + wa.w * _FragD[3].xyz
+                       + wb.x * _FragD[4].xyz + wb.y * _FragD[5].xyz + wb.z * _FragD[6].xyz + wb.w * _FragD[7].xyz;
+                    fwv = max(max(max(wa.x, wa.y), max(wa.z, wa.w)), max(max(wb.x, wb.y), max(wb.z, wb.w)));
+                    #ifndef ANAT_LITE
+                    float4 da = float4(dot(_FragD[0].xyz, pn), dot(_FragD[1].xyz, pn), dot(_FragD[2].xyz, pn), dot(_FragD[3].xyz, pn));
+                    float4 db = float4(dot(_FragD[4].xyz, pn), dot(_FragD[5].xyz, pn), dot(_FragD[6].xyz, pn), dot(_FragD[7].xyz, pn));
+                    float3 gr = 0;
+                    [unroll] for (int e = 0; e < 3; e++)
+                    {
+                        float3 o = 0; o[e] = du[e];
+                        float4 ea = SAMPLE_TEXTURE3D_LOD(_AnatFragA, sampler_AnatFragA, uv + o, 0), eb = 0;
+                        if (_FragPar.y > 1.5) eb = SAMPLE_TEXTURE3D_LOD(_AnatFragB, sampler_AnatFragB, uv + o, 0);
+                        gr[e] = (dot(ea - wa, da) + dot(eb - wb, db)) * 0.5;   // тексель = 2 ячейки
+                    }
+                    pn = normalize(pn - gr);
+                    #endif
+                    // отёк мягких тканей над отломком (на экране, как отёк части 8)
+                    swv += 0.3 * fwv * _AnatPar[(int)mat].y;
+                }
+                float3 p = i.p.xyz + normalize(i.n.xyz) * (swv / max(_BodyPar.x, 0.01)) + fd + _BodyShift.xyz;
                 float3 ws = TransformObjectToWorld(p);
-                float3 nw = TransformObjectToWorldNormal(normalize(i.n.xyz));
+                float3 nw = TransformObjectToWorldNormal(pn);
                 if (_SkinOn > 0.5 && _ChunkOrg.w < 99.5)   // оторванные куски (тело ≥ 100) лежат в мире сами по себе
                 {
                     float3 h = mul(_AnatW2H, float4(ws, 1)).xyz, hn = mul((float3x3)_AnatW2H, nw);
@@ -115,6 +146,7 @@ Shader "VoxProbe/Anatomy"
                 o.nw = nw;
                 o.md = float2(mat, dir);
                 o.sw = swv;
+                o.fw = fwv;
                 o.ao = saturate(i.n.w * 127.0 / 126.0);
                 return o;
             }
@@ -289,6 +321,16 @@ Shader "VoxProbe/Anatomy"
                         float per = 1.0 - smoothstep(0.02, 0.06, abs(fm - 0.5));
                         col = lerp(col, float3(0.62, 0.42, 0.36), per * 0.6 * (1.0 - bcov));
                     }
+                }
+                // часть 9: перелом §5 — тёмная линия по краю отломка на открытой кости, синяк на коже над отломком (и в ANAT_LITE)
+                if (i.fw > 0.01)
+                {
+                    if (mat == 12 || mat == 13 || mat == 14)
+                    {
+                        float fcr = 1.0 - smoothstep(0.1, 0.24, abs(i.fw - 0.5));
+                        col = lerp(col, float3(0.07, 0.015, 0.01), fcr * 0.92); wet = lerp(wet, 0.1, fcr);
+                    }
+                    col *= lerp(float3(1, 1, 1), _AnatDmg[2].rgb, saturate(i.fw) * 0.45 * skin);
                 }
                 // трещины на кости вокруг переломов головы: лучи от кольца и обрывки второго кольца
                 #ifndef ANAT_LITE

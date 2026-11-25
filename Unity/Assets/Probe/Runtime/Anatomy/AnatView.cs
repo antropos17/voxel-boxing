@@ -27,6 +27,7 @@ namespace VoxProbe
         public int lastRemoved;
         // этап B: повреждения мягких тканей и кровь на решётке головы (AnatDamage); капли в полёте
         public AnatDamage sim;
+        public AnatBones bones;             // часть 9: переломы костей по §5 (смещение отломков — в шейдере)
         AnatBloodFx drops;
         readonly AnatBody headBody; readonly int headK;
         readonly Material material;
@@ -88,6 +89,7 @@ namespace VoxProbe
             scanI = new NativeList<int>(16384, Allocator.Persistent); scanQ = new NativeList<float3>(16384, Allocator.Persistent);
             isl = new AnatIslands(a.head);
             pieces = new AnatPieces(root, material);
+            bones = new AnatBones(a);
             NewSim();
             var sw = System.Diagnostics.Stopwatch.StartNew();
             foreach (var b in bodies) b.BuildAll(layout);
@@ -113,6 +115,48 @@ namespace VoxProbe
             fracSent = n;
         }
 
+        // часть 9: отломки §5 в шейдер — текстуры веса (голова: 2, челюсть: 1), смещения в ячейках тела; сдвиг глаза и зубов целиком
+        static MaterialPropertyBlock fmpb;
+        static readonly int FragAId = Shader.PropertyToID("_AnatFragA"), FragBId = Shader.PropertyToID("_AnatFragB"), FragParId = Shader.PropertyToID("_FragPar"),
+            FragDimId = Shader.PropertyToID("_FragDim"), FragDId = Shader.PropertyToID("_FragD"), ShiftId = Shader.PropertyToID("_BodyShift");
+        readonly Vector4[] fragD = new Vector4[8];
+        void SendBones()
+        {
+            bones.dirty = false; fmpb ??= new MaterialPropertyBlock();
+            for (int body = 0; body < 2; body++)
+            {
+                var g = body == 0 ? a.head : a.mand; var B = bodies[System.Array.IndexOf(grids, g)];
+                int k0 = body == 0 ? 0 : 2, nt = body == 0 ? 2 : 1; bool any = false;
+                System.Array.Clear(fragD, 0, fragD.Length);
+                foreach (var r in bones.list)
+                {
+                    if (r.body != body || r.slot < 0) continue; any = true;
+                    float3 d = math.mul(math.transpose(g.rot), r.d) / g.step; fragD[r.slot] = new Vector4(d.x, d.y, d.z, r.t);
+                }
+                int3 td = bones.tdims[body];
+                if (any)
+                    for (int k = k0; k < k0 + nt; k++)
+                    {
+                        if (bones.tex[k] == null) bones.tex[k] = new Texture3D(td.x, td.y, td.z, TextureFormat.RGBA32, false) { name = g.name + "-frag" + k, filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
+                        bones.tex[k].SetPixelData(bones.data[k], 0); bones.tex[k].Apply(false, false);
+                    }
+                foreach (var rr in B.rs)
+                {
+                    rr.GetPropertyBlock(fmpb);
+                    fmpb.SetVector(FragParId, new Vector4(any ? 1 : 0, nt, 0, 0));
+                    if (any) { fmpb.SetTexture(FragAId, bones.tex[k0]); fmpb.SetTexture(FragBId, bones.tex[body == 0 ? 1 : 2]); fmpb.SetVector(FragDimId, new Vector4(td.x, td.y, td.z, 0)); fmpb.SetVectorArray(FragDId, fragD); }
+                    rr.SetPropertyBlock(fmpb);
+                }
+            }
+            Shift(a.eyeL, bones.eyeShift[0]); Shift(a.eyeR, bones.eyeShift[1]);
+            for (int t = 0; t < a.teeth.Length; t++) Shift(a.teeth[t], a.toothDefs[t].upper == 1 ? bones.upperShift : bones.lowerShift[t]);
+        }
+        void Shift(AnatGrid g, float3 dcm)
+        {
+            var B = bodies[System.Array.IndexOf(grids, g)]; float3 d = math.mul(math.transpose(g.rot), dcm) / g.step;
+            foreach (var rr in B.rs) { rr.GetPropertyBlock(fmpb); fmpb.SetVector(ShiftId, new Vector4(d.x, d.y, d.z, 0)); rr.SetPropertyBlock(fmpb); }
+        }
+
         void NewSim()
         {
             MeshDone();
@@ -123,6 +167,7 @@ namespace VoxProbe
             headBody.st = sim.st;
             drops?.Destroy(); drops = new AnatBloodFx(root, material, layout);
             Shader.SetGlobalFloat("_AnatTime", 0); fracSent = -1; SendFractures();
+            bones.Reset(); SendBones();
             if (wp != null) { pieces.Drop(wp); wp = null; }
             wk = -1; if (want != null) System.Array.Clear(want, 0, want.Length);
             isl?.Reset(); pieces?.Clear(); crumbs = 0; detachedBodies = 0;
@@ -140,6 +185,7 @@ namespace VoxProbe
             AnatProf.TLap(AnatProf.TStep);
             Shader.SetGlobalFloat("_AnatTime", sim.time);
             if (sim.fractures.Count != fracSent) SendFractures();
+            bones.Due(frame); if (bones.dirty && !bones.Pending) SendBones();
             drops.Update(sim.drops, sim.time);
             AnatProf.TLap(AnatProf.TDrops);
             // отдельные тела, сорванные ударом прошлого кадра; куски: результат поиска в назначенном кадре, разбор по бюджету,
@@ -179,6 +225,7 @@ namespace VoxProbe
         public void Settle(bool full = false)
         {
             MeshDone();
+            bones.Complete(); if (bones.dirty) SendBones();
             DetachWanted();
             if (full) { IslandsDue(true); IslandStep(int.MaxValue); Request(true); }
             for (int k = 0; k < 8 && (isl.busy || isl.HasWork || sim.cutLog.Length > 0); k++) { Request(false); IslandsDue(true); IslandStep(int.MaxValue); }
@@ -456,7 +503,8 @@ namespace VoxProbe
             MeshDone();
             var sw = clock; sw.Restart();
             int before = sim.removed;
-            sim.Hit(hit, dir, s.E, s.power);
+            var hi = sim.Hit(hit, dir, s.E, s.power);
+            bones.Hit(hi.zone, sim.lastP, sim.lastN, dir, s.E, s.power, sim.time, frame);
             tSim = sw.Elapsed.TotalMilliseconds;
             int removed = 0;
             if (s.bore)
@@ -633,7 +681,7 @@ namespace VoxProbe
             MeshDone();
             if (wp != null) { pieces.Drop(wp); wp = null; }
             pieces?.Clear(); isl?.Dispose(); if (wtmp.IsCreated) wtmp.Dispose(); if (scanI.IsCreated) scanI.Dispose(); if (scanQ.IsCreated) scanQ.Dispose();
-            sim?.Dispose(); sim = null; drops?.Destroy();
+            sim?.Dispose(); sim = null; drops?.Destroy(); bones?.Dispose();
             foreach (var b in bodies) b.Destroy();
             bodies.Clear();
             if (root != null) Object.DestroyImmediate(root.gameObject);
