@@ -86,6 +86,24 @@ namespace VoxGame
         // а не плечо жердью от нижнего угла через весь кадр (сустав условный, его не видно).
         static readonly Vector3 VictoryShoulder = new Vector3(0.30f, -0.30f, 0.15f);
         const float VictoryElbowDeg = 150f;
+        // ---- Пружинность и вытянутая рука по образцу веб-версии (FoeSpring.Enabled) ----------------------------------------
+        // В ударе и в победе плечо — настоящее: ниже и сбоку от глаза (оси камеры, x — наружу), с ударом уходит вперёд и внутрь
+        // (веб: ±0,2 / −0,3, вперёд на 0,22). В портрете плечи уже: рука входит снизу, а не с бокового края.
+        // Звенья не тянутся, запястье не дальше ReachK длины руки — локоть всегда заметно согнут.
+        public static Vector3 ShoulderP = new Vector3(0.10f, -0.40f, -0.02f), ShoulderL = new Vector3(0.13f, -0.40f, -0.02f);
+        public static Vector3 ShoulderPunch = new Vector3(-0.03f, 0.02f, 0.20f), ShoulderVictory = new Vector3(-0.02f, 0.10f, 0.12f);
+        public static float ReachK = 0.9f;
+        // Полюс локтя по виду удара (веб POLE): прямой — вниз и наружу за кулаком, хук — вверх и наружу, апперкот — вниз
+        public static Vector3 PoleJab = new Vector3(0.6f, -0.9f, 0f), PoleHook = new Vector3(1f, 0.6f, -0.1f),
+                                PoleUpper = new Vector3(0.3f, -1f, -0.4f), PoleVictory = new Vector3(0.7f, -1f, -0.3f);
+        // Перчатка при попадании сплющивается и качается (веб: k 620, c 24), шаг фиксированный
+        const float SqK = 620f, SqC = 24f, SqMin = -0.18f, SqMax = 0.34f, SqH = 1f / 240f;
+        static readonly float[] SqKick = { 5.5f, 9f, 13f };   // джеб, силовой, мега
+        readonly float[] _sq = new float[2], _sqv = new float[2];
+        readonly bool[] _landed = new bool[2];
+        float _sqAcc;
+        Vector3 _shP = ShoulderP;
+
         int     _vicSide = -1;
         bool    _vicOn;
         float   _vicW;
@@ -157,6 +175,7 @@ namespace VoxGame
             _reachPole = port ? ReachPoleP : ReachPoleL;
             _sideLowNY = port ? SideLowNYP : SideLowNY;
             _punchMaxZ = port ? PunchMaxZP : PunchMaxZL;
+            _shP = port ? ShoulderP : ShoulderL;
             float rz = port ? RestZP : RestZL, rnx = port ? RestNXP : RestNXL, rny = port ? RestNYP : RestNYL;
             float bnx = port ? BlockNXP : BlockNXL;
             for (int s = 0; s < 2; s++)
@@ -176,7 +195,7 @@ namespace VoxGame
 
         // Удар. side: −1 — левая, +1 — правая; duration — время до начала возврата, с;
         // worldTarget — точка на голове соперника, куда приходят костяшки.
-        public void Punch(int side, PunchType kind, float duration, Vector3 worldTarget)
+        public void Punch(int side, PunchType kind, float duration, Vector3 worldTarget, bool landed = true)
         {
             int s = side < 0 ? 0 : 1;
             float sg = Sign(s);
@@ -187,7 +206,9 @@ namespace VoxGame
                 case PunchType.Upper: t += new Vector3(0f, -0.075f, -0.04f); break;            // под подбородком
                 default:              t += new Vector3(0f, 0f, -0.08f); break;                 // перед лицом
             }
-            _goal[s]  = Reach(t, _punchMaxZ);
+            _goal[s]  = FoeSpring.Enabled ? ReachSphere(t, RealShoulder(s, 1f), ArmReach() + BoxerParts.GloveOff * Scale * 0.7f)
+                                          : Reach(t, _punchMaxZ);
+            _landed[s] = landed;
             _kind[s]  = kind;
             _timer[s] = Mathf.Max(duration, 0.08f);
             _outT[s]  = Mathf.Max(_timer[s] * 0.5f, 0.045f);
@@ -200,8 +221,31 @@ namespace VoxGame
         public void RaiseVictory(int side, Vector3 worldWrist)
         {
             _vicSide  = side < 0 ? 0 : 1;
-            _vicWrist = Reach(_cam.InverseTransformPoint(worldWrist), VictoryMaxZ);
+            _vicWrist = FoeSpring.Enabled ? ReachSphere(_cam.InverseTransformPoint(worldWrist), VicRealShoulder(_vicSide), ArmReach())
+                                          : Reach(_cam.InverseTransformPoint(worldWrist), VictoryMaxZ);
             _vicOn    = true;
+        }
+
+        float ArmReach() => (GloveLooks.UpperLenCm + GloveLooks.ForeLenCm) * 0.01f * Scale * ReachK;
+
+        // Настоящее плечо (оси камеры) при вылете e (0 — стойка, 1 — удар)
+        Vector3 RealShoulder(int s, float e) =>
+            new Vector3(Sign(s) * (_shP.x + ShoulderPunch.x * e), _shP.y + ShoulderPunch.y * e, _shP.z + ShoulderPunch.z * e);
+
+        Vector3 VicRealShoulder(int s) =>
+            new Vector3(Sign(s) * (_shP.x + ShoulderVictory.x), _shP.y + ShoulderVictory.y, _shP.z + ShoulderVictory.z);
+
+        // Точка на луче из камеры через t (на экране то же место), не дальше r от плеча sh: самая дальняя такая точка луча.
+        // Луч мимо сферы — ближайшая к плечу точка луча, подтянутая к плечу.
+        static Vector3 ReachSphere(Vector3 t, Vector3 sh, float r)
+        {
+            float tl = t.magnitude;
+            if (tl < 1e-5f) return t;
+            Vector3 u = t / tl;
+            float b = Vector3.Dot(u, sh), disc = b * b - sh.sqrMagnitude + r * r;
+            if (disc < 0f) { Vector3 c = u * Mathf.Max(0f, b); return sh + (c - sh).normalized * r; }
+            float far = b + Mathf.Sqrt(disc);
+            return tl <= far ? t : u * far;
         }
 
         // Точка (оси камеры) по лучу из камеры не дальше maxZ: на экране то же место, рука до неё достаёт.
@@ -241,6 +285,7 @@ namespace VoxGame
             float kb = 1f - Mathf.Exp(-14f * dt);
             _blockW = Mathf.Lerp(_blockW, _blocking ? 1f : 0f, kb);
 
+            if (FoeSpring.Enabled) SquashStep(dt);
             for (int s = 0; s < 2; s++)
             {
                 float sg = Sign(s);
@@ -249,7 +294,11 @@ namespace VoxGame
                 if (_timer[s] > 0f)
                 {
                     _timer[s] -= dt;
+                    float e0 = _ext[s];
                     _ext[s] = Mathf.Min(1f, _ext[s] + dt / _outT[s]);
+                    // касание: перчатка сплющивается и пружинит
+                    if (FoeSpring.Enabled && _landed[s] && e0 < 1f && _ext[s] >= 1f)
+                        _sqv[s] += SqKick[_kind[s] == PunchType.Mega ? 2 : _kind[s] == PunchType.Jab ? 0 : 1];
                 }
                 else if (_ext[s] > 0f) _ext[s] = Mathf.Max(0f, _ext[s] - dt / ReturnT);
 
@@ -285,6 +334,7 @@ namespace VoxGame
                             pk = new Vector3(0f, 0.05f, 1f); pb = new Vector3(sg * 0.3f, 1f, 0f);
                             bow = Vector3.zero; pu = JabAU; break;
                     }
+                    if (FoeSpring.Enabled) bow *= 0.5f;   // плечо уже ведёт дугу: прибавка по дуге меньше
                     pos  = Vector3.Lerp(pos, _goal[s], e) + bow * arc;
                     kn   = Vector3.Lerp(kn, pk, e);
                     back = Vector3.Lerp(back, pb, e);
@@ -310,7 +360,9 @@ namespace VoxGame
                     pos.y = Mathf.Lerp(pos.y, VictoryDropNY * pos.z * _tanV, _vicW);
 
                 float reachW = Mathf.Max(e, lockW);
-                Place(s, pos, kn, back, au, az, lockW, Mathf.Lerp(RestFollow, ForeFollow, reachW), reachW);
+                Vector3 kp = _kind[s] == PunchType.Hook ? PoleHook : _kind[s] == PunchType.Upper ? PoleUpper : PoleJab;
+                Place(s, pos, kn, back, au, az, lockW, Mathf.Lerp(RestFollow, ForeFollow, reachW), reachW, e, kp);
+                if (FoeSpring.Enabled) SquashApply(s);
             }
         }
 
@@ -332,27 +384,33 @@ namespace VoxGame
         // au/az — плечевой сустав под кадром, lockW — насколько запястье прижато к точке хвата рефери,
         // follow — насколько ось перчатки следует за предплечьем; reachW — вес вытянутой руки (удар, поднятая рука):
         // сустав уезжает вглубь по нижнему краю кадра к ближайшей к запястью точке, чтобы плечо не тянулось жердью.
-        void Place(int s, Vector3 pos, Vector3 kn, Vector3 back, float au, float az, float lockW, float follow, float reachW)
+        void Place(int s, Vector3 pos, Vector3 kn, Vector3 back, float au, float az, float lockW, float follow, float reachW,
+                   float ext = 0f, Vector3 kindPole = default)
         {
             float go = BoxerParts.GloveOff * Scale;
             Vector3 k = kn.sqrMagnitude > 1e-8f ? kn.normalized : Vector3.forward;
             Vector3 pole = new Vector3(Sign(s) * PoleOut, -1f, 0f);
+            bool sp = FoeSpring.Enabled;
             // первый проход: локоть для запястья по костяшкам, от него ось перчатки; второй — по настоящему запястью
             Vector3 w = pos - k * go;
-            if (reachW > 0f) pole = Vector3.Lerp(pole, new Vector3(Sign(s) * _reachPole.x, _reachPole.y, _reachPole.z), reachW);
-            float maxDeg = Mathf.Lerp(ElbowMinDeg, ReachElbowDeg, reachW);
+            Vector3 rp = sp ? kindPole : _reachPole;
+            if (reachW > 0f) pole = Vector3.Lerp(pole, new Vector3(Sign(s) * rp.x, rp.y, rp.z), reachW);
+            // с пружинностью звенья вытянутой руки не тянутся (179° — предел только для вырожденного треугольника)
+            float maxDeg = Mathf.Lerp(ElbowMinDeg, sp ? 179f : ReachElbowDeg, reachW);
             if (lockW > 0f)
             {
-                maxDeg = Mathf.Lerp(maxDeg, VictoryElbowDeg, lockW);
-                pole = Vector3.Lerp(pole, new Vector3(Sign(s), -0.9f, -0.2f), lockW);   // локоть вниз-наружу, к углу кадра
+                maxDeg = Mathf.Lerp(maxDeg, sp ? 179f : VictoryElbowDeg, lockW);
+                Vector3 vp = sp ? new Vector3(Sign(s) * PoleVictory.x, PoleVictory.y, PoleVictory.z) : new Vector3(Sign(s), -0.9f, -0.2f);
+                pole = Vector3.Lerp(pole, vp, lockW);   // локоть вниз-наружу, к углу кадра
             }
-            Vector3 el = Elbow(w, VicShoulder(s, Shoulder(s, au, az, w, reachW), lockW), pole, maxDeg);
+            Vector3 el = Elbow(w, ArmShoulder(s, au, az, w, reachW, lockW, ext), pole, maxDeg);
             Vector3 ga = Dir(Dir(w - el, k) * follow + k * (1f - follow), k);
             w = pos - ga * go;
             if (lockW > 0f) { w = Vector3.Lerp(w, _vicWrist, lockW); pos = w + ga * go; }
-            Vector3 sh = VicShoulder(s, Shoulder(s, au, az, w, reachW), lockW);
+            Vector3 sh = ArmShoulder(s, au, az, w, reachW, lockW, ext);
             // сустав дальше, чем достаёт рука с предельно вытянутым плечом, — подтянуть его к запястью
             float reach = GloveLooks.UpperLenCm * 0.01f * Scale * UpperMaxStretch + GloveLooks.ForeLenCm * 0.01f * Scale - 0.01f;
+            if (sp) reach = Mathf.Lerp(reach, (GloveLooks.UpperLenCm + GloveLooks.ForeLenCm) * 0.01f * Scale * 0.985f, Mathf.Max(reachW, lockW));
             Vector3 ws = sh - w;
             if (ws.sqrMagnitude > reach * reach) sh = w + ws.normalized * reach;
             el = Elbow(w, sh, pole, maxDeg);
@@ -415,6 +473,41 @@ namespace VoxGame
             float d = Mathf.Min(-AnchorGap, wIn - AnchorGap);
             return new Vector3(au * az * _tanH, d * _nLen - az * _tanV, az);
         }
+
+        // Плечевой сустав руки: без пружинности — как раньше; с ней вытянутая и поднятая рука идут от настоящего плеча.
+        Vector3 ArmShoulder(int s, float au, float az, Vector3 w, float reachW, float lockW, float ext)
+        {
+            if (!FoeSpring.Enabled) return VicShoulder(s, Shoulder(s, au, az, w, reachW), lockW);
+            Vector3 sh = Anchor(au, az, w);
+            if (reachW > 0f) sh = Vector3.Lerp(sh, RealShoulder(s, ext), reachW);
+            return lockW > 0f ? Vector3.Lerp(sh, VicRealShoulder(s), lockW) : sh;
+        }
+
+        // Сплющивание перчаток: пружина с фиксированным шагом SqH (реальное время, как вся рука игрока)
+        void SquashStep(float dt)
+        {
+            if (!(dt > 0f)) return;
+            _sqAcc = Mathf.Min(_sqAcc + dt, 0.1f);
+            while (_sqAcc >= SqH)
+            {
+                _sqAcc -= SqH;
+                for (int s = 0; s < 2; s++)
+                {
+                    _sqv[s] += (-SqK * _sq[s] - SqC * _sqv[s]) * SqH;
+                    _sq[s] = Mathf.Clamp(_sq[s] + _sqv[s] * SqH, SqMin, SqMax);
+                }
+            }
+        }
+
+        // Масштаб перчатки: вдоль оси (z) сжата, поперёк раздута; в покое — ровно Scale
+        void SquashApply(int s)
+        {
+            float q = Mathf.Abs(_sq[s]) > 0.002f ? _sq[s] : 0f;
+            var sc = new Vector3(Scale * (1f + q * 0.45f), Scale * (1f + q * 0.45f), Scale * (1f - q));
+            if ((_glove[s].localScale - sc).sqrMagnitude > 1e-10f) _glove[s].localScale = sc;
+        }
+
+        public float Squash(int s) => _sq[s];
 
         static Vector3 VicShoulder(int s, Vector3 sh, float lockW) =>
             lockW > 0f ? Vector3.Lerp(sh, new Vector3(Sign(s) * VictoryShoulder.x, VictoryShoulder.y, VictoryShoulder.z), lockW) : sh;

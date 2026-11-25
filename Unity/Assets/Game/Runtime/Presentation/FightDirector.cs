@@ -28,6 +28,7 @@ namespace VoxGame
         public BeltView    Belt       => _belt;
         public VictoryScene Victory   => _victory;
         public PlayerGloves Gloves    => _playerGloves;
+        public FoeBody     FoeFigure => _foeBody;
         public bool        TitleFight => _titleFight;
         public int         HitsThrown => _hitsTotal;    // ударов игрока
         public int         HitsLanded => _hitsLanded;   // из них попало (по логике боя)
@@ -515,7 +516,7 @@ namespace VoxGame
                     lastHitPoint = hitPt; lastHitDir = _v.pickDir; lastHitStrength = strength;
                     HeadHits++;
                     contact = hp + hr * ((Vector3)hitPt * 0.01f);
-                    _foeBody.AddImpulse(hr * (Vector3)_v.pickDir * (strength == 0 ? 0.25f : strength == 1 ? 0.6f : 1f));
+                    _foeBody.AddHit(contact, hitDirW, strength, p.pw);   // без пружинности — прежний AddImpulse
                 }
 
                 bool counter = st.phase == FightPhase.Windup;
@@ -603,7 +604,7 @@ namespace VoxGame
 
                 float speed = Mathf.Max(0.5f, st.fightParams.speedMult);
                 float gloveDur = (p.type == PunchType.Jab ? 0.085f : (p.isMega ? 0.4f : 0.2f)) / speed;
-                _playerGloves.Punch(p.side, p.isMega ? PunchType.Mega : p.type, gloveDur, contact);
+                _playerGloves.Punch(p.side, p.isMega ? PunchType.Mega : p.type, gloveDur, contact, hitPick);
                 _punchCd = FightState.PunchCooldown(p.type, p.isMega, speed);
 
                 // Один удар за тик
@@ -944,6 +945,7 @@ namespace VoxGame
             _v.Restore();
             AnatSkin.Reset();
             _foeBody.ResetGear();
+            _foeBody.spring.Reset();
             // «Заново» — тот же бой с нуля: мега-шкала не переносится
             var prms = _sim.State.fightParams;
             _sim = new FightSim(_foeDef.level, _foeDef.seed + (uint)(_restartCount + 1), prms);
