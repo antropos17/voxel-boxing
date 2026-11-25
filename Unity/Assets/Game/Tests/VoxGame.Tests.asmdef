@@ -1,0 +1,10 @@
+{
+  "name": "VoxGame.Tests",
+  "rootNamespace": "VoxGame.Tests",
+  "references": ["VoxGame", "VoxGame.Editor", "VoxProbe", "Unity.Mathematics", "Unity.Collections", "Unity.Burst", "UnityEngine.UI", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+  "includePlatforms": ["Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll"],
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "autoReferenced": false
+}

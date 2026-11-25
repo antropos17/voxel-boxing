@@ -17,3 +17,4 @@ earshot обучен на записях в общественном досто�
 
 - [three.js](https://threejs.org) r128 (MIT), загружается с cdnjs.
 - Шрифты Golos Text и Pixelify Sans (SIL OFL 1.1), загружаются с Google Fonts.
+- Unity: шрифт Inter (SIL OFL 1.1, © The Inter Project Authors), файлы и лицензия — `Unity/Assets/Game/Resources/Fonts/`.

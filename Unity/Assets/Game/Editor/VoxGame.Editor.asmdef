@@ -1,0 +1,6 @@
+{
+  "name": "VoxGame.Editor",
+  "rootNamespace": "VoxGame.Editor",
+  "references": ["VoxGame", "VoxProbe", "VoxProbe.Editor", "Unity.InputSystem", "Unity.Mathematics", "Unity.Collections", "Unity.Burst", "UnityEngine.UI", "Unity.RenderPipelines.Universal.Runtime", "Unity.RenderPipelines.Core.Runtime"],
+  "includePlatforms": ["Editor"]
+}
