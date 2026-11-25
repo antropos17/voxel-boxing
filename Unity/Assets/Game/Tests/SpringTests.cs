@@ -179,8 +179,10 @@ namespace VoxGame.Tests
                     g.Punch(side, kind, 0.2f, new Vector3(side * 0.05f, -0.02f, 1.25f));
                     for (int i = 0; i < 6; i++) g.Tick(1f / 60f);
                     int s = side < 0 ? 0 : 1;
-                    var up = Child(_root.transform, "playerUpperArm" + s);
-                    var fo = Child(_root.transform, "playerForeArm" + s);
+                    // руки под родителем playerArms (поле зрения рук, масштаб k, k, 1): длины и углы — в нём, кадр — в осях камеры
+                    var rig = Child(_root.transform, "playerArms");
+                    var up = Child(rig, "playerUpperArm" + s);
+                    var fo = Child(rig, "playerForeArm" + s);
                     string tag = kind + " " + side + (portrait ? " портрет" : " ландшафт");
                     // сетка плеча: локоть в начале, длина по Y = (локоть→сустав + запас 4 см) / UpperLen
                     float ul = GloveLooks.UpperLenCm * 0.01f;
@@ -192,7 +194,7 @@ namespace VoxGame.Tests
                     string exit = "в кадре";
                     for (int k = 0; k <= 50; k++)
                     {
-                        Vector3 p = Vector3.Lerp(el, sh, k / 50f);
+                        Vector3 p = rig.TransformPoint(Vector3.Lerp(el, sh, k / 50f));
                         if (p.z <= 0.02f) { exit = "низ"; break; }
                         if (p.y < -p.z * tanV) { exit = "низ"; break; }
                         if (Mathf.Abs(p.x) > p.z * tanH) { exit = "бок y=" + (p.y / (p.z * tanV)).ToString("0.00"); break; }
