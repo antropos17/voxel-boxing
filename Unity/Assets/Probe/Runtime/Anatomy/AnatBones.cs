@@ -59,6 +59,14 @@ namespace VoxProbe
             for (int k = 0; k < 3; k++) { int3 td = tdims[k < 2 ? 0 : 1]; data[k] = new NativeArray<byte>(td.x * td.y * td.z * 4, Allocator.Persistent); }
             lowerShift = new float3[a.teeth.Length];
             for (int b = 0; b < 2; b++) { var g = b == 0 ? a.head : a.mand; code[b] = new NativeArray<byte>(g.Count, Allocator.Persistent); new CodeJob { mat = g.mat, part = g.part, zone = g.zone, code = code[b] }.Run(g.Count); }
+            // в решётке головы место нижней челюсти занято (Covered): для масок головы это чужая кость — щека над челюстью не идёт с Ле Фором
+            var h = a.head; var m = a.mand; int3 off = AnatomyBuilder.MandOff; var hc = code[0];
+            for (int z = 0; z < m.dims.z; z++) for (int y = 0; y < m.dims.y; y++) for (int x = 0; x < m.dims.x; x++)
+            {
+                int i = m.Index(x, y, z); if (!Hard(m.mat[i])) continue;
+                int3 q = new int3(x, y, z) + off; if (math.any(q < 0) || math.any(q >= h.dims)) continue;
+                int j = h.Index(q.x, q.y, q.z); if (h.mat[j] == AnatMat.Covered) hc[j] = (byte)(128 | 32 | AnatPart.Mandible);
+            }
         }
 
         [BurstCompile(CompileSynchronously = true)]
@@ -95,11 +103,13 @@ namespace VoxProbe
                 case AnatZone.Eye: L.Add((orb, 0.8f)); L.Add((zyg, 0.3f)); L.Add((Nose, 0.2f)); break;
                 case AnatZone.Brow: L.Add((Frontal, 0.6f)); L.Add((orb, 0.5f)); L.Add((zyg, 0.3f)); break;
                 case AnatZone.CheekBone: L.Add((zyg, 0.85f)); L.Add((orb, 0.5f)); L.Add((Maxilla, 0.3f)); break;
-                case AnatZone.Cheek: L.Add((Maxilla, 0.6f)); L.Add((zyg, 0.4f)); L.Add((side ? JawAngle : JawBody, 0.3f)); break;
+                case AnatZone.Cheek:
+                    if (math.abs(p.x) > 2.6f && p.y > -1.6f) { L.Add((zyg, 0.85f)); L.Add((orb, 0.4f)); L.Add((Maxilla, 0.4f)); break; }   // щека над скуловой костью — как скула
+                    L.Add((Maxilla, 0.6f)); L.Add((zyg, 0.4f)); L.Add((side ? JawAngle : JawBody, 0.3f)); break;
                 case AnatZone.Mouth: L.Add((Maxilla, 0.5f)); L.Add((JawBody, 0.55f)); break;
                 case AnatZone.Jaw: if (side) { L.Add((JawAngle, 1f)); L.Add((JawBody, 0.4f)); } else { L.Add((JawBody, 1f)); L.Add((JawAngle, 0.3f)); } break;
                 case AnatZone.Temple: L.Add((tmp, 1f)); L.Add((zyg, 0.3f)); L.Add((par, 0.3f)); break;
-                case AnatZone.Fore: L.Add((Frontal, 1f)); L.Add((Nose, 0.15f)); break;
+                case AnatZone.Fore: L.Add((Frontal, 1f)); L.Add((Nose, 0.1f)); break;
                 case AnatZone.Scalp:
                     if (p.z > 3f) { L.Add((Frontal, 1f)); L.Add((par, 0.3f)); }
                     else if (p.z < -5f) { L.Add((Occipital, 1f)); L.Add((par, 0.3f)); }
@@ -173,8 +183,8 @@ namespace VoxProbe
                 case Maxilla: return r.level == 1 ? new float3(0, -0.15f, -0.3f) : r.level == 2 ? new float3(0, -0.2f, -0.45f) : new float3(0, -0.25f, -0.6f);
                 case JawAngle: return new float3((dir.x >= 0 ? 1 : -1) * 0.35f, -0.25f, -0.05f) * m;
                 case JawBody: return new float3(sx * 0.15f, -0.2f, -0.15f) * m;
-                case Frontal: return -r.n * 0.45f * m;
-                default: return -r.n * (r.bone == Occipital ? 0.3f : 0.35f) * m;   // чешуя височной, теменная
+                case Frontal: return -r.n * 0.8f * m;   // вдавление на толщину кости (7–10 мм)
+                default: return -r.n * (r.bone == Occipital ? 0.5f : r.bone == ParL || r.bone == ParR ? 0.6f : 0.5f) * m;   // чешуя височной, теменная
             }
         }
 
@@ -202,7 +212,7 @@ namespace VoxProbe
                     return (hard && (mx || nasal || pt == AnatPart.ZygomaticL || pt == AnatPart.ZygomaticR || pt == AnatPart.Ethmoid)) || cart;
                 }
                 case ParL: case ParR: return hard && pt == (L ? AnatPart.ParietalL : AnatPart.ParietalR) && math.distance(p, c) < 3.0f;
-                case Frontal: return hard && pt == AnatPart.Frontal && math.distance(p, c) < 2.4f;
+                case Frontal: return hard && pt == AnatPart.Frontal && math.distance(p, c) < 2.2f;
                 case Occipital: return hard && pt == AnatPart.Occipital && math.distance(p, c) < 3.0f;
                 case JawAngle:
                 {
@@ -228,7 +238,7 @@ namespace VoxProbe
                 case ZygL: case ZygR: lo = new float3(sx > 0 ? 1.5f : -9.5f, -4f, -1f); hi = new float3(sx > 0 ? 9.5f : -1.5f, 5f, 11f); return;
                 case Maxilla: lo = new float3(-6.5f, -7f, -1f); hi = new float3(6.5f, r.level >= 3 ? 5.5f : 4f, 13f); return;
                 case JawAngle: case JawBody: lo = -100; hi = 100; return;
-                default: float R = r.bone == Frontal ? 2.4f : r.bone == TempL || r.bone == TempR ? 2.6f : 3.0f; lo = r.c - (R + 2.5f); hi = r.c + (R + 2.5f); return;
+                default: float R = r.bone == Frontal ? 2.2f : r.bone == TempL || r.bone == TempR ? 2.6f : 3.0f; lo = r.c - (R + 2.5f); hi = r.c + (R + 2.5f); return;
             }
         }
 
@@ -241,11 +251,11 @@ namespace VoxProbe
                 Box(r, out float3 lo, out float3 hi);
                 int3 clo = math.max((int3)math.floor((lo - g.org) / g.step), 0), chi = math.min((int3)math.floor((hi - g.org) / g.step), g.dims - 1);
                 int3 tlo = clo / 2, thi = chi / 2, bn = thi - tlo + 1; int nb = bn.x * bn.y * bn.z;
-                var val = new NativeArray<byte>(nb, Allocator.TempJob); var cls = new NativeArray<byte>(nb, Allocator.TempJob); var q = new NativeArray<int>(nb, Allocator.TempJob);
-                temps.Add(val); temps.Add(cls); tempsI.Add(q);
+                var val = new NativeArray<byte>(nb, Allocator.TempJob); var tmp = new NativeArray<byte>(nb, Allocator.TempJob); var cls = new NativeArray<byte>(nb, Allocator.TempJob); var q = new NativeArray<int>(nb, Allocator.TempJob);
+                temps.Add(val); temps.Add(tmp); temps.Add(cls); tempsI.Add(q);
                 job = new FragJob { code = code[r.body], dims = g.dims, org = g.org, step = g.step, pos = g.pos, rot = g.rot,
                     tlo = tlo, thi = thi, td = tdims[r.body == 0 ? 0 : 1], bone = r.bone, side = r.side, level = r.level, c = r.c, ch = ch,
-                    tex = data[k], val = val, cls = cls, q = q }.Schedule(job);
+                    tex = data[k], val = val, tmp = tmp, cls = cls, q = q }.Schedule(job);
                 sent[r.bone] = r.level;
             }
             pending = true; dueFrame = frame + 1;
@@ -305,7 +315,7 @@ namespace VoxProbe
             [ReadOnly] public NativeArray<byte> code;
             public int3 dims, tlo, thi, td; public float3 org, pos, c; public float3x3 rot; public float step;
             public byte bone; public int side, level, ch;
-            public NativeArray<byte> tex, val, cls; public NativeArray<int> q;
+            public NativeArray<byte> tex, val, tmp, cls; public NativeArray<int> q;
             public void Execute()
             {
                 for (int i = 0; i < tex.Length; i += 4) tex[i + ch] = 0;
@@ -339,6 +349,23 @@ namespace VoxProbe
                         int j = nx + bn.x * (ny + bn.y * nz); if (cls[j] != 2) continue;
                         cls[j] = (byte)(10 + dist + 1); val[j] = val[b]; q[qt++] = j;
                     }
+                }
+                // мягкие ткани сглаживаются (3 прохода по соседям): кожа над краем отломка — склон, а не ступенька; кость остаётся резкой
+                for (int pass = 0; pass < 3; pass++)
+                {
+                    for (int b = 0; b < val.Length; b++)
+                    {
+                        tmp[b] = val[b]; if (cls[b] < 10 && cls[b] != 2) continue;
+                        int bx = b % bn.x, by = (b / bn.x) % bn.y, bz = b / (bn.x * bn.y), sum = val[b], cnt = 1;
+                        for (int d = 0; d < 6; d++)
+                        {
+                            int nx = bx + (d == 0 ? 1 : d == 1 ? -1 : 0), ny = by + (d == 2 ? 1 : d == 3 ? -1 : 0), nz = bz + (d == 4 ? 1 : d == 5 ? -1 : 0);
+                            if (nx < 0 || ny < 0 || nz < 0 || nx >= bn.x || ny >= bn.y || nz >= bn.z) continue;
+                            int j = nx + bn.x * (ny + bn.y * nz); if (cls[j] >= 10 || cls[j] == 2) { sum += val[j]; cnt++; }
+                        }
+                        tmp[b] = (byte)((sum + cnt / 2) / cnt);
+                    }
+                    for (int b = 0; b < val.Length; b++) val[b] = tmp[b];
                 }
                 // запись в канал; пустые тексели у поверхности — максимум заданных соседей (иначе выборка у кожи тянет вес к нулю)
                 for (int tz = 0; tz < bn.z; tz++) for (int ty = 0; ty < bn.y; ty++) for (int tx = 0; tx < bn.x; tx++)

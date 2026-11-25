@@ -37,7 +37,7 @@ namespace VoxProbe.Editor
             {
                 var side = new float3(0.4f, 0, -1); var mid = new float3(0, 0.3f, 1);
                 Case("nose", new[] { new B(new float3(-2.0f, 1.6f, 14), side) }, (n) => { Shot(n + "-front", 0, 3, 0.42f, mid); Shot(n + "-3q", -35, 8, 0.42f, mid); Shot(n + "-top", 0, 55, 0.4f, mid); });
-                var zyg = new B(new float3(4.4f, -0.9f, 14), new float3(-0.35f, 0, -1));
+                var zyg = new B(new float3(9.8f, -0.5f, 12.4f), new float3(-0.6f, 0, -0.8f));   // хук по скуловой кости Л снаружи
                 Case("zygoma", new[] { zyg, zyg, zyg, zyg }, (n) => { Shot(n + "-front", 0, 3, 0.42f, mid); Shot(n + "-3q", 35, 8, 0.42f, mid); Shot(n + "-below", 20, -30, 0.42f, mid); });
                 var chL = new B(new float3(3.0f, -2.2f, 14), new float3(-0.15f, 0, -1)); var chR = new B(new float3(-3.0f, -2.2f, 14), new float3(0.15f, 0, -1));
                 var mo = new B(new float3(0, -4.6f, 14), new float3(0, 0, -1));
@@ -45,9 +45,11 @@ namespace VoxProbe.Editor
                 Case("lefort2", lf2, (n) => { Shot(n + "-front", 0, 3, 0.45f, mid); Shot(n + "-3q", -35, 8, 0.45f, mid); Shot(n + "-side", -85, 0, 0.45f, mid); });
                 var lf3 = new[] { chL, chR, chL, chR, chL, chR, mo, chL, chR, chL, mo };
                 Case("lefort3", lf3, (n) => { Shot(n + "-front", 0, 3, 0.45f, mid); Shot(n + "-3q", -35, 8, 0.45f, mid); Shot(n + "-side", -85, 0, 0.45f, mid); });
-                var fo = new B(new float3(-0.5f, 7.0f, 14), new float3(0, -0.15f, -1));
-                Case("frontal", new[] { fo, fo, fo, fo, fo, fo }, (n) => { Shot(n + "-front", 0, 3, 0.42f, new float3(0, 4, 1)); Shot(n + "-3q", -35, 8, 0.42f, new float3(0, 4, 1)); Shot(n + "-side", -80, 0, 0.42f, new float3(0, 4, 1)); });
-                var fight = new[] { new B(new float3(-2.0f, 1.6f, 14), side), zyg, new B(new float3(-9, -7.4f, 4.5f), new float3(1, 0.05f, -0.3f)), zyg, new B(new float3(-9, -7.4f, 4.5f), new float3(1, 0.05f, -0.3f)), zyg, zyg };
+                // лоб: 30 лёгких ударов (нагрузка 0,6 за удар, порог 18) — без мощных кожа снимается до кости раньше, чем ломается лобная
+                var fo = new B(new float3(-0.5f, 7.0f, 14), new float3(0, -0.15f, -1), 0); var fos = new B[30]; for (int k = 0; k < 30; k++) fos[k] = fo;
+                Case("frontal", fos, (n) => { Shot(n + "-front", 0, 3, 0.42f, new float3(0, 4, 1)); Shot(n + "-3q", -35, 8, 0.42f, new float3(0, 4, 1)); Shot(n + "-side", -80, 0, 0.42f, new float3(0, 4, 1)); });
+                var hook = new B(new float3(-9, -7.4f, 4.5f), new float3(1, 0.05f, -0.3f));
+                var fight = new[] { new B(new float3(-2.0f, 1.6f, 14), side), zyg, hook, zyg, hook, zyg, hook, zyg };
                 Case("fight", fight, (n) => { Shot(n + "-front", 0, 5, 0.85f, new float3(0, -2, 0)); Shot(n + "-3q", 40, 10, 0.85f, new float3(0, -2, 0)); });
                 AnatPalette.SetLite(true);
                 Case("fight-lite", fight, (n) => { Shot(n + "-front", 0, 5, 0.85f, new float3(0, -2, 0)); Shot(n + "-3q", 40, 10, 0.85f, new float3(0, -2, 0)); Shot(n + "-close", 0, 3, 0.42f, mid); });
@@ -68,6 +70,7 @@ namespace VoxProbe.Editor
                 Ticks(t + 1.5f);
                 shots(on + "-" + name);
                 sb.Append(on + "-" + name).Append(": ").Append(blows.Length).Append(" ударов, треуг. ").Append(v.Triangles).Append(", переломы: ").Append(string.Join("; ", v.bones.log))
+                  .Append(" | отломки: ").Append(string.Join(", ", v.bones.list.ConvertAll(r => AnatBones.Names[r.bone] + " слот " + r.slot + " d=" + r.d + " c=" + r.c + " сдвиг в c " + math.length(v.bones.DispAt(r.body, r.c)).ToString("0.00"))))
                   .Append(" | травма зон лоб/нос/скула/щека/рот ").Append(v.sim.Eff(AnatZone.Fore).ToString("0.0")).Append('/').Append(v.sim.Eff(AnatZone.Nose).ToString("0.0")).Append('/')
                   .Append(v.sim.Eff(AnatZone.CheekBone).ToString("0.0")).Append('/').Append(v.sim.Eff(AnatZone.Cheek).ToString("0.0")).Append('/').Append(v.sim.Eff(AnatZone.Mouth).ToString("0.0")).Append('\n');
             }

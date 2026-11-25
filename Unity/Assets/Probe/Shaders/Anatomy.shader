@@ -127,8 +127,6 @@ Shader "VoxProbe/Anatomy"
                     }
                     pn = normalize(pn - gr);
                     #endif
-                    // отёк мягких тканей над отломком (на экране, как отёк части 8)
-                    swv += 0.3 * fwv * _AnatPar[(int)mat].y;
                 }
                 float3 p = i.p.xyz + normalize(i.n.xyz) * (swv / max(_BodyPar.x, 0.01)) + fd + _BodyShift.xyz;
                 float3 ws = TransformObjectToWorld(p);
