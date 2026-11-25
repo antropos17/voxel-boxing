@@ -46,7 +46,7 @@ namespace VoxGame
         // Досягаемость: голова соперника в 1.3 м, а рука игрока — 0.6 м. Цель удара и точка хвата рефери переносятся
         // по лучу из камеры ближе (на экране — та же точка, перчатка крупнее и закрывает место удара), иначе плечо
         // тянулось жердью через полкадра. Плечо удлиняется не больше UpperMaxStretch, при растяжении — и толще.
-        const float PunchMaxZP = 0.74f, PunchMaxZL = 0.80f, VictoryMaxZ = 0.70f;
+        const float PunchMaxZP = 0.74f, PunchMaxZL = 0.80f, VictoryMaxZ = 0.45f;
         const float UpperMaxStretch = 1.35f;
         float _punchMaxZ = PunchMaxZP;
         const float ReachLen = 0.48f, ReachElbowDeg = 110f;   // в вытянутой руке локоть не прямее этого угла
@@ -82,6 +82,10 @@ namespace VoxGame
         // Поднятая рука входит в кадр из нижнего угла своей стороны и с глубины VictoryAnchorZ: предплечье идёт
         // наискось вверх, а не столбом из середины низа. Вторая рука в это время опущена за нижний край.
         const float VictoryAU = 1.0f, VictoryAnchorZ = 0.55f, VictoryDropNY = -1.7f;
+        // Поднятая рука: сустав сбоку вне кадра, локоть уходит за боковой край — в кадре предплечье и перчатка,
+        // а не плечо жердью от нижнего угла через весь кадр (сустав условный, его не видно).
+        static readonly Vector3 VictoryShoulder = new Vector3(0.30f, -0.30f, 0.15f);
+        const float VictoryElbowDeg = 150f;
         int     _vicSide = -1;
         bool    _vicOn;
         float   _vicW;
@@ -337,11 +341,16 @@ namespace VoxGame
             Vector3 w = pos - k * go;
             if (reachW > 0f) pole = Vector3.Lerp(pole, new Vector3(Sign(s) * _reachPole.x, _reachPole.y, _reachPole.z), reachW);
             float maxDeg = Mathf.Lerp(ElbowMinDeg, ReachElbowDeg, reachW);
-            Vector3 el = Elbow(w, Shoulder(s, au, az, w, reachW), pole, maxDeg);
+            if (lockW > 0f)
+            {
+                maxDeg = Mathf.Lerp(maxDeg, VictoryElbowDeg, lockW);
+                pole = Vector3.Lerp(pole, new Vector3(Sign(s), -0.9f, -0.2f), lockW);   // локоть вниз-наружу, к углу кадра
+            }
+            Vector3 el = Elbow(w, VicShoulder(s, Shoulder(s, au, az, w, reachW), lockW), pole, maxDeg);
             Vector3 ga = Dir(Dir(w - el, k) * follow + k * (1f - follow), k);
             w = pos - ga * go;
             if (lockW > 0f) { w = Vector3.Lerp(w, _vicWrist, lockW); pos = w + ga * go; }
-            Vector3 sh = Shoulder(s, au, az, w, reachW);
+            Vector3 sh = VicShoulder(s, Shoulder(s, au, az, w, reachW), lockW);
             // сустав дальше, чем достаёт рука с предельно вытянутым плечом, — подтянуть его к запястью
             float reach = GloveLooks.UpperLenCm * 0.01f * Scale * UpperMaxStretch + GloveLooks.ForeLenCm * 0.01f * Scale - 0.01f;
             Vector3 ws = sh - w;
@@ -406,6 +415,9 @@ namespace VoxGame
             float d = Mathf.Min(-AnchorGap, wIn - AnchorGap);
             return new Vector3(au * az * _tanH, d * _nLen - az * _tanV, az);
         }
+
+        static Vector3 VicShoulder(int s, Vector3 sh, float lockW) =>
+            lockW > 0f ? Vector3.Lerp(sh, new Vector3(Sign(s) * VictoryShoulder.x, VictoryShoulder.y, VictoryShoulder.z), lockW) : sh;
 
         Vector3 Shoulder(int s, float au, float az, Vector3 w, float reachW)
         {

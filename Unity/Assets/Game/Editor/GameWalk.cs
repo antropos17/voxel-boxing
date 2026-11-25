@@ -269,6 +269,13 @@ namespace VoxGame.Editor
             Press("settings.sfx-");
             Check("settings-volume", f.Profile.sfxVolume < 1f, "sfx=" + F(f.Profile.sfxVolume));
             Pair("w4-settings");
+            // переключатель «выключено»: вид, сохранение, обратно
+            Press("settings.vibration");
+            Check("settings-switch-off", !f.Profile.vibrationEnabled && !_app.Settings.SwitchShownOn(false)
+                                         && _app.Settings.SwitchCaption(false) == "ВЫКЛ" && !SaveService.Load(savePath).vibrationEnabled,
+                  "vibration=" + f.Profile.vibrationEnabled + " caption=" + _app.Settings.SwitchCaption(false));
+            Pair("w4-settings-off");
+            Press("settings.vibration");
             Press("settings.reset");
             Check("settings-confirm", _app.Settings.ConfirmShown, "подтверждение показано");
             Pair("w4-settings-confirm");

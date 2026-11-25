@@ -26,7 +26,13 @@ namespace VoxGame {
             public RectTransform rt;
             public Text label;
             public Button btn;
+            public RectTransform knob;   // ползунок переключателя: справа — включено, слева — выключено
         }
+
+        // Вид переключателя: включено — оранжевая подложка, ползунок справа, «ВКЛ» слева от него;
+        // выключено — тёмная подложка, серый ползунок слева, серая «ВЫКЛ» справа.
+        public static readonly Color SwitchOnBg = new Color32(150, 85, 22, 255), SwitchOffBg = new Color32(22, 19, 28, 255);
+        public static readonly Color KnobOff = new Color32(95, 90, 100, 255);
 
         Text _header;
         RectTransform _line;
@@ -114,6 +120,9 @@ namespace VoxGame {
             r.label.text = caption;
             r.btn = MenuKit.Secondary(r.rt, "Toggle", "ВКЛ", UIKit.FontMd);
             r.btn.onClick.AddListener(onTap);
+            r.knob = UIKit.Panel(r.btn.transform, "Knob", UIKit.Accent);
+            r.knob.offsetMin = new Vector2(6f, 6f);
+            r.knob.offsetMax = new Vector2(-6f, -6f);
             return r;
         }
 
@@ -142,10 +151,8 @@ namespace VoxGame {
         }
 
         void Refresh() {
-            MenuKit.SetCaption(_soundRow.btn, _sound ? "ВКЛ" : "ВЫКЛ");
-            MenuKit.SetToggle(_soundRow.btn, _sound);
-            MenuKit.SetCaption(_vibRow.btn, _vibration ? "ВКЛ" : "ВЫКЛ");
-            MenuKit.SetToggle(_vibRow.btn, _vibration);
+            SetSwitch(_soundRow, _sound);
+            SetSwitch(_vibRow, _vibration);
             for (int i = 0; i < 3; i++) {
                 var r = _vol[i];
                 MenuKit.SetPips(r.pips, _level[i]);
@@ -154,6 +161,21 @@ namespace VoxGame {
                 r.label.color = new Color(UIKit.TextMain.r, UIKit.TextMain.g, UIKit.TextMain.b, a);
             }
         }
+
+        static void SetSwitch(ToggleRow r, bool on) {
+            MenuKit.SetCaption(r.btn, on ? "ВКЛ" : "ВЫКЛ");
+            r.btn.GetComponent<Image>().color = on ? SwitchOnBg : SwitchOffBg;
+            var lbl = r.btn.GetComponentInChildren<Text>();
+            lbl.color = on ? UIKit.TextMain : UIKit.TextSub;
+            // надпись — на свободной от ползунка стороне
+            UIKit.SetAnchors(lbl.rectTransform, on ? 0f : 0.36f, 0f, on ? 0.64f : 1f, 1f);
+            UIKit.SetAnchors(r.knob, on ? 0.66f : 0f, 0f, on ? 1f : 0.34f, 1f);
+            r.knob.GetComponent<Image>().color = on ? UIKit.Accent : KnobOff;
+        }
+
+        // Для тестов и прохода: включён ли переключатель на экране (по ползунку) и его надпись.
+        public bool SwitchShownOn(bool sound) => (sound ? _soundRow : _vibRow).knob.anchorMin.x > 0.5f;
+        public string SwitchCaption(bool sound) => (sound ? _soundRow : _vibRow).btn.GetComponentInChildren<Text>().text;
 
         void Step(VolumeKind k, int d) {
             int i = (int)k;

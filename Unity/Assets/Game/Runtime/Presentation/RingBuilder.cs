@@ -4,7 +4,7 @@ using UnityEngine;
 namespace VoxGame
 {
     // Ринг и зал: помост с настилом, четыре ряда канатов, угловые стойки с подушками, пустые трибуны (зрителей
-    // ставит CrowdView), лампы зала и ключевой свет. Всё строится кодом один раз, в бою не меняется.
+    // ставит CrowdView), ключевой свет. Всё строится кодом один раз, в бою не меняется.
     // Оси ринга: центр настила в начале координат, настил на высоте 0, пол зала на −PlatH.
     // Красный угол — (+RopeHalf, −RopeHalf), синий — напротив.
     // НЕ MonoBehaviour — создаётся и управляется из FightDirector.
@@ -28,7 +28,6 @@ namespace VoxGame
         static readonly Color32 CHall     = new Color32( 34,  34,  42, 255);
         static readonly Color32 CStand    = new Color32( 28,  28,  36, 255);
         static readonly Color32 CWall     = new Color32( 20,  20,  28, 255);
-        static readonly Color32 CLamp     = new Color32(255, 244, 214, 255);
         static readonly Color32[] RopeCol = { CRed, CBlue, CWhite, CRed };   // снизу вверх
 
         Transform _root;
@@ -46,7 +45,6 @@ namespace VoxGame
             var shader = GameUtil.FindShader("VoxGame/VertexColor", GameUtil.VoxMaterial);
             var ringMat = NewMat(shader, 0.42f, 0f, 1000f, 2000f);
             var hallMat = NewMat(shader, 0.34f, 0f, 5.5f, 21f);
-            var glowMat = NewMat(shader, 1f, 1f, 1000f, 2000f);
 
             var mb = new MeshBuilder();
             AddCanvas(mb); AddSkirt(mb); AddPosts(mb); AddRopes(mb);
@@ -55,10 +53,8 @@ namespace VoxGame
             mb = new MeshBuilder();
             AddHall(mb);
             Spawn("hall", mb.Build("hall"), hallMat);
-
-            mb = new MeshBuilder();
-            AddLamps(mb);
-            Spawn("lamps", mb.Build("lamps"), glowMat);
+            // ряды ламп над трибунами убраны (25.11.2026): в тёмном небе они читались белыми «чёрточками»
+            // и пересекали таймер и кнопку паузы; свет сцены даёт KeyLight, лампы её не освещали
 
             var lightGO = new GameObject("KeyLight");
             lightGO.transform.SetParent(parent, false);
@@ -172,14 +168,6 @@ namespace VoxGame
                            new Vector3(11.5f, 0.3f * (k + 1), 2.75f), yaw, CStand);
                 mb.Box(Rot(yaw, new Vector3(0, 2.0f, 13.2f)), new Vector3(14f, 3.2f, 0.3f), yaw, CWall);
             }
-        }
-
-        // Ряд ламп над дальними трибунами с каждой стороны.
-        static void AddLamps(MeshBuilder mb)
-        {
-            for (int side = 0; side < 4; side++)
-                for (int i = -3; i <= 3; i++)
-                    mb.Box(Rot(side * 90f, new Vector3(i * 2.6f, 3.1f, 12.6f)), new Vector3(0.55f, 0.11f, 0.06f), side * 90f, CLamp);
         }
 
         static Vector3 Rot(float yaw, Vector3 v) => Quaternion.Euler(0f, yaw, 0f) * v;
