@@ -147,13 +147,16 @@ namespace VoxGame.Editor
 
         // ------------------------------------------------------------------ Портреты бойцов
 
-        // Поясной портрет бойца в стойке: тело FoeBody, общая анатомическая голова, накладки HeadGear, тёмный фон.
+        // Поясной портрет бойца в стойке: тело FoeBody, анатомическая голова бойца (тон кожи и причёска — FACES.md), накладки HeadGear, тёмный фон.
         sealed class PortraitRig
         {
             public readonly Camera cam;
             readonly Transform _root;
             readonly Material _anatMat, _voxMat;
-            readonly AnatView _v;
+            AnatView _v;
+            public AnatView View => _v;
+            public FoeBody Body => _body;
+            readonly Vector3 _at;
             FoeBody _body;
 
             public PortraitRig(Vector3 at)
@@ -187,14 +190,16 @@ namespace VoxGame.Editor
 
                 AnatSkin.on = true;
                 AnatSkin.Reset();
-                _v = new AnatView(_root, at + Vector3.up * 1.6f, _anatMat);
+                _at = at;
             }
 
             public void SetFighter(in FighterDef def)
             {
                 _body?.Dispose();
+                _v?.Dispose();
                 AnatSkin.Reset();
-                _body = new FoeBody(_root, def, _voxMat);
+                _v = new AnatView(_root, _at + Vector3.up * 1.6f, _anatMat, FighterGen.AnatLookOf(def));
+                _body = new FoeBody(_root, def, _voxMat, true);
                 var cmd = new AICommand { newPhase = FightPhase.Idle };
                 for (int i = 0; i < 45; i++)
                 {
@@ -221,7 +226,7 @@ namespace VoxGame.Editor
             public void Dispose()
             {
                 _body?.Dispose();
-                _v.Dispose();
+                _v?.Dispose();
                 AnatSkin.Reset();
                 Object.DestroyImmediate(_anatMat);
                 Object.DestroyImmediate(_voxMat);

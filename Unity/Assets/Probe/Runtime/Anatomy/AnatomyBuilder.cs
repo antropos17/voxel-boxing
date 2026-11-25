@@ -67,6 +67,7 @@ namespace VoxProbe
         public AnatGrid[] teeth;
         public ToothDef[] toothDefs;
         public AnatVis vis;
+        public AnatLook look;                     // внешность (AnatLook.cs): тон кожи, причёска, цвет волос
         public readonly Dictionary<string, double> ms = new Dictionary<string, double>();
         public IEnumerable<AnatGrid> All { get { yield return head; yield return mand; yield return eyeL; yield return eyeR; foreach (var t in teeth) yield return t; } }
 
@@ -129,10 +130,12 @@ namespace VoxProbe
             return v.ToArray();
         }
 
-        public static AnatHead Build()
+        public static AnatHead Build() => Build(default);
+
+        public static AnatHead Build(AnatLook look)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var r = new AnatHead();
+            var r = new AnatHead { look = look };
             var head = r.head = new AnatGrid("head", Dims, S, Org);
             int n = head.Count;
             var occ = new NativeArray<byte>(n, Allocator.TempJob);
@@ -164,7 +167,8 @@ namespace VoxProbe
             src.Dispose();
             new BoneJob { mat = head.mat, part = head.part, dims = head.dims }.Schedule(head.dims.z, 1).Complete();
             new WrapJob { mat = head.mat, part = head.part, dims = head.dims }.Schedule(head.dims.z, 1).Complete();
-            new HairJob { mat = head.mat, part = head.part, zone = head.zone, dims = head.dims, org = head.org, s = S }.Schedule(head.dims.z, 1).Complete();
+            new HairJob { mat = head.mat, part = head.part, zone = head.zone, dims = head.dims, org = head.org, s = S, style = look.hair }.Schedule(head.dims.z, 1).Complete();
+            AnatLooks.Grow(head, look.hair);
             r.ms["head.bone+hair"] = sw.Elapsed.TotalMilliseconds; sw.Restart();
 
             // нижняя челюсть
@@ -836,7 +840,7 @@ namespace VoxProbe
         struct HairJob : IJobParallelFor
         {
             [NativeDisableParallelForRestriction] public NativeArray<byte> mat, part, zone;
-            public int3 dims; public float3 org; public float s;
+            public int3 dims; public float3 org; public float s; public byte style;   // style ≠ Short — тут только брови, волосы ставит AnatLooks.Grow
             public void Execute(int z)
             {
                 int W = dims.x, H = dims.y, D = dims.z;
@@ -848,7 +852,7 @@ namespace VoxProbe
                     int i = x + W * (y + H * z);
                     if (mat[i] != 0) continue;
                     float X = org.x + (x + 0.5f) * s, Y = org.y + (y + 0.5f) * s;
-                    bool hair = HairZone(X, Y, Z), brow = !hair && BrowZone(math.abs(X), Y, Z);
+                    bool hair = style == AnatHair.Short && HairZone(X, Y, Z), brow = !hair && BrowZone(math.abs(X), Y, Z);
                     if (!hair && !brow) continue;
                     bool skin = false;
                     for (int d = 0; d < 6 && !skin; d++)

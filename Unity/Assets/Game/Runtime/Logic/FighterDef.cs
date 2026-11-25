@@ -57,7 +57,8 @@ namespace VoxGame
 
     public struct BodyColors
     {
-        public Color skin;              // тон кожи тела (= тон анатомической головы, у всех один)
+        public Color skin;              // тон кожи тела и анатомической головы (FighterGen.SkinTones[skinTone])
+        public int   skinTone;          // номер тона, 0 светлый … 4 тёмный (VoxProbe.AnatLook.Tones)
         public Color trunks;            // основной цвет трусов
         public Color accent;            // пояс трусов
         public Color stripe;            // лампасы и кант

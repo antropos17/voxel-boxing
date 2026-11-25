@@ -88,7 +88,8 @@ namespace VoxGame
         // Поле множителя: 0 (не задано) читается как 1
         static float Or1(float v) => v > 0f ? v : 1f;
 
-        public FoeBody(Transform parent, FighterDef def, Material mat)
+        /// voxelHair — причёску рисует анатомическая голова (бой); иначе (портрет с простой головой) — накладка HeadGear.
+        public FoeBody(Transform parent, FighterDef def, Material mat, bool voxelHair = false)
         {
             var b = def.build;
             scale = Mathf.Clamp(def.scale <= 0f ? 1f : def.scale, 0.9f, 1.1f);
@@ -121,7 +122,7 @@ namespace VoxGame
             headMount.localPosition = HeadLocal();
             headDy = WaistY - HipDrop + HeadLocal().y - RefHeadY;
 
-            Color32 skin = BoxerParts.HeadSkin;
+            Color32 skin = def.colors.skin.a > 0f ? (Color32)def.colors.skin : BoxerParts.HeadSkin;
             var torsoMesh = BuildTorso(skin, def);
             var t = VoxModel.Spawn("torso", torsoJoint, torsoMesh, mat);
             t.localPosition = new Vector3(0f, HipDrop, 0f);
@@ -155,7 +156,7 @@ namespace VoxGame
             Pose(Vector3.zero);
 
             gear = new HeadGear();
-            gear.Build(headMount, def, mat);
+            gear.Build(headMount, def, mat, voxelHair);
         }
 
         // ---- Форма торса (см; начало — пояс, +Z — грудь) -------------------------------------------

@@ -55,6 +55,8 @@ namespace VoxGame
         Material mat;
         readonly List<Mesh> meshes = new List<Mesh>(8);
         HeadLook look;
+        Color32 skin;         // тон кожи бойца
+        bool voxelHair;       // причёска — воксели анатомической головы: накладкой только хвост
         float hairOut;        // толщина причёски над кожей (на ней сидит головной убор)
         bool visible = true;
 
@@ -69,10 +71,12 @@ namespace VoxGame
 
         // ---- Сборка --------------------------------------------------------------------------------
 
-        public void Build(Transform mount, FighterDef def, Material material)
+        public void Build(Transform mount, FighterDef def, Material material, bool voxelHair = false)
         {
             mat = material;
             look = def.head;
+            skin = def.colors.skin.a > 0f ? (Color32)def.colors.skin : BoxerParts.HeadSkin;
+            this.voxelHair = voxelHair;
             dropParent = mount.root;
 
             holder = new GameObject("headGear").transform;
@@ -150,11 +154,16 @@ namespace VoxGame
             var pal = new Color32[]
             {
                 default, hc, Color.Lerp(hc, Color.black, 0.35f), Color.Lerp(hc, Color.white, 0.18f),
-                BoxerParts.HeadSkin, Color.Lerp(hc, Color.black, 0.2f),
+                skin, Color.Lerp(hc, Color.black, 0.2f),
             };
             var ao = new[] { 1f, 0.5f, 0.5f, 0.5f, 0.3f, 0.5f };
             var mn = new Vector3(-10.5f, -7f, -14f);
             var mx = new Vector3(10.5f, 17.5f, 12f);
+
+            if (voxelHair)   // волосы — воксели головы (AnatLook); хвост висит за решёткой головы — накладкой
+                return look.hair != HairStyle.Ponytail ? null : Part("hairTail", new Vector3(-10.5f, -9.5f, -15.5f), mx, HairCell,
+                    TailSdf, (x, y, z) => Vector3.Distance(new Vector3(x, y, z), TailA) < 1.6f && y < TailA.y + 0.2f ? PTrim : PMain,
+                    WithTrim(pal, look.wearColor), ao);
 
             switch (look.hair)
             {
@@ -305,7 +314,7 @@ namespace VoxGame
             var pal = new Color32[]
             {
                 default, wc, Color.Lerp(wc, Color.black, 0.3f), Color.Lerp(wc, Color.white, 0.6f),
-                BoxerParts.HeadSkin, tc, new Color32(198, 200, 206, 255),
+                skin, tc, new Color32(198, 200, 206, 255),
             };
             var ao = new[] { 1f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
             float inner = hairOut - 0.1f;
