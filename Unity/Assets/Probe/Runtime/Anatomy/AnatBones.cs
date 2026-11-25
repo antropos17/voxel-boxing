@@ -156,7 +156,7 @@ namespace VoxProbe
             }
             r.level = lv; r.d = Disp(r, dir);
             if (b == Maxilla) upperShift = r.d;
-            if (b == OrbitL || b == OrbitR) eyeShift[b == OrbitL ? 0 : 1] = new float3(0, -0.22f, -0.25f) * Mul(lv);
+            if (b == OrbitL || b == OrbitR) eyeShift[b == OrbitL ? 0 : 1] = new float3(0, -0.22f, -0.25f) * Mul(lv) * ShowEye;
             if (b == JawAngle || b == JawBody) for (int t = 0; t < a.teeth.Length; t++)
                 if (a.toothDefs[t].upper == 0 && Member(b, r.side, lv, a.toothDefs[t].c, AnatPart.Mandible, AnatMat.Compact, 0, r.c)) lowerShift[t] = r.d;
             log.Add(time.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " с: перелом — " + Label(r) + (r.slot < 0 ? " (без смещения: предел отломков)" : ""));
@@ -169,8 +169,17 @@ namespace VoxProbe
 
         static float Mul(int lv) => lv <= 1 ? 1f : lv == 2 ? 1.5f : 1.9f;
 
+        /// Усиление смещения ради читаемости с расстояния боя (замечание Руслана 25.11.2026): лицо ×Show, свод ×ShowVault.
+        public const float Show = 2.6f, ShowVault = 1.5f, ShowEye = 1.2f;   // глаз и дно глазницы — меньше: сильнее глаз уходит из век и открывает тёмную глазницу
+
         /// Смещение отломка, см в рамке головы.
         static float3 Disp(Brk r, float3 dir)
+        {
+            bool vault = r.bone == Frontal || r.bone == Occipital || r.bone == ParL || r.bone == ParR || r.bone == TempL || r.bone == TempR;
+            return Disp0(r, dir) * (vault ? ShowVault : r.bone == OrbitL || r.bone == OrbitR ? ShowEye : Show);
+        }
+
+        static float3 Disp0(Brk r, float3 dir)
         {
             float m = Mul(r.level), sx = r.side == 0 ? 1 : -1;
             switch (r.bone)

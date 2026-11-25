@@ -148,7 +148,9 @@ namespace VoxProbe
                     rr.SetPropertyBlock(fmpb);
                 }
             }
-            Shift(a.eyeL, bones.eyeShift[0]); Shift(a.eyeR, bones.eyeShift[1]);
+            // Ле Фор III уносит скулы и края глазниц — глаз уходит вместе с ними наполовину, иначе выпирает из запавшего лица
+            float3 lf = bones.Level(AnatBones.Maxilla) >= 3 ? bones.upperShift * 0.6f : 0;
+            Shift(a.eyeL, bones.eyeShift[0] + lf); Shift(a.eyeR, bones.eyeShift[1] + lf);
             for (int t = 0; t < a.teeth.Length; t++) Shift(a.teeth[t], a.toothDefs[t].upper == 1 ? bones.upperShift : bones.lowerShift[t]);
         }
         void Shift(AnatGrid g, float3 dcm)
