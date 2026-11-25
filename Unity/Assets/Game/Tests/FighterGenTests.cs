@@ -319,10 +319,33 @@ namespace VoxGame.Tests
                     Assert.AreEqual(HeadWear.Beanie, h.wear, $"seed {s}: помпон без шапочки");
                 Assert.IsTrue(h.side == 1 || h.side == -1, $"seed {s}: side");
                 Assert.IsTrue(f.markSide == 1 || f.markSide == -1, $"seed {s}: markSide");
-                Assert.AreEqual((Color)FighterGen.HeadSkin, f.colors.skin, $"seed {s}: тон кожи тела не как у головы");
+                Assert.AreEqual((Color)FighterGen.SkinTones[f.colors.skinTone], f.colors.skin, $"seed {s}: тон кожи тела не из таблицы");
+                Assert.AreEqual((Color32)f.colors.skin, FighterGen.AnatLookOf(f).skin, $"seed {s}: тон кожи тела не как у головы");
             }
             for (int t = 0; t < counts.Length; t++)
                 Assert.Greater(counts[t], 0, $"верх головы {t} не выпадает ни разу");
+        }
+
+        // Лестница: у каждого бойца свой фиксированный тон кожи и причёска головы; тонов не меньше 4, причёсок — 3 с лысым,
+        // цветов волос — 3; соседи по лестнице различаются тоном; та же лестница — те же пары.
+        [Test]
+        public void Roster_FacesVaried()
+        {
+            foreach (uint seed in new[] { 42u, 999u, 777u, 1u })
+            {
+                var r = new RosterDef(seed); var again = new RosterDef(seed);
+                var tones = new HashSet<int>(); var hair = new HashSet<byte>(); var hc = new HashSet<Color32>();
+                for (int i = 0; i < RosterDef.Count; i++)
+                {
+                    var f = r.Get(i); var lk = FighterGen.AnatLookOf(f); var lk2 = FighterGen.AnatLookOf(again.Get(i));
+                    Assert.AreEqual(lk.skin, lk2.skin); Assert.AreEqual(lk.hair, lk2.hair); Assert.AreEqual(lk.hairCol, lk2.hairCol);
+                    tones.Add(f.colors.skinTone); hair.Add(lk.hair); if (lk.hair != VoxProbe.AnatHair.Bald) hc.Add(lk.hairCol);
+                    if (i > 0) Assert.AreNotEqual(r.Get(i - 1).colors.skinTone, f.colors.skinTone, $"seed {seed}: соседи {i - 1}, {i} одного тона");
+                }
+                Assert.GreaterOrEqual(tones.Count, 4, $"seed {seed}: тонов");
+                Assert.GreaterOrEqual(hair.Count, 3, $"seed {seed}: причёсок"); Assert.IsTrue(hair.Contains(VoxProbe.AnatHair.Bald), $"seed {seed}: лысый");
+                Assert.GreaterOrEqual(hc.Count, 3, $"seed {seed}: цветов волос");
+            }
         }
 
         [Test]

@@ -20,7 +20,7 @@ namespace VoxGame
         readonly Transform _root;
         readonly Camera _cam;
         readonly Material _mat;
-        Mesh _headMesh;
+        readonly Mesh[] _headMesh = new Mesh[FighterGen.SkinToneCount];   // простая голова по тону кожи
 
         struct Slot { public int key; public RenderTexture rt; public uint used; }
         readonly Slot[] _portraits = new Slot[MaxPortraits];
@@ -81,8 +81,9 @@ namespace VoxGame
                 var cmd = new AICommand { newPhase = FightPhase.Idle };
                 for (int i = 0; i < 30; i++) body.Tick(cmd, 1f / 60f, Vector3.zero);
                 body.gear.SyncToSkull();
-                if (_headMesh == null) _headMesh = BuildHead();
-                var head = VoxModel.Spawn("portraitHead", body.headMount, _headMesh, _mat);
+                int tone = Mathf.Clamp(def.colors.skinTone, 0, _headMesh.Length - 1);
+                if (_headMesh[tone] == null) _headMesh[tone] = BuildHead(def.colors.skin.a > 0f ? (Color32)def.colors.skin : BoxerParts.HeadSkin);
+                var head = VoxModel.Spawn("portraitHead", body.headMount, _headMesh[tone], _mat);
                 float ms = body.headMount.lossyScale.x;
                 head.localScale = Vector3.one / (ms > 1e-4f ? ms : 1f);
 
@@ -101,7 +102,7 @@ namespace VoxGame
         }
 
         // Простая голова в тон кожи (см, начало — уровень ушей, +Z — лицо): череп, челюсть, нос, уши, глаза, брови, рот.
-        static Mesh BuildHead()
+        static Mesh BuildHead(Color32 skin)
         {
             var mn = new Vector3(-11f, -15f, -12f);
             var mx = new Vector3(11f, 14f, 13.5f);
@@ -123,7 +124,7 @@ namespace VoxGame
                     if (z > 6f && ax < 2.6f && y > -6.4f && y < -5.3f) return 4;              // рот
                     return 1;
                 });
-            var pal = new Color32[] { default, BoxerParts.HeadSkin, new Color32(40, 30, 28, 255),
+            var pal = new Color32[] { default, skin, new Color32(40, 30, 28, 255),
                                       new Color32(88, 60, 44, 255), new Color32(150, 78, 70, 255) };
             return m.BuildMesh("portraitHead", pal, mn * 0.01f, 0.006f);
         }
@@ -185,8 +186,7 @@ namespace VoxGame
             }
             foreach (var kv in _gloves) if (kv.Value != null) { kv.Value.Release(); GameUtil.Destroy(kv.Value); }
             _gloves.Clear();
-            GameUtil.Destroy(_headMesh);
-            _headMesh = null;
+            for (int i = 0; i < _headMesh.Length; i++) { GameUtil.Destroy(_headMesh[i]); _headMesh[i] = null; }
             GameUtil.Destroy(_mat);
             if (_root != null) GameUtil.Destroy(_root.gameObject);
         }

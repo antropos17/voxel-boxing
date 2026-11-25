@@ -249,14 +249,17 @@ namespace VoxProbe
     {
         /// Палитра в шейдер: _AnatPal (цвет поверхности, линейный; a — разброс), _AnatCut (цвет на срезе), _AnatPar (x — влажность, y — кожа:
         /// на ней видны покраснение, синяк, ссадина), _AnatDmg — цвета повреждений, _BruiseDay — секунд боя на «день» синяка.
-        public static void Apply()
+        public static void Apply() => Apply(default);
+
+        /// look — тон кожи и цвет волос соперника (AnatLook); default — цвета таблицы AnatMat.
+        public static void Apply(AnatLook look)
         {
             var pal = new Vector4[64]; var cut = new Vector4[64]; var par = new Vector4[64];
             bool lin = QualitySettings.activeColorSpace == ColorSpace.Linear;
             for (int i = 0; i < AnatMat.Count; i++)
             {
                 var d = AnatMat.Table[i];
-                Color s = d.surf, c = d.cut;
+                Color s = AnatLooks.Surf(i, look), c = d.cut;
                 if (lin) { s = s.linear; c = c.linear; }
                 pal[i] = new Vector4(s.r, s.g, s.b, d.vary);
                 cut[i] = new Vector4(c.r, c.g, c.b, d.vary);

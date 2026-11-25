@@ -7,7 +7,9 @@ namespace VoxGame
     {
         // Тон кожи анатомической головы (AnatMat «кожа», sRGB). Голова у всех соперников одна, поэтому тело
         // всегда этого тона, а различимость дают фигура, трусы, перчатки, накладки головы и отметины.
-        public static readonly Color32 HeadSkin = new Color32(222, 168, 128, 255);
+        public static readonly Color32 HeadSkin = new Color32(222, 168, 128, 255);   // прежний тон (= AnatLook.Tones[1])
+        public static Color32[] SkinTones => VoxProbe.AnatLook.Tones;
+        public static int SkinToneCount => VoxProbe.AnatLook.Tones.Length;
 
         // ---- Таблицы имён ------------------------------------------------
 
@@ -207,8 +209,8 @@ namespace VoxGame
         // Принудительный выбор признаков (−1 — по зерну). Лестница через это делает бойцов попарно различимыми.
         public struct LookPicks
         {
-            public int trunks, gloves, body, top, beard, nick, style;
-            public static readonly LookPicks Free = new LookPicks { trunks = -1, gloves = -1, body = -1, top = -1, beard = -1, nick = -1, style = -1 };
+            public int trunks, gloves, body, top, beard, nick, style, skin;
+            public static readonly LookPicks Free = new LookPicks { trunks = -1, gloves = -1, body = -1, top = -1, beard = -1, nick = -1, style = -1, skin = -1 };
         }
 
         // ---- Публичный API -----------------------------------------------
@@ -243,10 +245,12 @@ namespace VoxGame
             int top        = p.top >= 0 ? p.top % TopCount : (int)(Hash(seed, 9) % TopCount);
             int beard      = p.beard >= 0 ? p.beard % BeardCount : (int)(Hash(seed, 14) % BeardCount);
             bool wrapsOn   = Hash(seed, 24) % 3u != 0u;
+            int tone       = p.skin >= 0 ? p.skin % SkinToneCount : (int)(Hash(seed, 31) % (uint)SkinToneCount);
 
             var colors = new BodyColors
             {
-                skin          = (Color)HeadSkin,
+                skin          = (Color)SkinTones[tone],
+                skinTone      = tone,
                 trunks        = (Color)TrunksMain[trunksIdx],
                 accent        = (Color)TrunksBelt[trunksIdx],
                 stripe        = (Color)TrunksStripe[trunksIdx],
@@ -350,6 +354,25 @@ namespace VoxGame
             h.earring = h.wear != HeadWear.Helmet && Hash(seed, 18) % 3u == 0u;
             h.pompom  = h.wear == HeadWear.Beanie && (Hash(seed, 20) & 1u) == 0u;
             return h;
+        }
+
+        /// Внешность анатомической головы бойца: тон кожи, воксельная причёска (хвост — короткая + накладка хвоста), цвет волос.
+        public static VoxProbe.AnatLook AnatLookOf(in FighterDef f)
+        {
+            byte hair;
+            switch (f.head.hair)
+            {
+                case HairStyle.Bald:     hair = VoxProbe.AnatHair.Bald;   break;
+                case HairStyle.Buzz:     hair = VoxProbe.AnatHair.Buzz;   break;
+                case HairStyle.Mohawk:   hair = VoxProbe.AnatHair.Mohawk; break;
+                case HairStyle.FullHair: hair = VoxProbe.AnatHair.Full;   break;
+                default:                 hair = VoxProbe.AnatHair.Short;  break;
+            }
+            Color32 skin = f.colors.skin.a > 0f ? (Color32)f.colors.skin : HeadSkin;
+            Color32 hc = f.head.hairColor.a > 0f ? (Color32)f.head.hairColor : new Color32(46, 31, 23, 255);
+            var look = new VoxProbe.AnatLook { hair = hair, skin = skin, hairCol = hc };
+            foreach (var d in HairDyed) if (d.Equals(hc)) look.browCol = HairNatural[1];   // крашеный ирокез — брови свои, тёмно-русые
+            return look;
         }
 
         // Сводка вида головы для старого поля headStyle

@@ -183,7 +183,7 @@ namespace VoxGame
             _sceneRoot = sg.transform;
 
             // Соперник (тело + крепление головы); глаза игрока — на высоте его головы в стойке
-            _foeBody = new FoeBody(_sceneRoot, foe, _voxMat);
+            _foeBody = new FoeBody(_sceneRoot, foe, _voxMat, true);
             _eye.y = _foeBody.headMount.position.y;
 
             // Ринг: красный угол — за соперником справа от него на экране
@@ -199,7 +199,7 @@ namespace VoxGame
             // Анатомия головы (строится здесь как «экран загрузки»)
             AnatSkin.on = true;
             AnatSkin.Reset();
-            _v = new AnatView(_sceneRoot, _foeBody.headMount.position, _anatMat);
+            _v = new AnatView(_sceneRoot, _foeBody.headMount.position, _anatMat, FighterGen.AnatLookOf(foe));   // тон кожи и причёска бойца
 
             // Руки игрока
             var glove = GlovesCatalog.Get(profile.equippedGloveId);

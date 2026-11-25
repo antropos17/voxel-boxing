@@ -28,6 +28,7 @@ namespace VoxGame
             int[] tops   = Chain(FighterGen.TopCount,      FighterGen.Hash(seed, 0x70F5u));
             int[] bodies = Chain(FighterGen.BodyTypeCount, FighterGen.Hash(seed, 0xB0D1u));
             int[] beards = FighterGen.Perm(FighterGen.BeardCount, FighterGen.Hash(seed, 0xBEA4u));
+            int[] skins  = Chain(FighterGen.SkinToneCount, FighterGen.Hash(seed, 0x5C1Eu));
 
             var usedHead = new bool[FighterGen.TopCount * 8];
             for (int i = 0; i < Count; i++)
@@ -46,6 +47,7 @@ namespace VoxGame
                     beard  = beard,
                     nick   = nicks[i],
                     style  = LadderStyles[i],
+                    skin   = skins[i],
                 };
                 uint s = FighterGen.Hash(seed, (uint)(i + 100));
                 Fighters[i] = FighterGen.Generate(s, i + 1, picks);

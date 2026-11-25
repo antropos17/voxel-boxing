@@ -77,7 +77,7 @@ namespace VoxGame.Editor
         }
 
         static FightDirector NewFight(out Camera cam, out UIRoot ui, float hpMult = 1f, float stunMult = 1f,
-                                      int foeIdx = 0, bool forceBelt = false)
+                                      int foeIdx = 0, bool forceBelt = false, Func<FighterDef, FighterDef> tweak = null)
         {
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
@@ -96,6 +96,7 @@ namespace VoxGame.Editor
             ui.Init(cam);
 
             var def = new RosterDef(42u).Get(foeIdx);
+            if (tweak != null) def = tweak(def);   // замеры и снимки внешности (FacesShots)
             var fdGO = new GameObject("FightDirector");
             var director = fdGO.AddComponent<FightDirector>();
             director.Init(def, new PlayerProfile(), cam, ui, null, hpMult, stunMult, foeIdx, RosterDef.Count, forceBelt);

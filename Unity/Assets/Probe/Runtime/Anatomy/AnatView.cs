@@ -70,12 +70,15 @@ namespace VoxProbe
         };
         public static bool Brain(byte m) => m == AnatMat.Grey || m == AnatMat.White || m == AnatMat.CerebGrey || m == AnatMat.Stem || m == AnatMat.Csf;
 
-        public AnatView(Transform parent, Vector3 center, Material material)
+        public AnatView(Transform parent, Vector3 center, Material material) : this(parent, center, material, default) { }
+
+        /// look — внешность соперника (тон кожи, причёска, цвет волос; AnatLook.cs).
+        public AnatView(Transform parent, Vector3 center, Material material, AnatLook look)
         {
-            AnatPalette.Apply();
+            AnatPalette.Apply(look);
             if (AnatBones.B10Off) Shader.SetGlobalFloat("_AnatB10Off", 1);   // часть 10: снимки «без» через игровой слой
             this.material = material;
-            a = AnatomyBuilder.Build();
+            a = AnatomyBuilder.Build(look);
             a.vis.Warm();
             layout = new NativeArray<VertexAttributeDescriptor>(AnatMesher.Layout, Allocator.Persistent);
             root = new GameObject("anat").transform;
@@ -212,6 +215,7 @@ namespace VoxProbe
         /// Передать убранные ячейки в поиск кусков и запустить его, если он свободен и прошлый результат разобран.
         void Request(bool full)
         {
+            if (HairFall && DropHair() > 0) sim.Flush();   // волосы над убранной кожей (удар, пробой, оторванный кусок)
             if (sim.cutLog.Length > 0 || full) { isl.Request(sim.cutLog, full); sim.cutLog.Clear(); }
             if (isl.busy || wk >= 0) return;   // снимок и списки поиска общие: новый — только после разбора прошлого
             isl.Schedule(); if (isl.busy) islAt = frame + IslDelay;
@@ -672,6 +676,23 @@ namespace VoxProbe
         }
 
         /// Совпадает ли текущее состояние решёток с исходным (для тестов).
+        /// Волосы без опоры после удара или отрыва куска уходят вместе с кожей под ними (AnatLooks.Settle), а не висят. Выключатель — для
+        /// сравнения с прежним поведением (seed 77 в эталоне снят без него).
+        public static bool HairFall = true;
+        public int hairDropped;
+        readonly List<int> hairCut = new List<int>();
+        int DropHair()
+        {
+            int n = AnatLooks.Layers(a.look.hair); if (n == 0 || sim.cutLog.Length == 0) return 0;
+            var h = a.head; int3 mn = int.MaxValue, mx = int.MinValue;
+            for (int k = 0; k < sim.cutLog.Length; k++) { int i = sim.cutLog[k]; int3 c = new int3(i % h.dims.x, (i / h.dims.x) % h.dims.y, i / (h.dims.x * h.dims.y)); mn = math.min(mn, c); mx = math.max(mx, c); }
+            hairCut.Clear();
+            AnatLooks.Settle(h, mn - n - 1, mx + n + 1, hairCut);
+            foreach (var i in hairCut) sim.Cut(i % h.dims.x, (i / h.dims.x) % h.dims.y, i / (h.dims.x * h.dims.y));
+            hairDropped += hairCut.Count;
+            return hairCut.Count;
+        }
+
         public int DiffFromPristine()
         {
             int diff = 0;
