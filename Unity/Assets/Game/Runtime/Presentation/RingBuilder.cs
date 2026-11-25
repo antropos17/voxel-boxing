@@ -3,8 +3,8 @@ using UnityEngine;
 
 namespace VoxGame
 {
-    // Ринг и зал: помост с настилом, четыре ряда канатов, угловые стойки с подушками, трибуны со зрителями,
-    // лампы зала и ключевой свет. Всё строится кодом один раз, в бою не меняется.
+    // Ринг и зал: помост с настилом, четыре ряда канатов, угловые стойки с подушками, пустые трибуны (зрителей
+    // ставит CrowdView), лампы зала и ключевой свет. Всё строится кодом один раз, в бою не меняется.
     // Оси ринга: центр настила в начале координат, настил на высоте 0, пол зала на −PlatH.
     // Красный угол — (+RopeHalf, −RopeHalf), синий — напротив.
     // НЕ MonoBehaviour — создаётся и управляется из FightDirector.
@@ -14,7 +14,6 @@ namespace VoxGame
         const float PlatHalf = 2.6f;           // помост шире канатов на фартук
         const float PlatH    = 1.0f;           // высота помоста над полом зала
         const float RopeT    = 0.036f;         // толщина каната
-        const int   MaxCrowd = 300;            // предел числа зрителей
         static readonly float[] RopeY = { 0.46f, 0.76f, 1.06f, 1.36f };
 
         static readonly Color32 CCanvas   = new Color32( 62, 104, 168, 255);
@@ -32,20 +31,8 @@ namespace VoxGame
         static readonly Color32 CLamp     = new Color32(255, 244, 214, 255);
         static readonly Color32[] RopeCol = { CRed, CBlue, CWhite, CRed };   // снизу вверх
 
-        static readonly Color32[] Cloth =
-        {
-            new Color32(96, 52, 52, 255), new Color32(52, 66, 104, 255), new Color32(78, 78, 82, 255),
-            new Color32(104, 90, 54, 255), new Color32(52, 88, 70, 255), new Color32(116, 116, 122, 255),
-            new Color32(88, 58, 96, 255),
-        };
-        static readonly Color32[] Faces =
-        {
-            new Color32(176, 132, 104, 255), new Color32(132, 96, 72, 255), new Color32(196, 152, 122, 255),
-        };
-
         Transform _root;
         readonly List<Object> _owned = new List<Object>();
-        public int CrowdCount { get; private set; }
 
         // Построить ринг: center и yawDeg — положение и поворот ринга в осях parent.
         // lightForward — направление ключевого света в осях parent (свет в осях боя, а не ринга).
@@ -66,7 +53,7 @@ namespace VoxGame
             Spawn("ring", mb.Build("ring"), ringMat);
 
             mb = new MeshBuilder();
-            AddHall(mb); AddCrowd(mb);
+            AddHall(mb);
             Spawn("hall", mb.Build("hall"), hallMat);
 
             mb = new MeshBuilder();
@@ -185,30 +172,6 @@ namespace VoxGame
                            new Vector3(11.5f, 0.3f * (k + 1), 2.75f), yaw, CStand);
                 mb.Box(Rot(yaw, new Vector3(0, 2.0f, 13.2f)), new Vector3(14f, 3.2f, 0.3f), yaw, CWall);
             }
-        }
-
-        // Зрители: сидят рядами на трёх ступенях с четырёх сторон, не больше MaxCrowd.
-        void AddCrowd(MeshBuilder mb)
-        {
-            uint rng = 0x9E3779B9u;
-            float Rnd() { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return (rng & 0xFFFFFF) / 16777216f; }
-            int n = 0;
-            for (int side = 0; side < 4; side++)
-            for (int k = 0; k < 3; k++)
-            {
-                float yaw = side * 90f, dist = 4.95f + 1.1f * k, y = -PlatH + 0.6f * (k + 1), w = 4.6f + 1.1f * k;
-                for (float x = -w; x <= w && n < MaxCrowd; x += 0.62f)
-                {
-                    if (Rnd() < 0.12f) continue;   // пустое место
-                    float jx = (Rnd() - 0.5f) * 0.16f, jh = Rnd() * 0.10f, kc = 0.7f + 0.5f * Rnd();
-                    Color32 cloth = Mul(Cloth[(int)(Rnd() * Cloth.Length) % Cloth.Length], kc);
-                    Color32 face = Mul(Faces[(int)(Rnd() * Faces.Length) % Faces.Length], 0.75f + 0.25f * Rnd());
-                    mb.Box(Rot(yaw, new Vector3(x + jx, y + 0.27f + jh * 0.5f, dist)), new Vector3(0.21f, 0.27f + jh * 0.5f, 0.14f), yaw, cloth);
-                    mb.Box(Rot(yaw, new Vector3(x + jx, y + 0.66f + jh, dist + 0.01f)), new Vector3(0.10f, 0.11f, 0.10f), yaw, face);
-                    n++;
-                }
-            }
-            CrowdCount = n;
         }
 
         // Ряд ламп над дальними трибунами с каждой стороны.

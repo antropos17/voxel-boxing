@@ -71,6 +71,11 @@ namespace VoxGame
         float headDy;   // поправка поз, заданных абсолютной высотой, к настоящей высоте головы
         FightPhase phase = FightPhase.Idle;
 
+        // Рука в руке рефери (победа соперника): номер руки и точка запястья (мир); -1 — не держат
+        int holdArm = -1;
+        Vector3 holdWrist;
+        float holdW;
+
         // Рука 0 — на экране слева (мир +X, правая рука соперника), рука 1 — справа.
         static float ArmSign(int s) => s == 0 ? 1f : -1f;
 
@@ -425,6 +430,7 @@ namespace VoxGame
             }
 
             float k = 1f - Mathf.Exp(-rate * sdt);
+            holdW = Mathf.MoveTowards(holdW, holdArm >= 0 ? 1f : 0f, sdt / 0.2f);
             glovePos[0] = Vector3.Lerp(glovePos[0], t0, k);
             glovePos[1] = Vector3.Lerp(glovePos[1], t1, k);
             float kb = 1f - Mathf.Exp(-Mathf.Min(rate, 10f) * sdt);
@@ -489,8 +495,30 @@ namespace VoxGame
                 Vector3 pole = low ? right * sg * 0.9f - fwd * 0.4f
                                    : Vector3.Lerp(right * sg * 0.35f - up + fwd * 0.1f, right * sg * 0.25f - up - fwd * 0.7f, armLow);
                 Vector3 back = right * sg * 0.85f + fwd * 0.5f;
+                if (s == holdArm && holdW > 0f)
+                {
+                    // запястье в руке рефери, перчатка над ним костяшками вверх, локоть наружу и назад
+                    gt = Vector3.Lerp(gt, holdWrist + up * BoxerParts.GloveOff * scale, holdW);
+                    kn = Vector3.Lerp(kn, up, holdW).normalized;
+                    pole = Vector3.Lerp(pole, right * sg * 0.8f - fwd * 0.4f, holdW);
+                    back = Vector3.Lerp(back, fwd, holdW);
+                }
                 BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale);
             }
+        }
+
+        // Рефери держит руку arm (0 — на экране слева, 1 — справа) за запястье в точке worldWrist (мир).
+        // Звать каждый кадр, пока держит; поза применяется в следующем Tick.
+        public void HoldWrist(int arm, Vector3 worldWrist)
+        {
+            holdArm = arm == 0 ? 0 : 1;
+            holdWrist = worldWrist;
+        }
+
+        // Отпустить руку сразу (переигровка).
+        public void ReleaseWrist()
+        {
+            holdArm = -1; holdW = 0f;
         }
 
         // Импульс от удара игрока (мир): корпус отклоняется назад и скручивается.

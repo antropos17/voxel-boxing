@@ -15,6 +15,7 @@ namespace VoxGame
         const float RestY      = -0.03f;         // точка покоя в осях камеры (по высоте), м
         const float BuckleFill = 0.75f;          // доля ширины кадра под пряжкой (портрет)
         const float MinDist = 0.55f, MaxDist = 0.90f;
+        const float WholeFill = 0.92f;           // весь ремень — не шире этой доли кадра (в портрете пояс мельче)
         const float Scale      = 1f;             // общий масштаб пояса
         const float FlashEvery = 1.1f, FlashLen = 0.35f;   // блики на пряжке
         const float BaseGlow   = 0.10f, FlashGlow = 0.45f;
@@ -88,7 +89,9 @@ namespace VoxGame
             float vHalf = vFovDeg * 0.5f * Mathf.Deg2Rad;
             float hHalf = Mathf.Atan(Mathf.Tan(vHalf) * Mathf.Max(0.1f, aspect));
             float z = Mathf.Clamp(0.15f * Scale / BuckleFill / Mathf.Tan(hHalf), MinDist, MaxDist);
+            float k = Mathf.Min(1f, WholeFill * z * Mathf.Tan(hHalf) / (Scale * (StrapHalfLen + 2f) * 0.01f));
             _rest = new Vector3(0f, RestY, z);
+            if (_root != null) _root.localScale = Vector3.one * (Scale * k);
         }
 
         public void Show()

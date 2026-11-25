@@ -49,6 +49,15 @@ namespace VoxGame
         int   _dodgeSide;
         float _dodgeTimer;
 
+        // Поднятая рука победителя: запястье в руке рефери (оси камеры)
+        const float VictoryIn = 0.18f;  // переход в позу и обратно, с
+        const float VictoryStretch = 3.2f; // предплечье поднятой руки длиннее: локоть за краем кадра, без обрубка посреди экрана
+        int     _vicSide = -1;
+        bool    _vicOn;
+        float   _vicW;
+        Vector3 _vicWrist;
+        bool    _visible = true;
+
         static float Sign(int s) => s == 0 ? -1f : 1f;
 
         public PlayerGloves(Transform cameraParent, GloveLook look, Material mat)
@@ -123,6 +132,33 @@ namespace VoxGame
 
         public void SetBlock(bool blocking) => _blocking = blocking;
 
+        // Рефери поднимает руку игрока: side (−1 левая, +1 правая), worldWrist — точка хвата (мир), куда встаёт запястье;
+        // перчатка над ним костяшками вверх. Звать каждый кадр, пока рефери держит руку.
+        public void RaiseVictory(int side, Vector3 worldWrist)
+        {
+            _vicSide  = side < 0 ? 0 : 1;
+            _vicWrist = _cam.InverseTransformPoint(worldWrist);
+            _vicOn    = true;
+        }
+
+        // Отпустить руку сразу (переигровка).
+        public void ClearVictory()
+        {
+            _vicOn = false; _vicW = 0f; _vicSide = -1;
+        }
+
+        // Показать или спрятать обе руки (во время пояса перед камерой).
+        public void SetVisible(bool on)
+        {
+            if (on == _visible) return;
+            _visible = on;
+            for (int s = 0; s < 2; s++)
+            {
+                _fore[s].gameObject.SetActive(on);
+                _glove[s].gameObject.SetActive(on);
+            }
+        }
+
         // Уклон: side < 0 — влево, > 0 — вправо.
         public void SetDodge(int side)
         {
@@ -188,11 +224,52 @@ namespace VoxGame
                     shoulder += _lunge[s] * e;
                 }
 
+                Vector3 pole = new Vector3(sg * 0.55f, -1f, -0.25f);
+                if (s == _vicSide)
+                {
+                    _vicW = Mathf.MoveTowards(_vicW, _vicOn ? 1f : 0f, dt / VictoryIn);
+                    if (_vicW > 0f) VictoryPose(sg, _vicW, ref pos, ref kn, ref back, ref shoulder, ref pole);
+                }
+
                 BoxerParts.SolveArm(null, _fore[s], _glove[s],
                     _cam.TransformPoint(shoulder), _cam.TransformPoint(pos),
-                    _cam.TransformDirection(kn), _cam.TransformDirection(new Vector3(sg * 0.55f, -1f, -0.25f)),
+                    _cam.TransformDirection(kn), _cam.TransformDirection(pole),
                     _cam.TransformDirection(back), Scale);
+                StretchFore(s, s == _vicSide ? _vicW : 0f);
             }
+        }
+
+        // Предплечье тянется вдоль своей оси от запястья (k = 1 — обычная длина). Модель идёт от локтя по +Y.
+        void StretchFore(int s, float w)
+        {
+            Transform f = _fore[s];
+            if (w <= 0f)
+            {
+                if (f.localScale.y != Scale) f.localScale = Vector3.one * Scale;
+                return;
+            }
+            float l2 = BoxerParts.ForeLen * Scale, k = 1f + (VictoryStretch - 1f) * w;
+            Vector3 wrist = f.position + f.up * l2;
+            f.position = wrist - f.up * (l2 * k);
+            f.localScale = new Vector3(Scale, Scale * k, Scale);
+        }
+
+        // Поднятая рука (оси камеры): запястье в точке хвата, костяшки вверх; предплечье уходит вниз и наружу за край
+        // кадра (плечо не рисуется, локоть должен быть вне кадра). w — вес позы 0..1.
+        void VictoryPose(float sg, float w, ref Vector3 pos, ref Vector3 kn, ref Vector3 back, ref Vector3 shoulder, ref Vector3 pole)
+        {
+            Vector3 up = _cam.InverseTransformDirection(Vector3.up);
+            Vector3 vk = (up * 0.92f + new Vector3(-sg * 0.12f, 0f, 0.2f)).normalized;
+            Vector3 wrist = _vicWrist;
+            float l1 = BoxerParts.UpperLen * Scale, l2 = BoxerParts.ForeLen * Scale;
+            Vector3 elbow = wrist + new Vector3(sg * 0.55f, -0.55f, -0.62f).normalized * l2;
+            Vector3 sh = elbow + new Vector3(sg * 0.25f, -0.85f, -0.45f).normalized * (l1 * 0.98f);
+            Vector3 gt = wrist + vk * BoxerParts.GloveOff * Scale;
+            pos      = Vector3.Lerp(pos, gt, w);
+            kn       = Vector3.Lerp(kn, vk, w).normalized;
+            back     = Vector3.Lerp(back, new Vector3(sg * 0.3f, 0f, -1f), w);
+            shoulder = Vector3.Lerp(shoulder, sh, w);
+            pole     = Vector3.Lerp(pole, elbow - (sh + wrist) * 0.5f, w);
         }
 
         public void Dispose()

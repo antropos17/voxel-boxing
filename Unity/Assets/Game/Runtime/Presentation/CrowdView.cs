@@ -350,6 +350,8 @@ namespace VoxGame
         public void Burst(float strength) => _burst = Mathf.Max(_burst, Mathf.Clamp01(strength));
 
         // dt — игровое время: в стоп-кадре зал замирает вместе с боем, в слоу-мо замедляется.
+        int _half;
+
         public void Tick(float dt, float udt)
         {
             if (_root == null || dt <= 0f) return;
@@ -363,8 +365,10 @@ namespace VoxGame
             _burst  *= Mathf.Exp(-BurstDecay * dt);
             if (_burst < 0.002f) _burst = 0f;
 
+            // за кадр — две трибуны из четырёх через одну: зал движется с половинной частотой, затраты вдвое меньше
             float t = _time;
-            for (int side = 0; side < 4; side++)
+            _half = 1 - _half;
+            for (int side = _half; side < 4; side += 2)
             {
                 var mesh = _mesh[side];
                 if (mesh == null) continue;

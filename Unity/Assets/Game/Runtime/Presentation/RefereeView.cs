@@ -24,31 +24,36 @@ namespace VoxGame
         // ---- Постановка (подгонять по снимкам) -------------------------------------------------
         // Место в покое — смещение от корня соперника: сбоку за ним, на экране справа (мир −X), не закрывая его.
         // Портрет узкий (по горизонтали ±16.5°), поэтому ближе к оси взгляда; ландшафт — дальше в сторону.
-        public static readonly Vector3 IdlePortrait  = new Vector3(-0.42f, 0f, -1.05f);
+        public static readonly Vector3 IdlePortrait  = new Vector3(-0.52f, 0f, -1.10f);
         public static readonly Vector3 IdleLandscape = new Vector3(-0.80f, 0f, -0.70f);
-        // У упавшего соперника: сбоку и чуть позади, лицом между соперником и игроком
-        public static readonly Vector3 CountSpot = new Vector3(-0.40f, 0f, -0.20f);
+        // У упавшего соперника: сбоку и позади, лицом между соперником и игроком. Камера в нокдауне смотрит вниз
+        // на упавшего, а верх кадра занят полосами HUD, поэтому рефери не вплотную: иначе видны только брюки.
+        public static readonly Vector3 CountSpot = new Vector3(-0.38f, 0f, -0.85f);
+        const float CountSquat = 38f;   // при счёте рефери приседает к упавшему: голова ниже полос HUD; угол бедра, градусы
         // Упал игрок: рефери шагает к камере (в осях камеры по горизонтали: вправо, вперёд)
         const float PlayerDownRight = 0.38f, PlayerDownFwd = 0.70f;
         // Победил соперник: рефери справа от него на экране и поднимает его руку 1 (мир −X). Оси корня соперника.
         static readonly Vector3 FoeWinStand    = new Vector3(-0.60f, 0f, 0.10f);
         static readonly Vector3 FoeWristGuard  = new Vector3(-0.12f, 1.36f, 0.20f);
         static readonly Vector3 FoeWristRaised = new Vector3(-0.30f, 1.95f, 0.05f);
-        // Победил игрок: рефери справа от камеры, берёт правую перчатку игрока за запястье (оси камеры)
-        static readonly Vector3 PlayerWristRest   = new Vector3(0.15f, -0.30f, 0.56f);
-        static readonly Vector3 PlayerWristRaised = new Vector3(0.12f, 0.17f, 0.62f);
-        const float PlayerWinRight = 0.50f, PlayerWinFwd = 0.84f;
+        // Победил игрок: рефери справа от камеры, берёт левую перчатку игрока за запястье (оси камеры).
+        // Левую — чтобы предплечье игрока уходило за левый край, а не поперёк рефери.
+        static readonly Vector3 PlayerWristRest   = new Vector3(-0.15f, -0.30f, 0.56f);
+        // Поднятое запястье — левее середины и выше глаз: перчатка целиком в кадре и ниже полос HUD в обеих ориентациях.
+        // Рефери стоит так, что его правое плечо правее и заметно дальше запястья: рука почти прямая, не поперёк лица.
+        static readonly Vector3 PlayerWristRaised = new Vector3(-0.12f, 0.10f, 0.91f);
+        const float PlayerWinRight = 0.18f, PlayerWinFwd = 1.33f;
 
-        // Какой рукой победителя машет рефери: у игрока сторона как в PlayerGloves.Punch (+1 — правая),
+        // Какой рукой победителя машет рефери: у игрока сторона как в PlayerGloves.Punch (−1 — левая),
         // у соперника — номер руки FoeBody (1 — на экране справа, мир −X).
-        public const int PlayerGripSide = 1;
+        public const int PlayerGripSide = -1;
         public const int FoeGripArm = 1;
 
         const float WalkSpeed  = 1.1f;    // м/с, возврат на место
         const float StrideLen  = 0.30f;   // м на полшага
         const float PoseRate   = 10f;     // скорость сглаживания углов
         const float StrikeRate = 26f;     // взмах счёта
-        const int   CountArm   = 0;       // считает левой: при взгляде на упавшего она ближе к камере
+        const int   CountArm   = 1;       // считает правой: она со стороны упавшего, взмах виден на фоне зала
 
         // ---- Цвета ------------------------------------------------------------------------------
         static readonly Color32 CSkin    = new Color32(206, 150, 112, 255);
@@ -91,7 +96,7 @@ namespace VoxGame
         readonly float[] _raise = new float[2], _abd = new float[2], _twist = new float[2], _bend = new float[2];
         readonly float[] _tRaise = new float[2], _tAbd = new float[2], _tTwist = new float[2], _tBend = new float[2];
         readonly float[] _armRate = new float[2];
-        float _lean, _tLean, _roll, _tRoll, _spin, _tSpin;
+        float _lean, _tLean, _roll, _tRoll, _spin, _tSpin, _squat, _tSquat;
 
         static float Sign(int i) => i == 0 ? -1f : 1f;
 
@@ -100,8 +105,12 @@ namespace VoxGame
         public bool WinnerIsPlayer => _logic == null || _logic.PlayerWon;
 
         // Рефери держит руку победителя: директор каждый кадр ведёт запястье победителя в GripPoint().
-        public bool IsGripping => _logic != null && _gripW > 0.5f &&
+        public bool IsGripping => _logic != null && _gripW > 0.5f && !_letGo &&
                                   (_logic.State == RefereeState.RaiseHand || _logic.State == RefereeState.Done);
+
+        // Отпустить руку победителя (вручают пояс): рука рефери опускается; снова хватает только в следующей развязке.
+        public void LetGo() => _letGo = true;
+        bool _letGo;
 
         // Мировая точка хвата: середина кисти рефери со стороны ладони — сюда ставится запястье победителя.
         public Vector3 GripPoint() => _gripPoint;
@@ -169,13 +178,13 @@ namespace VoxGame
             _prev = State;
             _pos = _from = IdleSpot();
             _yaw = YawTo(_pos, Mid());
-            _walkAmt = 0f; _gripW = 0f;
+            _walkAmt = 0f; _gripW = 0f; _letGo = false; _tSquat = 0f;
             IdlePose();
             for (int i = 0; i < 2; i++)
             {
                 _raise[i] = _tRaise[i]; _abd[i] = _tAbd[i]; _twist[i] = _tTwist[i]; _bend[i] = _tBend[i];
             }
-            _lean = _tLean; _roll = _tRoll; _spin = _tSpin;
+            _lean = _tLean; _roll = _tRoll; _spin = _tSpin; _squat = _tSquat;
             Apply(0f, Mid());
         }
 
@@ -212,7 +221,8 @@ namespace VoxGame
         Vector3 DownSpot() => WinnerIsPlayer ? FoeSpot(CountSpot) : CamSpot(PlayerDownRight, PlayerDownFwd);
         Vector3 DownTarget() => WinnerIsPlayer ? FoeHead() : Cam() + Vector3.down * 0.5f;
 
-        Vector3 WinStand() => WinnerIsPlayer ? CamSpot(PlayerWinRight, PlayerWinFwd) : FoeSpot(FoeWinStand);
+        Vector3 WinStand() => WinnerIsPlayer ? CamSpot(PlayerWinRight, PlayerWinFwd)
+                                             : FoeSpot(FoeWinStand);
 
         Vector3 GripStart() => WinnerIsPlayer
             ? (_cam != null ? _cam.TransformPoint(PlayerWristRest) : Cam())
@@ -251,10 +261,10 @@ namespace VoxGame
             if (st != _prev)
             {
                 _from = _pos;
-                // рука хвата — та, чьё плечо ближе к запястью победителя
+                // рука хвата — та, чьё плечо ближе к поднятому запястью победителя (иначе рука идёт поперёк лица)
                 if (st == RefereeState.WalkToWinner)
                 {
-                    Vector3 stand = WinStand(), g = GripStart();
+                    Vector3 stand = WinStand(), g = GripEnd();
                     float yaw = YawTo(stand, WinFace());
                     Quaternion q = Quaternion.Euler(0f, yaw, 0f);
                     float d0 = (stand + q * new Vector3(-ShoulderLocal.x, HipY + ShoulderLocal.y, 0f) - g).sqrMagnitude;
@@ -263,6 +273,7 @@ namespace VoxGame
                 }
                 if (st == RefereeState.Idle && (_prev == RefereeState.Done || _prev == RefereeState.RaiseHand))
                     _gripW = 0f;   // переигровка: руку отпускаем сразу
+                if (st == RefereeState.Idle || st == RefereeState.WalkToWinner) _letGo = false;
                 _prev = st;
             }
 
@@ -307,12 +318,14 @@ namespace VoxGame
             float gripT = 0f;
             Vector3 gripTarget = GripStart();
             for (int i = 0; i < 2; i++) _armRate[i] = PoseRate;
+            _tSquat = 0f;
             switch (st)
             {
                 case RefereeState.StepIn:
                     IdlePose();
                     if (p > 0.55f) CountArmPose(0.6f * Smooth((p - 0.55f) / 0.45f));   // рука уже идёт вверх
                     _tLean = 8f * Smooth(p);
+                    _tSquat = Smooth((p - 0.5f) / 0.5f);
                     break;
                 case RefereeState.Counting:
                     IdlePose();
@@ -320,7 +333,7 @@ namespace VoxGame
                     _armRate[CountArm] = StrikeRate;
                     int other = 1 - CountArm;   // вторая рука на колене
                     SetArm(other, 28f, 12f, -30f, 52f);
-                    _tLean = 16f; _tRoll = 0f; _tSpin = 0f;
+                    _tLean = 26f; _tRoll = 0f; _tSpin = 0f; _tSquat = 1f;   // наклон и присед к упавшему
                     break;
                 case RefereeState.Resume:
                 {
@@ -337,7 +350,7 @@ namespace VoxGame
                     float w = 0.5f - 0.5f * Mathf.Cos(2f * Mathf.PI * 2f * p);
                     float up = Smooth(p / 0.2f);
                     for (int i = 0; i < 2; i++)
-                        SetArm(i, Mathf.Lerp(40f, 166f, up), Mathf.Lerp(42f, -30f, w), -90f, 14f);
+                        SetArm(i, Mathf.Lerp(40f, 120f, up), Mathf.Lerp(42f, -30f, w), -90f, 24f);   // кисти над головой, но ниже полос HUD
                     _tLean = -4f; _tRoll = 0f; _tSpin = 0f;
                     break;
                 }
@@ -353,8 +366,8 @@ namespace VoxGame
                     Vector3 a = GripStart(), b = GripEnd();
                     gripTarget = Vector3.Lerp(a, b, k) + Vector3.up * (0.05f * Mathf.Sin(Mathf.PI * k));
                     if (st == RefereeState.Done) gripTarget += Vector3.up * (0.012f * Mathf.Sin(_t * 3.2f));
-                    gripT = 1f;
-                    SetArm(1 - _gripArm, 38f, 42f, 0f, 36f);   // свободная рука — к залу
+                    gripT = _letGo ? 0f : 1f;
+                    SetArm(1 - _gripArm, 10f, 16f, -20f, 22f);   // свободная рука опущена вдоль тела
                     _tLean = -3f; _tRoll = 0f; _tSpin = 0f;
                     break;
                 }
@@ -383,6 +396,7 @@ namespace VoxGame
             _lean = Mathf.Lerp(_lean, _tLean, kb);
             _roll = Mathf.Lerp(_roll, _tRoll, kb);
             _spin = Mathf.Lerp(_spin, _tSpin, kb);
+            _squat = Mathf.Lerp(_squat, _tSquat, kb);
             _gripW = gripT >= _gripW ? gripT : Mathf.Lerp(_gripW, gripT, 1f - Mathf.Exp(-8f * udt));
 
             Apply(udt, look, gripTarget);
@@ -400,12 +414,13 @@ namespace VoxGame
         }
 
         // Счёт: рука поднимается (0..0.6), замирает вверху (0.6..0.78) и рубит вниз к моменту счёта (0.78..1).
+        // Рука отведена в сторону упавшего; верх — на уровне головы: выше рука ушла бы под полосы HUD.
         // Ладонь при подъёме смотрит вперёд, внизу — в настил. p ≤ 0.6 — только подъём (так рука готовится на подходе).
         void CountArmPose(float p)
         {
             float up = p < 0.6f ? Smooth(p / 0.6f) : p < 0.78f ? 1f : 1f - Smooth((p - 0.78f) / 0.22f);
             int i = CountArm;
-            SetArm(i, Mathf.Lerp(60f, 162f, up), Mathf.Lerp(6f, 18f, up), -90f, Mathf.Lerp(4f, 24f, up));
+            SetArm(i, Mathf.Lerp(55f, 115f, up), Mathf.Lerp(30f, 58f, up), -90f, Mathf.Lerp(10f, 35f, up));
         }
 
         void SetArm(int i, float raise, float abd, float twist, float bend)
@@ -421,20 +436,22 @@ namespace VoxGame
         {
             _root.SetPositionAndRotation(_pos, Quaternion.Euler(0f, _yaw, 0f));
 
-            // ноги: простой шаг; бедро вперёд-назад, колено гнётся, пока нога идёт вперёд, стопа параллельна полу
-            float maxThigh = 0f;
+            // ноги: простой шаг; бедро вперёд-назад, колено гнётся, пока нога идёт вперёд, стопа параллельна полу.
+            // Присед: бедро вперёд на sq, голень назад на sq — стопа остаётся под тазом.
+            float maxThigh = 0f, sq = _squat * CountSquat;
             for (int i = 0; i < 2; i++)
             {
                 float ph = _gait + (i == 0 ? 0f : Mathf.PI);
                 float th = Mathf.Sin(ph) * 22f * _walkAmt;
                 float kn = 4f + Mathf.Max(0f, Mathf.Cos(ph)) * 42f * _walkAmt;
-                _thigh[i].localRotation = Quaternion.Euler(-th, 0f, 0f);
-                _shin[i].localRotation = Quaternion.Euler(kn, 0f, 0f);
-                _shoe[i].localRotation = Quaternion.Euler(th - kn, 0f, 0f);
+                _thigh[i].localRotation = Quaternion.Euler(-th - sq, 0f, 0f);
+                _shin[i].localRotation = Quaternion.Euler(kn + 2f * sq, 0f, 0f);
+                _shoe[i].localRotation = Quaternion.Euler(th - kn - sq, 0f, 0f);
                 if (Mathf.Cos(ph) <= 0f) maxThigh = Mathf.Max(maxThigh, Mathf.Abs(th));
             }
             // опорная нога прямая: таз опускается, чтобы стопа не висела над настилом
-            float drop = (ThighLen + ShinLen) * (1f - Mathf.Cos(maxThigh * Mathf.Deg2Rad));
+            float drop = (ThighLen + ShinLen) * (1f - Mathf.Cos(maxThigh * Mathf.Deg2Rad))
+                       + (ThighLen + ShinLen) * (1f - Mathf.Cos(sq * Mathf.Deg2Rad));
             float sway = Mathf.Sin(_t * 1.3f) * 0.012f * (1f - _walkAmt);
             var pelvis = new Vector3(sway, HipY - drop, 0f);
             _hips.localPosition = pelvis;
@@ -537,7 +554,7 @@ namespace VoxGame
 
         static bool Stripe(float x) => Mathf.Repeat(x + 1.25f, 5f) < 2.5f;
 
-        // Голова: начало — верх шеи, лицо в +Z. Простая, кубическая, с проседью.
+        // Голова: начало — верх шеи, лицо в +Z. Простая, кубическая, с проседью; лоб открыт (волосы не дальше z 6.5).
         static float HeadShape(float x, float y, float z)
         {
             float ax = Mathf.Abs(x);
@@ -550,7 +567,7 @@ namespace VoxGame
         }
 
         static float HairShape(float x, float y, float z) =>
-            Mathf.Max(VoxModel.Ell(x, y - 14.8f, z + 0.4f, 8.5f, 8.0f, 9.6f), Mathf.Min(13f - y, z + 3f));
+            Mathf.Max(Mathf.Max(VoxModel.Ell(x, y - 14.8f, z + 0.4f, 8.5f, 8.0f, 9.6f), Mathf.Min(13f - y, z + 3f)), z - 6.5f);
 
         static byte HeadPaint(float x, float y, float z)
         {

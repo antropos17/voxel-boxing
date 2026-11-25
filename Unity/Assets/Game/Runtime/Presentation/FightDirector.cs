@@ -23,6 +23,12 @@ namespace VoxGame
         public AnatView    Head       => _v;
         public FightHUD    Hud        => _hud;
         public RefereeLogic Referee   => _referee;
+        public RefereeView RefereeFigure => _refView;
+        public CrowdView   Crowd      => _crowd;
+        public BeltView    Belt       => _belt;
+        public VictoryScene Victory   => _victory;
+        public PlayerGloves Gloves    => _playerGloves;
+        public bool        TitleFight => _titleFight;
         public int         HitsThrown => _hitsTotal;    // ударов игрока
         public int         HitsLanded => _hitsLanded;   // из них попало (по логике боя)
         public int         HeadHits   { get; private set; }   // ударов, дошедших до головы (Pick попал)
@@ -31,6 +37,8 @@ namespace VoxGame
         // Замер кадра удара: весь Tick в кадре, где был v.Hit, и его части (мс).
         public float lastHitFrameMs, maxHitFrameMs;
         public float lastPickMs, lastHitMs, lastAnatTickMs, lastLayerMs;
+        // Части слоя в том же кадре: толпа, фигура рефери, накладки головы (мс)
+        public float lastCrowdMs, lastRefMs, lastGearMs;
         public int   hitFrameSeq; // растёт на каждый Tick с ударом по голове
         // Последний удар по голове (для повторения тех же ударов на отдельной голове в замере) и игровое время кадра.
         public Ray    lastHeadRay;
@@ -74,6 +82,12 @@ namespace VoxGame
         InputReader   _inputReader;
         FightHUD      _hud;
         ResultScreen  _result;
+        RefereeView   _refView;
+        CrowdView     _crowd;
+        BeltView      _belt;
+        VictoryScene  _victory;
+        bool          _titleFight;
+        static readonly Color BeltStrap = new Color(0.50f, 0.05f, 0.07f);   // тёмно-красная кожа ремня
 
         Material      _anatMat;
         Material      _voxMat;
@@ -122,9 +136,13 @@ namespace VoxGame
 
         // Строит сцену, головы и соперника. Вызывается создателем после AddComponent.
         // foeHpMult / foeStunMult — запас здоровья и стойкость соперника (1 — по уровню; меньше — быстрее нокдаун и нокаут).
+        // ladderIndex / ladderCount — место боя в лестнице: последний бой титульный, после победы выносят пояс.
+        // forceBelt — пояс после победы в любом бою (сценарии снимков).
         public void Init(FighterDef foe, PlayerProfile profile, Camera cam, UIRoot ui,
-                         ModeManager modeManager = null, float foeHpMult = 1f, float foeStunMult = 1f)
+                         ModeManager modeManager = null, float foeHpMult = 1f, float foeStunMult = 1f,
+                         int ladderIndex = -1, int ladderCount = 0, bool forceBelt = false)
         {
+            _titleFight = forceBelt || VictoryScene.IsTitleFight(ladderIndex, ladderCount);
             _foeDef      = foe;
             _profile     = profile;
             _cam         = cam;
@@ -155,6 +173,8 @@ namespace VoxGame
             var ringCenter = corner + new Vector3(Mathf.Sin(diag), 0f, Mathf.Cos(diag)) * cornerR;
             _ring = new RingBuilder();
             _ring.Build(_sceneRoot, ringCenter, 45f + CornerDiag, LightForward);
+            _crowd = new CrowdView();
+            _crowd.Build(_sceneRoot, CrowdStands.Default(ringCenter, 45f + CornerDiag));
 
             // Анатомия головы (строится здесь как «экран загрузки»)
             AnatSkin.on = true;
@@ -200,7 +220,24 @@ namespace VoxGame
             _result.Init(_uiRoot);
             _result.OnRematch += Restart;
 
+            // Пояс перед камерой и постановщик развязки
+            _belt = new BeltView();
+            _belt.Build(cam.transform, _voxMat, BeltStrap);
+            _victory = new VictoryScene(_referee, _belt)
+            {
+                SetCrowdMood = m => _crowd.SetMood(m),
+                OnHandRaised = () => _crowd.Burst(1f),
+                OnBelt       = () => { _playerGloves.SetVisible(false); _refView.LetGo(); },
+                OnReady      = ShowResult,
+            };
+
             UpdateCamera(0f);
+
+            // Рефери: место в покое зависит от камеры, поэтому после неё
+            _refView = new RefereeView();
+            _refView.Build(_sceneRoot, _voxMat, _referee);
+            _refView.SetView(_viewW > 0 && _viewH > 0 ? (float)_viewW / _viewH : (float)Screen.width / Mathf.Max(1, Screen.height));
+            _refView.SetScene(_foeBody.root, _foeBody.headMount, cam.transform);
 
             // Строки HUD кэшируем один раз
             _hudData.foeName    = foe.name;
@@ -226,7 +263,13 @@ namespace VoxGame
         {
             _viewW = w; _viewH = h;
             _uiRoot?.SetViewSize(w, h);
-            if (_cam != null) { UpdateCamera(0f); _playerGloves.Tick(0f); }
+            if (_cam != null)
+            {
+                UpdateCamera(0f);
+                // место рефери в покое зависит от ориентации: при повороте экрана он встаёт туда сразу
+                if (_refView != null && _referee.State == RefereeState.Idle) _refView.Snap();
+                if (_refView != null) PoseFigures(0f, 0f); else _playerGloves.Tick(0f);
+            }
         }
 
         // ---- Tick / Update -------------------------------------------------
@@ -277,21 +320,25 @@ namespace VoxGame
             AnatSkin.Step(sdt);
             _v.Tick(sdt);
             AnatSkin.SetGlobals(_v.root);
+            double t1g = _tickSw.Elapsed.TotalMilliseconds;
+            double anatMs = t1g - t0;
             _foeBody.gear.SyncToSkull();   // накладки головы — по позе черепа этого кадра
-            double anatMs = _tickSw.Elapsed.TotalMilliseconds - t0;
+            double gearMs = _tickSw.Elapsed.TotalMilliseconds - t1g;
 
-            // Рефери (реальное время)
+            // Рефери (реальное время) и развязка
             _referee.Tick(realDt);
             while (_referee.TryDequeueEvent(out RefereeEvent re))
                 HandleRefereeEvent(re);
+            _victory.Tick(realDt);
 
-            // Результаты после поднятия руки
-            if (!_resultShown && _referee.State == RefereeState.RaiseHand)
-                ShowResult();
-
-            // Камера и руки игрока (руки — в осях камеры, поэтому после неё)
+            // Камера, затем фигуры в осях камеры и сцены
             UpdateCamera(realDt);
-            _playerGloves.Tick(sdt);
+            PoseFigures(sdt, realDt);
+
+            // Зал: dt — игровое время (в стоп-кадре замирает вместе с боем)
+            double tc = _tickSw.Elapsed.TotalMilliseconds;
+            _crowd.Tick(sdt, realDt);
+            double crowdMs = _tickSw.Elapsed.TotalMilliseconds - tc;
 
             // HUD
             FillHudData();
@@ -310,8 +357,30 @@ namespace VoxGame
                 lastHitMs      = (float)_hitMs;
                 lastAnatTickMs = (float)anatMs;
                 lastLayerMs    = lastHitFrameMs - lastPickMs - lastHitMs - lastAnatTickMs;
+                lastCrowdMs    = (float)crowdMs;
+                lastRefMs      = (float)_refPoseMs;
+                lastGearMs     = (float)gearMs;
                 hitFrameSeq++;
             }
+        }
+
+        double _refPoseMs;
+
+        // Рефери, руки игрока и пояс. Рука победителя идёт за рукой рефери, поэтому после него.
+        // Из SetViewSize зовётся с нулевым временем: только расставить по новой камере.
+        void PoseFigures(float sdt, float udt)
+        {
+            double t0 = _tickSw.Elapsed.TotalMilliseconds;
+            _refView.Tick(sdt, udt);
+            _refPoseMs = _tickSw.Elapsed.TotalMilliseconds - t0;
+            if (_refView.IsGripping)
+            {
+                if (_referee.PlayerWon) _playerGloves.RaiseVictory(RefereeView.PlayerGripSide, _refView.GripPoint());
+                else _foeBody.HoldWrist(RefereeView.FoeGripArm, _refView.GripPoint());
+            }
+            // после конца боя руки игрока живут в реальном времени: удар нокаута не висит в кадре всё слоу-мо
+            _playerGloves.Tick(Finished ? udt : sdt);
+            _belt.Tick(sdt, udt);
         }
 
         // ---- Ввод игрока ---------------------------------------------------
@@ -396,6 +465,9 @@ namespace VoxGame
                         _referee.OnKnockout(true);
                         PlayerWon = true;
                         Finished  = true;
+                        _crowd.SetMood(CrowdMood.Cheer);
+                        _crowd.Burst(1f);
+                        _victory.Begin(true, _titleFight);
                         TriggerHitStop(0f, 1.0f, 0.22f);
                         OnFoeHit?.Invoke(result);
                         OnKnockout?.Invoke();
@@ -405,6 +477,8 @@ namespace VoxGame
                         _hud.ShowBanner("НОКДАУН!", 2f);
                         int riseAt = 4 + (int)(_sim.State.knockdowns % 3);
                         _referee.OnKnockdown(riseAt);
+                        _crowd.SetMood(CrowdMood.Tense);
+                        _crowd.Burst(0.8f);
                         TriggerHitStop(4f, 0.5f);
                         OnFoeHit?.Invoke(result);
                         OnKnockdown?.Invoke();
@@ -415,6 +489,10 @@ namespace VoxGame
                             : p.type == PunchType.Jab ? 0.008f : 0.015f;
                         _camShakeAmt = Mathf.Max(_camShakeAmt, shakeAmt);
                         if (p.isMega) TriggerHitStop(0f, 0.4f);
+                        // зал взрывается на мегу, контру и силовой удар
+                        if (p.isMega) _crowd.Burst(1f);
+                        else if (counter) _crowd.Burst(0.7f);
+                        else if (strength > 0) _crowd.Burst(0.4f);
                         OnFoeHit?.Invoke(result);
                     }
                 }
@@ -532,6 +610,9 @@ namespace VoxGame
                 Finished  = true;
                 PlayerWon = false;
                 _referee.OnKnockout(false);
+                _crowd.SetMood(CrowdMood.Cheer);
+                _crowd.Burst(1f);
+                _victory.Begin(false, _titleFight);
             }
         }
 
@@ -549,12 +630,12 @@ namespace VoxGame
                     _sim.State.phase = FightPhase.Rise;
                     _sim.State.groggy = Mathf.Max(0f, _sim.State.groggy * 0.5f);
                     _hud.ShowBanner("БОЙ!", 1.5f);
+                    _crowd.SetMood(CrowdMood.Idle);
                     break;
                 case RefereeEventType.FightStopped:
                     Finished = true;
-                    break;
-                case RefereeEventType.HandRaised:
-                    ShowResult();
+                    // отсчёт до десяти: развязка начинается здесь (нокаут начал её раньше)
+                    if (_victory.State == VictoryState.Idle) _victory.Begin(_referee.PlayerWon, _titleFight);
                     break;
             }
         }
@@ -590,7 +671,10 @@ namespace VoxGame
             float w = _viewW > 0 ? _viewW : Screen.width, h = _viewH > 0 ? _viewH : Screen.height;
             bool land = w > h;
             _cam.fieldOfView = GameUtil.CalcFov(w, h);
-            _playerGloves.SetView(_cam.fieldOfView, h > 0f ? w / h : 0.46f);
+            float aspect = h > 0f ? w / h : 0.46f;
+            _playerGloves.SetView(_cam.fieldOfView, aspect);
+            _belt?.SetView(_cam.fieldOfView, aspect);
+            _refView?.SetView(aspect);
 
             Vector3 eye = _eye;
             if (_camShakeAmt > 0.0001f)
@@ -607,8 +691,11 @@ namespace VoxGame
             _camDodge = Mathf.Lerp(_camDodge, dodgeT, 1f - Mathf.Exp(-18f * realDt));
             eye.x += _camDodge;
 
-            // Взгляд: по стойке, а за упавшим соперником — вниз, к его голове
-            bool low = st.phase == FightPhase.Down || st.phase == FightPhase.KO;
+            // Взгляд: по стойке, а за упавшим соперником — вниз, к его голове; когда рефери пошёл к победителю — снова прямо
+            // (в нокауте вниз — только пока рефери подходит: его взмахи над головой должны быть в кадре)
+            bool low = st.phase == FightPhase.Down
+                       || (st.phase == FightPhase.KO && (_victory == null || _victory.State == VictoryState.Idle
+                                                         || _referee.State == RefereeState.StepIn));
             _camFollow = Mathf.Lerp(_camFollow, low ? 0.6f : 0f, 1f - Mathf.Exp(-3.5f * realDt));
             Quaternion stand = Quaternion.Euler(land ? LandPitch : PortPitch, 180f, _camDodge * -25f);
             Vector3 look = Vector3.Lerp(eye + stand * Vector3.forward * 1.1f, _foeBody.headMount.position, _camFollow);
@@ -650,6 +737,12 @@ namespace VoxGame
             _sim.CarryMegaMeter(prevMega);
             _ai  = new FightAI(_aiStyle, _foeDef.level, _foeDef.seed);
             _referee.Reset();
+            _victory.Reset();
+            _refView.Snap();
+            _crowd.SetMood(CrowdMood.Idle);
+            _playerGloves.ClearVictory();
+            _playerGloves.SetVisible(true);
+            _foeBody.ReleaseWrist();
 
             Finished      = false;
             PlayerWon     = false;
@@ -682,6 +775,9 @@ namespace VoxGame
 
         public void Dispose()
         {
+            _refView?.Dispose();
+            _crowd?.Dispose();
+            _belt?.Dispose();
             _ring?.Dispose();
             _foeBody?.Dispose();
             _v?.Dispose();
@@ -692,6 +788,9 @@ namespace VoxGame
             if (_anatMat   != null) GameUtil.Destroy(_anatMat);
             if (_voxMat    != null) GameUtil.Destroy(_voxMat);
             _ring         = null;
+            _refView      = null;
+            _crowd        = null;
+            _belt         = null;
             _foeBody      = null;
             _v            = null;
             _playerGloves = null;

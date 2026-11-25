@@ -21,7 +21,7 @@ using Object = UnityEngine.Object;
 
 namespace VoxGame.Editor
 {
-    public static class ShotsTaker
+    public static partial class ShotsTaker
     {
         const float DT = 1f / 60f;
         const int PortW = 540, PortH = 1170, LandW = 1170, LandH = 540;
@@ -73,7 +73,8 @@ namespace VoxGame.Editor
             return d;
         }
 
-        static FightDirector NewFight(out Camera cam, out UIRoot ui, float hpMult = 1f, float stunMult = 1f)
+        static FightDirector NewFight(out Camera cam, out UIRoot ui, float hpMult = 1f, float stunMult = 1f,
+                                      int foeIdx = 0, bool forceBelt = false)
         {
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
@@ -91,10 +92,10 @@ namespace VoxGame.Editor
             ui = uiGO.AddComponent<UIRoot>();
             ui.Init(cam);
 
-            var def = new RosterDef(42u).Get(0);
+            var def = new RosterDef(42u).Get(foeIdx);
             var fdGO = new GameObject("FightDirector");
             var director = fdGO.AddComponent<FightDirector>();
-            director.Init(def, new PlayerProfile(), cam, ui, null, hpMult, stunMult);
+            director.Init(def, new PlayerProfile(), cam, ui, null, hpMult, stunMult, foeIdx, RosterDef.Count, forceBelt);
             director.SetViewSize(PortW, PortH);
             return director;
         }
@@ -119,7 +120,7 @@ namespace VoxGame.Editor
 
         // ------------------------------------------------------------------ Замер кадра удара
 
-        struct HitFrame { public double ext, frame, pick, hit, tick, layer, tSim, tBore, tRest, tMesh, tickLastMs; }
+        struct HitFrame { public double ext, frame, pick, hit, tick, layer, tSim, tBore, tRest, tMesh, tickLastMs, crowd, refv, gear; }
 
         // Что повторить на отдельной голове: игровое время каждого кадра и удар в тех кадрах, где он был.
         struct Rec { public float sdt; public bool hit; public Ray ray; public float3 pt, dir; public int str; }
@@ -154,7 +155,7 @@ namespace VoxGame.Editor
                 frames.Add(new HitFrame
                 {
                     ext = ext, frame = d.lastHitFrameMs, pick = d.lastPickMs, hit = d.lastHitMs, tick = d.lastAnatTickMs,
-                    layer = d.lastLayerMs, tSim = v.tSim, tBore = v.tBore, tRest = v.tRest, tMesh = v.tMesh, tickLastMs = v.lastMs,
+                    layer = d.lastLayerMs, crowd = d.lastCrowdMs, refv = d.lastRefMs, gear = d.lastGearMs, tSim = v.tSim, tBore = v.tBore, tRest = v.tRest, tMesh = v.tMesh, tickLastMs = v.lastMs,
                 });
             }
 
@@ -324,7 +325,7 @@ namespace VoxGame.Editor
             }
             {
                 int w = 0;
-                while (d.Referee.State != RefereeState.Done && w < 900) { run.Tick(); w++; }
+                while (!d.Victory.IsDone && w < 900) { run.Tick(); w++; }
                 run.Ticks(30);
                 log.AppendLine("GAME_RESULT finished=" + d.Finished + " won=" + d.PlayerWon + " punches=" + punches + " megaSwipes=" + megas
                                + " kd=" + d.State.knockdowns + " ref=" + d.Referee.State + " playerHp=" + F(d.State.playerHp));
@@ -351,6 +352,8 @@ namespace VoxGame.Editor
             string brk = "GAME_HIT_BREAKDOWN pick=" + F(aPick) + " hit=" + F(aHit) + " tick=" + F(aTick) + " layer=" + F(aLayer)
                          + " (layer " + layerStats + "; outer Stopwatch avg=" + F(aExt) + ")"
                          + " hitParts tSim=" + F(aSim) + " tBore=" + F(aBore) + " tRest=" + F(aRest) + " tMesh=" + F(aMesh) + " tick.lastMs=" + F(aLast);
+            string parts = "GAME_LAYER_PARTS crowd " + Stats(fs, WarmHits, f => f.crowd, out _) + "; referee " + Stats(fs, WarmHits, f => f.refv, out _)
+                           + "; gear " + Stats(fs, WarmHits, f => f.gear, out _);
 
             Vector3 headAt = d.Head.root.position;
             var recs = run.recs;
@@ -364,13 +367,9 @@ namespace VoxGame.Editor
             Stats(bare, WarmHits, f => f.tick, out double bTick);
             bareLine += " pick=" + F(bPick) + " hit=" + F(bHit) + " tick=" + F(bTick);
 
-            Debug.Log(hitsLine);
-            Debug.Log(log.ToString().TrimEnd());
-            Debug.Log(warm.ToString());
-            Debug.Log(frameLine);
-            Debug.Log(brk);
-            Debug.Log(bareLine);
-            Debug.Log("GAME_BURST " + BurstInfo());
+            LastLog = hitsLine + "\n" + log.ToString().TrimEnd() + "\n" + warm + "\n" + frameLine + "\n" + brk + "\n" + parts
+                      + "\n" + bareLine + "\nGAME_BURST " + BurstInfo();
+            Debug.Log(LastLog);
             Debug.Log("GAME_SHOTS_OK " + dir);
         }
 
