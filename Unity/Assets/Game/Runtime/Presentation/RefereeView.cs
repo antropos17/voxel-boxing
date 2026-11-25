@@ -39,10 +39,12 @@ namespace VoxGame
         // Победил игрок: рефери справа от камеры, берёт левую перчатку игрока за запястье (оси камеры).
         // Левую — чтобы предплечье игрока уходило за левый край, а не поперёк рефери.
         static readonly Vector3 PlayerWristRest   = new Vector3(-0.15f, -0.30f, 0.56f);
-        // Поднятое запястье — левее середины и выше глаз: перчатка целиком в кадре и ниже полос HUD в обеих ориентациях.
-        // Рефери стоит так, что его правое плечо правее и заметно дальше запястья: рука почти прямая, не поперёк лица.
-        static readonly Vector3 PlayerWristRaised = new Vector3(-0.12f, 0.10f, 0.91f);
-        const float PlayerWinRight = 0.18f, PlayerWinFwd = 1.33f;
+        // Поднятое запястье — у середины и выше глаз: перчатка вверху кадра (HUD в развязке убран).
+        // Рефери стоит сбоку справа (в портрете виден по пояс у края кадра), его рука почти прямая, не поперёк лица.
+        static readonly Vector3 PlayerWristRaised = new Vector3(-0.04f, 0.24f, 0.92f);
+        const float PlayerWinRight = 0.30f, PlayerWinFwd = 1.30f;
+        // Пояс выносят перед камерой: рефери отпускает руку и отходит в сторону, чтобы не стоять за поясом.
+        const float BeltStepAside = 0.55f;
 
         // Какой рукой победителя машет рефери: у игрока сторона как в PlayerGloves.Punch (−1 — левая),
         // у соперника — номер руки FoeBody (1 — на экране справа, мир −X).
@@ -221,7 +223,7 @@ namespace VoxGame
         Vector3 DownSpot() => WinnerIsPlayer ? FoeSpot(CountSpot) : CamSpot(PlayerDownRight, PlayerDownFwd);
         Vector3 DownTarget() => WinnerIsPlayer ? FoeHead() : Cam() + Vector3.down * 0.5f;
 
-        Vector3 WinStand() => WinnerIsPlayer ? CamSpot(PlayerWinRight, PlayerWinFwd)
+        Vector3 WinStand() => WinnerIsPlayer ? CamSpot(PlayerWinRight + (_letGo ? BeltStepAside : 0f), PlayerWinFwd)
                                              : FoeSpot(FoeWinStand);
 
         Vector3 GripStart() => WinnerIsPlayer

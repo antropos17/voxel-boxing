@@ -110,6 +110,7 @@ namespace VoxGame.Editor
                 log.AppendLine("W2_REF_RAISE victory=" + d.Victory.State + " ref=" + d.Referee.State + " gripping=" + d.RefereeFigure.IsGripping
                                + " grip(cam)=" + cam.transform.InverseTransformPoint(g).ToString("F3") + " mood=" + d.Crowd.Mood);
                 Pair(d, cam, ui, dir, "w2-ref-raise");
+                Pair(d, cam, ui, dir, "w3-victory-raise");
                 DiagRef(d, cam, "raise");
             }
 
@@ -120,6 +121,7 @@ namespace VoxGame.Editor
                 run.Ticks(20);
                 log.AppendLine("W2_BELT victory=" + d.Victory.State + " shows=" + d.Victory.ShowsBelt + " settled=" + d.Belt.Settled);
                 Pair(d, cam, ui, dir, "w2-belt");
+                Pair(d, cam, ui, dir, "w3-victory-belt");
             }
 
             // ---- экран результата после развязки

@@ -120,7 +120,7 @@ namespace VoxGame.Editor
 
         // ------------------------------------------------------------------ Замер кадра удара
 
-        struct HitFrame { public double ext, frame, pick, hit, tick, layer, tSim, tBore, tRest, tMesh, tickLastMs, crowd, refv, gear; }
+        struct HitFrame { public double ext, frame, pick, hit, tick, layer, tSim, tBore, tRest, tMesh, tickLastMs, crowd, refv, gear, fx, sound; }
 
         // Что повторить на отдельной голове: игровое время каждого кадра и удар в тех кадрах, где он был.
         struct Rec { public float sdt; public bool hit; public Ray ray; public float3 pt, dir; public int str; }
@@ -133,11 +133,12 @@ namespace VoxGame.Editor
             readonly Stopwatch sw = new Stopwatch();
 
             bool dodged;
+            public bool defend = true;   // false — игрок не уклоняется (снимки пропущенного удара, поражение)
 
             public void Tick()
             {
                 // защита игрока — настоящими кнопками HUD: уклон в сторону от летящего удара
-                if (d.State.phase == FightPhase.Strike && !dodged)
+                if (defend && d.State.phase == FightPhase.Strike && !dodged)
                 {
                     if (d.FoeAttackSide > 0) d.Hud.PressDodgeLeft(); else d.Hud.PressDodgeRight();
                     dodged = true;
@@ -155,7 +156,7 @@ namespace VoxGame.Editor
                 frames.Add(new HitFrame
                 {
                     ext = ext, frame = d.lastHitFrameMs, pick = d.lastPickMs, hit = d.lastHitMs, tick = d.lastAnatTickMs,
-                    layer = d.lastLayerMs, crowd = d.lastCrowdMs, refv = d.lastRefMs, gear = d.lastGearMs, tSim = v.tSim, tBore = v.tBore, tRest = v.tRest, tMesh = v.tMesh, tickLastMs = v.lastMs,
+                    layer = d.lastLayerMs, crowd = d.lastCrowdMs, refv = d.lastRefMs, gear = d.lastGearMs, fx = d.lastFxMs, sound = d.lastSoundMs, tSim = v.tSim, tBore = v.tBore, tRest = v.tRest, tMesh = v.tMesh, tickLastMs = v.lastMs,
                 });
             }
 
@@ -353,7 +354,18 @@ namespace VoxGame.Editor
                          + " (layer " + layerStats + "; outer Stopwatch avg=" + F(aExt) + ")"
                          + " hitParts tSim=" + F(aSim) + " tBore=" + F(aBore) + " tRest=" + F(aRest) + " tMesh=" + F(aMesh) + " tick.lastMs=" + F(aLast);
             string parts = "GAME_LAYER_PARTS crowd " + Stats(fs, WarmHits, f => f.crowd, out _) + "; referee " + Stats(fs, WarmHits, f => f.refv, out _)
-                           + "; gear " + Stats(fs, WarmHits, f => f.gear, out _);
+                           + "; gear " + Stats(fs, WarmHits, f => f.gear, out _)
+                           + "; fx=" + Stats(fs, WarmHits, f => f.fx, out _) + "; sound=" + Stats(fs, WarmHits, f => f.sound, out _);
+            // самый дорогой кадр слоя: из чего он состоит
+            int wi = -1;
+            for (int i = WarmHits; i < fs.Count; i++) if (wi < 0 || fs[i].layer > fs[wi].layer) wi = i;
+            if (wi >= 0)
+            {
+                var w = fs[wi];
+                parts += "\nGAME_LAYER_WORST #" + (wi + 1) + " layer=" + F(w.layer) + " crowd=" + F(w.crowd) + " referee=" + F(w.refv)
+                       + " gear=" + F(w.gear) + " fx=" + F(w.fx) + " sound=" + F(w.sound)
+                       + " other=" + F(w.layer - w.crowd - w.refv - w.gear - w.fx - w.sound);
+            }
 
             Vector3 headAt = d.Head.root.position;
             var recs = run.recs;

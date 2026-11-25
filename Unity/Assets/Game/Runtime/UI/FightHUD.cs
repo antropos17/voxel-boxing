@@ -47,7 +47,19 @@ namespace VoxGame {
         int   _cacheCombo  = -1;
         bool  _cacheMegaRdy;
 
-        static readonly char[] _timeBuf = new char[4]; // "M:SS"
+        // Готовые строки таймера «M:SS» (0:00…9:59) и серии «×N»: в кадре боя строки не создаются.
+        const int TimerMax = 600, ComboMax = 99;
+        static readonly string[] TimerStr = BuildTimer(), ComboStr = BuildCombo();
+        static string[] BuildTimer() {
+            var a = new string[TimerMax];
+            for (int i = 0; i < TimerMax; i++) a[i] = (i / 60) + ":" + (i % 60 / 10) + (i % 10);
+            return a;
+        }
+        static string[] BuildCombo() {
+            var a = new string[ComboMax + 1];
+            for (int i = 0; i <= ComboMax; i++) a[i] = "×" + i;
+            return a;
+        }
 
         // ------------------------------------------------------------------ Таймеры баннеров
 
@@ -217,7 +229,7 @@ namespace VoxGame {
                 _cacheCombo = d.combo;
                 bool show = d.combo >= 2;
                 _comboLbl.gameObject.SetActive(show);
-                if (show) _comboLbl.text = "×" + d.combo;
+                if (show) _comboLbl.text = ComboStr[Mathf.Min(d.combo, ComboMax)];
             }
 
             // Телеграф: плашка «!» при замахе соперника; даже слабая подсказка стиля читается (не прозрачнее 0.55)
@@ -324,13 +336,9 @@ namespace VoxGame {
 
         // ------------------------------------------------------------------ Вспомогательное
 
-        // Формат M:SS через char-буфер — не аллоцирует при каждом вызове.
+        // Формат M:SS из готовых строк — без аллокаций.
         void WriteTimer(int m, int s) {
-            _timeBuf[0] = (char)('0' + m);
-            _timeBuf[1] = ':';
-            _timeBuf[2] = (char)('0' + s / 10);
-            _timeBuf[3] = (char)('0' + s % 10);
-            _timerLbl.text = new string(_timeBuf, 0, 4); // аллокация только при смене секунды
+            _timerLbl.text = TimerStr[Mathf.Clamp(m * 60 + s, 0, TimerMax - 1)];
         }
     }
 }

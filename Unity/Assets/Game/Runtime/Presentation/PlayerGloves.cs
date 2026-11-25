@@ -2,47 +2,54 @@ using UnityEngine;
 
 namespace VoxGame
 {
-    public enum GloveShape { Normal, Heavy, Narrow, Spiked }
-
-    public struct GloveLook
-    {
-        public Color      colorA, colorB;
-        public GloveShape shape;
-
-        // Смаппировать запись каталога (shapeTag 0-3 → GloveShape 0-3)
-        public static GloveLook FromEntry(GloveEntry e) => new GloveLook
-        {
-            colorA = e.colorA,
-            colorB = e.colorB,
-            shape  = (GloveShape)Mathf.Clamp(e.shapeTag, 0, (int)GloveShape.Spiked),
-        };
-    }
-
     // Руки игрока от первого лица: две перчатки с предплечьями в осях камеры (камера смотрит в свой +Z).
     // Рука 0 — левая (на экране слева), рука 1 — правая.
+    // Предплечье всегда идёт от точки-«локтя» под нижним краем кадра к запястью: в покое, в ударе, в блоке
+    // и в поднятой руке оно входит в кадр снизу (или из нижнего угла), а его конец всегда за кадром.
     // НЕ MonoBehaviour — создаётся и управляется из FightDirector.
     public class PlayerGloves
     {
-        const float Scale    = 0.86f;   // руки игрока чуть мельче рук соперника: иначе в портрете две перчатки не помещаются
-        const float RestZ    = 0.55f;   // глубина перчаток в стойке, м от камеры
-        const float ReturnT  = 0.16f;   // возврат руки после удара, с
+        const float Scale   = 0.86f;   // руки игрока чуть мельче рук соперника: иначе в портрете две перчатки не помещаются
+        const float ReturnT = 0.16f;   // возврат руки после удара, с
+
+        // Поза покоя: доли полуэкрана от центра (nx — к своему краю, ny — вверх, минус — вниз) и глубина, м.
+        // Портрет: кнопки HUD по всей ширине низа (~13% высоты), перчатки с манжетами над ними.
+        const float RestNXP = 0.60f, RestNYP = -0.40f, RestZP = 0.60f;
+        // Ландшафт: кнопки только по нижним углам, перчатки ближе к середине.
+        const float RestNXL = 0.40f, RestNYL = -0.52f, RestZL = 0.52f;
+        // Блок: перчатки выше и ближе
+        const float BlockNXP = 0.62f, BlockNXL = 0.21f, BlockNY = -0.36f, BlockZ = 0.40f;
+
+        // «Локоть»: точка под нижним краем кадра на глубине AnchorZ (в ударе уходит до AnchorPunchZ),
+        // по горизонтали — доля полуширины кадра на этой глубине (1 — нижний угол своей стороны).
+        const float AnchorZ = 0.22f, AnchorPunchZ = 0.50f;
+        const float AnchorGap = 0.07f;   // м за нижней плоскостью кадра: больше толщины предплечья, среза не видно
+        const float RestAUP = 0.85f, RestAUL = 0.55f, BlockAU = 0.45f;
+        const float JabAU = 0.85f, HookAU = 1.0f, UpperAU = 0.50f, MegaAU = 0.80f;
+        const float ForeFollow = 0.55f;  // насколько ось перчатки следует за предплечьем (остальное — направление костяшек)
+        const float EdgeX = 0.90f;       // в размахе хука центр перчатки не дальше этой доли полуширины кадра
+        const float ForeOver = 0.05f;    // запас длины предплечья за «локтем», м
 
         readonly Transform _cam;
         readonly Transform[] _fore = new Transform[2], _glove = new Transform[2];
-        readonly Mesh[] _meshes;
+        readonly MeshFilter[] _foreMf = new MeshFilter[2], _gloveMf = new MeshFilter[2];
+        Mesh _foreMesh;
+        readonly Mesh[] _gloveMesh = new Mesh[2];
+        GloveLook _look;
+
+        // Кадр
+        float _tanV = 0.64f, _tanH = 0.30f, _nLen = 1.19f;
+        float _restAU = RestAUP;
 
         // Положение в стойке (оси камеры) — зависит от поля зрения и пропорций экрана
         readonly Vector3[] _rest = new Vector3[2], _block = new Vector3[2];
         readonly Vector3[] _base = new Vector3[2];   // сглаженное положение без удара
-        bool _baseSet;
+        bool  _baseSet;
+        float _blockW;
 
         // Удар
         readonly float[] _ext = new float[2], _timer = new float[2], _outT = new float[2];
-        readonly Vector3[] _goal = new Vector3[2], _lunge = new Vector3[2];
-        const float LungeMin  = 0.55f;  // наименьший вынос плеча в ударе, м
-        const float LungeKeep = 0.40f;  // расстояние плечо → цель в конце удара (рука 0.49 м, остаётся сгиб в локте)
-
-        static Vector3 Shoulder(float sg) => new Vector3(sg * 0.17f, -0.30f, 0.10f);
+        readonly Vector3[] _goal = new Vector3[2];
         readonly PunchType[] _kind = new PunchType[2];
 
         bool  _blocking;
@@ -51,7 +58,9 @@ namespace VoxGame
 
         // Поднятая рука победителя: запястье в руке рефери (оси камеры)
         const float VictoryIn = 0.18f;  // переход в позу и обратно, с
-        const float VictoryStretch = 3.2f; // предплечье поднятой руки длиннее: локоть за краем кадра, без обрубка посреди экрана
+        // Поднятая рука входит в кадр из нижнего угла своей стороны и с глубины VictoryAnchorZ: предплечье идёт
+        // наискось вверх, а не столбом из середины низа. Вторая рука в это время опущена за нижний край.
+        const float VictoryAU = 1.0f, VictoryAnchorZ = 0.55f, VictoryDropNY = -1.7f;
         int     _vicSide = -1;
         bool    _vicOn;
         float   _vicW;
@@ -63,42 +72,67 @@ namespace VoxGame
         public PlayerGloves(Transform cameraParent, GloveLook look, Material mat)
         {
             _cam = cameraParent;
-            float k = look.shape == GloveShape.Heavy ? 1.12f : 1f;
-            float kx = look.shape == GloveShape.Narrow ? 0.86f : 1f;
-            bool studs = look.shape == GloveShape.Spiked;
-            var fore = BoxerParts.ForeArmMesh(BoxerParts.HeadSkin);
-            var gl = new[]
-            {
-                BoxerParts.GloveMesh(+1, look.colorA, look.colorB, k, kx, studs),
-                BoxerParts.GloveMesh(-1, look.colorA, look.colorB, k, kx, studs),
-            };
-            _meshes = new[] { fore, gl[0], gl[1] };
+            BuildMeshes(look);
             for (int s = 0; s < 2; s++)
             {
-                _fore[s]  = VoxModel.Spawn("playerForeArm" + s, _cam, fore, mat);
-                _glove[s] = VoxModel.Spawn("playerGlove" + s, _cam, gl[s], mat);
+                _fore[s]  = VoxModel.Spawn("playerForeArm" + s, _cam, _foreMesh, mat);
+                _glove[s] = VoxModel.Spawn("playerGlove" + s, _cam, _gloveMesh[s], mat);
+                _foreMf[s]  = _fore[s].GetComponent<MeshFilter>();
+                _gloveMf[s] = _glove[s].GetComponent<MeshFilter>();
                 _fore[s].localScale = _glove[s].localScale = Vector3.one * Scale;
             }
             SetView(60f, 0.46f);
             Tick(0f);
         }
 
+        public GloveLook Look => _look;
+
+        // Сменить вид перчаток (магазин, переигровка): сетки перестраиваются, поза не меняется.
+        public void SetLook(GloveLook look)
+        {
+            DestroyMeshes();
+            BuildMeshes(look);
+            for (int s = 0; s < 2; s++)
+            {
+                _foreMf[s].sharedMesh  = _foreMesh;
+                _gloveMf[s].sharedMesh = _gloveMesh[s];
+            }
+        }
+
+        public void SetGloves(string gloveId) => SetLook(GloveLook.FromEntry(GlovesCatalog.Get(gloveId)));
+
+        void BuildMeshes(GloveLook look)
+        {
+            _look = look;
+            _foreMesh = GloveLooks.BuildForeArmMesh(look);
+            _gloveMesh[0] = GloveLooks.BuildGloveMesh(look, +1);   // левая: большой палец сверху при тыльной стороне наружу
+            _gloveMesh[1] = GloveLooks.BuildGloveMesh(look, -1);
+        }
+
+        void DestroyMeshes()
+        {
+            GameUtil.Destroy(_foreMesh);
+            GameUtil.Destroy(_gloveMesh[0]);
+            GameUtil.Destroy(_gloveMesh[1]);
+            _foreMesh = null; _gloveMesh[0] = _gloveMesh[1] = null;
+        }
+
         // Поле зрения камеры (вертикальное, градусы) и отношение ширины к высоте: перчатки стоят по бокам у нижнего края.
         public void SetView(float vFovDeg, float aspect)
         {
-            float vHalf = vFovDeg * 0.5f * Mathf.Deg2Rad;
-            float hHalf = Mathf.Atan(Mathf.Tan(vHalf) * aspect);
-            // в портрете кадр узкий: перчатки дальше и ближе к углам, иначе две перчатки занимают весь низ
+            _tanV = Mathf.Tan(vFovDeg * 0.5f * Mathf.Deg2Rad);
+            _tanH = _tanV * aspect;
+            _nLen = Mathf.Sqrt(1f + _tanV * _tanV);
             bool port = aspect < 1f;
-            float z = port ? 0.64f : RestZ;
-            // в портрете перчатки подняты над кнопками HUD (низ кадра ~13% занят кнопками)
-            float xAng = port ? hHalf * 0.80f : Mathf.Min(hHalf * 0.57f, 22f * Mathf.Deg2Rad);
-            float x = z * Mathf.Tan(xAng), y = -z * Mathf.Tan(vHalf * (port ? 0.55f : 0.84f));
-            float bx = Mathf.Min(x, 0.085f), by = -0.40f * Mathf.Tan(vHalf * 0.42f);
+            _restAU = port ? RestAUP : RestAUL;
+            float rz = port ? RestZP : RestZL, rnx = port ? RestNXP : RestNXL, rny = port ? RestNYP : RestNYL;
+            float bnx = port ? BlockNXP : BlockNXL;
             for (int s = 0; s < 2; s++)
             {
+                float sg = Sign(s);
+                Vector3 rest  = new Vector3(sg * rnx * rz * _tanH, rny * rz * _tanV, rz);
+                Vector3 block = new Vector3(sg * bnx * BlockZ * _tanH, BlockNY * BlockZ * _tanV, BlockZ);
                 // при повороте экрана перчатки переезжают сразу, а не плывут через полэкрана
-                Vector3 rest = new Vector3(Sign(s) * x, y, z), block = new Vector3(Sign(s) * bx, by, 0.40f);
                 _base[s] = _baseSet ? _base[s] + (_blocking ? block - _block[s] : rest - _rest[s]) : rest;
                 _rest[s]  = rest;
                 _block[s] = block;
@@ -122,9 +156,6 @@ namespace VoxGame
                 default:              t += new Vector3(0f, 0f, -0.08f); break;                 // перед лицом
             }
             _goal[s]  = t;
-            // корпус идёт за ударом: плечо выносится к цели настолько, чтобы рука доставала до головы соперника
-            Vector3 sh = Shoulder(sg), to = t - sh;
-            _lunge[s] = to.normalized * Mathf.Max(LungeMin, to.magnitude - LungeKeep);
             _kind[s]  = kind;
             _timer[s] = Mathf.Max(duration, 0.08f);
             _outT[s]  = Mathf.Max(_timer[s] * 0.5f, 0.045f);
@@ -172,6 +203,7 @@ namespace VoxGame
         {
             if (_dodgeTimer > 0f) { _dodgeTimer -= dt; if (_dodgeTimer <= 0f) _dodgeSide = 0; }
             float kb = 1f - Mathf.Exp(-14f * dt);
+            _blockW = Mathf.Lerp(_blockW, _blocking ? 1f : 0f, kb);
 
             for (int s = 0; s < 2; s++)
             {
@@ -193,88 +225,122 @@ namespace VoxGame
                 float arc = Mathf.Sin(Mathf.PI * _ext[s]);
 
                 // стойка: костяшки вверх и вперёд, тыльная сторона наружу и к игроку
-                Vector3 pos = _base[s];
-                Vector3 kn = new Vector3(-sg * 0.14f, 0.78f, 0.61f);
+                Vector3 pos  = _base[s];
+                Vector3 kn   = new Vector3(-sg * 0.14f, 0.78f, 0.61f);
                 Vector3 back = new Vector3(sg * 0.8f, 0.2f, -0.55f);
-                Vector3 shoulder = Shoulder(sg);
+                float au = sg * Mathf.Lerp(_restAU, BlockAU, _blockW), az = AnchorZ;
 
                 if (e > 0f)
                 {
                     Vector3 pk, pb, bow;
+                    float pu;
                     switch (_kind[s])
                     {
                         case PunchType.Hook:
                             pk = new Vector3(-sg * 0.9f, 0.05f, 0.45f); pb = new Vector3(0f, 0.75f, -0.65f);
-                            bow = new Vector3(sg * 0.17f, 0.02f, -0.04f); break;
+                            bow = new Vector3(sg * 0.17f, 0.02f, -0.04f); pu = HookAU; break;
                         case PunchType.Upper:
                             pk = new Vector3(0f, 0.85f, 0.52f); pb = new Vector3(sg * 0.25f, -0.45f, 0.85f);
-                            bow = new Vector3(0f, -0.16f, 0f); break;
+                            bow = new Vector3(0f, -0.16f, 0f); pu = UpperAU; break;
                         case PunchType.Mega:
                             pk = new Vector3(0f, 0.05f, 1f); pb = new Vector3(sg * 0.3f, 1f, 0f);
-                            bow = new Vector3(sg * 0.08f, 0.06f, -0.10f); break;
+                            bow = new Vector3(sg * 0.08f, 0.06f, -0.10f); pu = MegaAU; break;
                         default:
                             pk = new Vector3(0f, 0.05f, 1f); pb = new Vector3(sg * 0.3f, 1f, 0f);
-                            bow = Vector3.zero; break;
+                            bow = Vector3.zero; pu = JabAU; break;
                     }
-                    pos = Vector3.Lerp(pos, _goal[s], e) + bow * arc;
-                    kn = Vector3.Lerp(kn, pk, e);
+                    pos  = Vector3.Lerp(pos, _goal[s], e) + bow * arc;
+                    kn   = Vector3.Lerp(kn, pk, e);
                     back = Vector3.Lerp(back, pb, e);
-                    // корпус идёт за ударом; плечо не рисуется, поэтому вынос с запасом: рука достаёт до головы
-                    // соперника, а не застывает огромной перчаткой перед камерой
-                    shoulder += _lunge[s] * e;
+                    au   = Mathf.Lerp(au, sg * pu, e);
+                    az   = Mathf.Lerp(AnchorZ, AnchorPunchZ, e);
+                    // размах хука не уводит перчатку за боковой край кадра
+                    float lim = Mathf.Max(0.05f, pos.z) * _tanH * EdgeX;
+                    pos.x = Mathf.Clamp(pos.x, -lim, lim);
                 }
 
-                Vector3 pole = new Vector3(sg * 0.55f, -1f, -0.25f);
+                float lockW = 0f;
                 if (s == _vicSide)
                 {
                     _vicW = Mathf.MoveTowards(_vicW, _vicOn ? 1f : 0f, dt / VictoryIn);
-                    if (_vicW > 0f) VictoryPose(sg, _vicW, ref pos, ref kn, ref back, ref shoulder, ref pole);
+                    if (_vicW > 0f)
+                    {
+                        VictoryPose(sg, _vicW, ref pos, ref kn, ref back, ref au);
+                        az = Mathf.Lerp(az, VictoryAnchorZ, _vicW);
+                        lockW = _vicW;
+                    }
                 }
+                else if (_vicSide >= 0 && _vicW > 0f)
+                    pos.y = Mathf.Lerp(pos.y, VictoryDropNY * pos.z * _tanV, _vicW);
 
-                BoxerParts.SolveArm(null, _fore[s], _glove[s],
-                    _cam.TransformPoint(shoulder), _cam.TransformPoint(pos),
-                    _cam.TransformDirection(kn), _cam.TransformDirection(pole),
-                    _cam.TransformDirection(back), Scale);
-                StretchFore(s, s == _vicSide ? _vicW : 0f);
+                Place(s, pos, kn, back, au, az, lockW);
             }
         }
 
-        // Предплечье тянется вдоль своей оси от запястья (k = 1 — обычная длина). Модель идёт от локтя по +Y.
-        void StretchFore(int s, float w)
-        {
-            Transform f = _fore[s];
-            if (w <= 0f)
-            {
-                if (f.localScale.y != Scale) f.localScale = Vector3.one * Scale;
-                return;
-            }
-            float l2 = BoxerParts.ForeLen * Scale, k = 1f + (VictoryStretch - 1f) * w;
-            Vector3 wrist = f.position + f.up * l2;
-            f.position = wrist - f.up * (l2 * k);
-            f.localScale = new Vector3(Scale, Scale * k, Scale);
-        }
-
-        // Поднятая рука (оси камеры): запястье в точке хвата, костяшки вверх; предплечье уходит вниз и наружу за край
-        // кадра (плечо не рисуется, локоть должен быть вне кадра). w — вес позы 0..1.
-        void VictoryPose(float sg, float w, ref Vector3 pos, ref Vector3 kn, ref Vector3 back, ref Vector3 shoulder, ref Vector3 pole)
+        // Поднятая рука (оси камеры): запястье в точке хвата, костяшки вверх; «локоть» под кадром прямо под запястьем,
+        // поэтому предплечье идёт от нижнего края вверх. w — вес позы 0..1.
+        void VictoryPose(float sg, float w, ref Vector3 pos, ref Vector3 kn, ref Vector3 back, ref float au)
         {
             Vector3 up = _cam.InverseTransformDirection(Vector3.up);
             Vector3 vk = (up * 0.92f + new Vector3(-sg * 0.12f, 0f, 0.2f)).normalized;
-            Vector3 wrist = _vicWrist;
-            float l1 = BoxerParts.UpperLen * Scale, l2 = BoxerParts.ForeLen * Scale;
-            Vector3 elbow = wrist + new Vector3(sg * 0.55f, -0.55f, -0.62f).normalized * l2;
-            Vector3 sh = elbow + new Vector3(sg * 0.25f, -0.85f, -0.45f).normalized * (l1 * 0.98f);
-            Vector3 gt = wrist + vk * BoxerParts.GloveOff * Scale;
-            pos      = Vector3.Lerp(pos, gt, w);
-            kn       = Vector3.Lerp(kn, vk, w).normalized;
-            back     = Vector3.Lerp(back, new Vector3(sg * 0.3f, 0f, -1f), w);
-            shoulder = Vector3.Lerp(shoulder, sh, w);
-            pole     = Vector3.Lerp(pole, elbow - (sh + wrist) * 0.5f, w);
+            Vector3 gt = _vicWrist + vk * (BoxerParts.GloveOff * Scale);
+            float vu = sg * VictoryAU;
+            pos  = Vector3.Lerp(pos, gt, w);
+            kn   = Vector3.Lerp(kn, vk, w).normalized;
+            back = Vector3.Lerp(back, new Vector3(sg * 0.3f, 0f, -1f), w);
+            au   = Mathf.Lerp(au, vu, w);
+        }
+
+        // Поставить руку (оси камеры): pos — центр перчатки, kn — направление костяшек, back — тыльная сторона,
+        // au/az — «локоть» под кадром, lockW — насколько запястье прижато к точке хвата рефери.
+        void Place(int s, Vector3 pos, Vector3 kn, Vector3 back, float au, float az, float lockW)
+        {
+            float go = BoxerParts.GloveOff * Scale;
+            Vector3 k = kn.sqrMagnitude > 1e-8f ? kn.normalized : Vector3.forward;
+            Vector3 w0 = pos - k * go;
+            Vector3 a = Dir(w0 - Anchor(au, az, w0), k);
+            Vector3 ga = (a * ForeFollow + k * (1f - ForeFollow)).normalized;
+            Vector3 w = pos - ga * go;
+            if (lockW > 0f) { w = Vector3.Lerp(w, _vicWrist, lockW); pos = w + ga * go; }
+            Vector3 el = Anchor(au, az, w);
+            a = Dir(w - el, ga);
+
+            _glove[s].localPosition = pos;
+            _glove[s].localRotation = Quaternion.LookRotation(ga, Perp(back, ga));
+            _fore[s].localPosition = w;
+            _fore[s].localRotation = Quaternion.LookRotation(Perp(back, a), a);
+            // сетка предплечья длиной ForeLenCm; если «локоть» дальше (удар в дальнюю голову) — тянем вдоль оси
+            float need = (w - el).magnitude + ForeOver, have = GloveLooks.ForeLenCm * 0.01f * Scale;
+            float sy = need > have ? Scale * need / have : Scale;
+            if (_fore[s].localScale.y != sy) _fore[s].localScale = new Vector3(Scale, sy, Scale);
+        }
+
+        // «Локоть» под нижним краем кадра: на глубине az, по горизонтали au долей полуширины, за нижней плоскостью
+        // кадра на AnchorGap и не ближе к ней, чем запястье w (иначе обратный конец предплечья заходит в кадр).
+        Vector3 Anchor(float au, float az, Vector3 w)
+        {
+            float wIn = (w.y + w.z * _tanV) / _nLen;           // расстояние запястья от нижней плоскости, + внутри кадра
+            float d = Mathf.Min(-AnchorGap, wIn - AnchorGap);
+            return new Vector3(au * az * _tanH, d * _nLen - az * _tanV, az);
+        }
+
+        static Vector3 Dir(Vector3 v, Vector3 fallback) => v.sqrMagnitude > 1e-8f ? v.normalized : fallback;
+
+        // h, сделанный перпендикулярным единичной оси ax; не вырождается.
+        static Vector3 Perp(Vector3 h, Vector3 ax)
+        {
+            Vector3 o = h - ax * Vector3.Dot(h, ax);
+            if (o.sqrMagnitude < 1e-4f)
+            {
+                o = Mathf.Abs(ax.y) < 0.9f ? Vector3.up : Vector3.forward;
+                o -= ax * Vector3.Dot(o, ax);
+            }
+            return o.normalized;
         }
 
         public void Dispose()
         {
-            foreach (var m in _meshes) GameUtil.Destroy(m);
+            DestroyMeshes();
             for (int i = 0; i < 2; i++)
             {
                 if (_fore[i] != null) GameUtil.Destroy(_fore[i].gameObject);
