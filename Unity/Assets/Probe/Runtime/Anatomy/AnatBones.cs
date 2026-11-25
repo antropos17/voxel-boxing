@@ -31,6 +31,11 @@ namespace VoxProbe
         public const float LeFort1Y = -2.4f; // Ле Фор I: горизонтальная линия над дном носа и верхушками корней
         public const int Dmax = 8;           // мягкие ткани идут за отломком до 8 текселей (3,2 см) от кости
         public static bool On = true;        // выключатель для замера «до / после» в одной сборке
+        /// Часть 10: вес мягких тканей считается с запасом вокруг коробки (соседние кости видны волне — край коробки не режет бровь),
+        /// сглаживание шире смещения (кожа на краю не перехлёстывается), кожа у глазного яблока держится за глаз. false — как в части 9.
+        /// -anatB10Off в командной строке — все правки части 10 выключены (снимки «без» через игровой слой, который не трогаем).
+        public static readonly bool B10Off = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-anatB10Off") >= 0;
+        public static bool Wide = !B10Off;
 
         public class Brk { public byte bone, level, side; public float t; public float3 c, n, d; public int body, slot; }
 
@@ -50,7 +55,7 @@ namespace VoxProbe
         /// Исходная анатомия для масок (по байту на ячейку: номер кости 0–31, бит 5 — кость, бит 6 — хрящ носа, бит 7 — не пусто):
         /// маска считается по целой голове, а не по текущей решётке — джоб не читает то, что меняет удар, итог не зависит от того, когда он идёт.
         readonly NativeArray<byte>[] code = new NativeArray<byte>[2];
-        readonly List<NativeArray<byte>> temps = new List<NativeArray<byte>>(); readonly List<NativeArray<int>> tempsI = new List<NativeArray<int>>();
+        readonly List<NativeArray<byte>> temps = new List<NativeArray<byte>>(); readonly List<NativeArray<int>> tempsI = new List<NativeArray<int>>(); readonly List<NativeArray<float>> tempsF = new List<NativeArray<float>>();
 
         public AnatBones(AnatHead a)
         {
@@ -258,13 +263,18 @@ namespace VoxProbe
                 if (r.slot < 0 || !Changed(r)) continue;
                 var g = r.body == 0 ? a.head : a.mand; int k = r.body == 0 ? (r.slot < 4 ? 0 : 1) : 2, ch = r.slot & 3;
                 Box(r, out float3 lo, out float3 hi);
+                int R = Wide ? math.clamp((int)math.ceil(1.5f * math.length(r.d) / (2 * g.step)), 2, 8) : 0;   // радиус сглаживания, тексели: склон в 1,5 раза шире смещения
+                if (Wide && r.body == 0) { float m = (R + 3) * 2 * g.step; lo -= m; hi += m; }
                 int3 clo = math.max((int3)math.floor((lo - g.org) / g.step), 0), chi = math.min((int3)math.floor((hi - g.org) / g.step), g.dims - 1);
                 int3 tlo = clo / 2, thi = chi / 2, bn = thi - tlo + 1; int nb = bn.x * bn.y * bn.z;
+                var fa = new NativeArray<float>(Wide ? nb * 3 : 1, Allocator.TempJob); tempsF.Add(fa);
                 var val = new NativeArray<byte>(nb, Allocator.TempJob); var tmp = new NativeArray<byte>(nb, Allocator.TempJob); var cls = new NativeArray<byte>(nb, Allocator.TempJob); var q = new NativeArray<int>(nb, Allocator.TempJob);
                 temps.Add(val); temps.Add(tmp); temps.Add(cls); tempsI.Add(q);
                 job = new FragJob { code = code[r.body], dims = g.dims, org = g.org, step = g.step, pos = g.pos, rot = g.rot,
                     tlo = tlo, thi = thi, td = tdims[r.body == 0 ? 0 : 1], bone = r.bone, side = r.side, level = r.level, c = r.c, ch = ch,
-                    tex = data[k], val = val, tmp = tmp, cls = cls, q = q }.Schedule(job);
+                    tex = data[k], val = val, tmp = tmp, cls = cls, q = q, fa = fa, R = R, fade = Wide && r.body == 0,
+                    eyes = Wide && r.body == 0 && r.bone != OrbitL && r.bone != OrbitR, eV = (byte)(r.bone == Maxilla && r.level >= 3 ? 153 : 0),
+                    eA = new float3(AnatGeo.EX, AnatGeo.EY, AnatGeo.EZ), eB = new float3(-AnatGeo.EX, AnatGeo.EY, AnatGeo.EZ), eR = AnatGeo.ER + 0.5f }.Schedule(job);
                 sent[r.bone] = r.level;
             }
             pending = true; dueFrame = frame + 1;
@@ -280,7 +290,7 @@ namespace VoxProbe
         {
             if (!pending) return;
             job.Complete(); pending = false;
-            foreach (var t in temps) t.Dispose(); foreach (var t in tempsI) t.Dispose(); temps.Clear(); tempsI.Clear();
+            foreach (var t in temps) t.Dispose(); foreach (var t in tempsI) t.Dispose(); foreach (var t in tempsF) t.Dispose(); temps.Clear(); tempsI.Clear(); tempsF.Clear();
             dirty = true;
         }
 
@@ -325,6 +335,7 @@ namespace VoxProbe
             public int3 dims, tlo, thi, td; public float3 org, pos, c; public float3x3 rot; public float step;
             public byte bone; public int side, level, ch;
             public NativeArray<byte> tex, val, tmp, cls; public NativeArray<int> q;
+            public NativeArray<float> fa; public int R; public bool eyes, fade; public byte eV; public float3 eA, eB; public float eR;
             public void Execute()
             {
                 for (int i = 0; i < tex.Length; i += 4) tex[i + ch] = 0;
@@ -344,13 +355,14 @@ namespace VoxProbe
                     }
                     int b = tx + bn.x * (ty + bn.y * tz);
                     if (fb + ob > 0) { val[b] = (byte)(255 * fb / (fb + ob)); cls[b] = 1; q[qt++] = b; }
+                    else if (sf > 0 && eyes && Near(new int3(tlo.x + tx, tlo.y + ty, tlo.z + tz))) { val[b] = eV; cls[b] = 3; q[qt++] = b; }   // веко и ткань у глазного яблока — с глазом
                     else { val[b] = 0; cls[b] = (byte)(sf > 0 ? 2 : 0); }
                 }
                 // волна по мягким тканям от кости: значение ближайшей кости; cls 1 — задано (у мягких 10 + шаг)
                 while (qh < qt)
                 {
                     int b = q[qh++]; int bx = b % bn.x, by = (b / bn.x) % bn.y, bz = b / (bn.x * bn.y);
-                    int dist = cls[b] == 1 ? 0 : cls[b] - 10; if (dist >= Dmax) continue;
+                    int dist = cls[b] == 1 || cls[b] == 3 ? 0 : cls[b] - 10; if (dist >= Dmax) continue;
                     for (int d = 0; d < 6; d++)
                     {
                         int nx = bx + (d == 0 ? 1 : d == 1 ? -1 : 0), ny = by + (d == 2 ? 1 : d == 3 ? -1 : 0), nz = bz + (d == 4 ? 1 : d == 5 ? -1 : 0);
@@ -360,7 +372,8 @@ namespace VoxProbe
                     }
                 }
                 // мягкие ткани сглаживаются (3 прохода по соседям): кожа над краем отломка — склон, а не ступенька; кость остаётся резкой
-                for (int pass = 0; pass < 3; pass++)
+                if (R > 0) Blur(bn);
+                else for (int pass = 0; pass < 3; pass++)
                 {
                     for (int b = 0; b < val.Length; b++)
                     {
@@ -380,17 +393,60 @@ namespace VoxProbe
                 for (int tz = 0; tz < bn.z; tz++) for (int ty = 0; ty < bn.y; ty++) for (int tx = 0; tx < bn.x; tx++)
                 {
                     int b = tx + bn.x * (ty + bn.y * tz); byte v = val[b];
-                    if (cls[b] == 0 || cls[b] == 2)
+                    if (R > 0 && cls[b] != 0) { if (cls[b] != 1 && fade) v = (byte)(v * math.saturate(Edge(new int3(tx, ty, tz), bn) / (float)R)); }   // к краю коробки вес мягких тканей сходит на нет
+                    else if (cls[b] == 0 || cls[b] == 2)
                     {
-                        v = 0;
+                        v = 0; int sum = 0, cnt = 0;
                         for (int d = 0; d < 6; d++)
                         {
                             int nx = tx + (d == 0 ? 1 : d == 1 ? -1 : 0), ny = ty + (d == 2 ? 1 : d == 3 ? -1 : 0), nz = tz + (d == 4 ? 1 : d == 5 ? -1 : 0);
                             if (nx < 0 || ny < 0 || nz < 0 || nx >= bn.x || ny >= bn.y || nz >= bn.z) continue;
-                            int j = nx + bn.x * (ny + bn.y * nz); if (cls[j] == 1 || cls[j] >= 10) v = (byte)math.max((int)v, (int)val[j]);
+                            int j = nx + bn.x * (ny + bn.y * nz); if (!(cls[j] == 1 || cls[j] >= 10 || (R > 0 && cls[j] != 0))) continue;
+                            if (R > 0) { sum += val[j]; cnt++; } else v = (byte)math.max((int)v, (int)val[j]);
                         }
+                        // часть 10: среднее, а не максимум — максимум давал гребни по текселям (4 мм) у кожи, при сдвиге 1–2 см тёмные ступеньки
+                        if (cnt > 0) v = (byte)((sum + cnt / 2) / cnt);
                     }
                     int3 t = tlo + new int3(tx, ty, tz); tex[(t.x + td.x * (t.y + td.y * t.z)) * 4 + ch] = v;
+                }
+            }
+
+            bool Near(int3 t)
+            {
+                float3 p = pos + math.mul(rot, org + (float3)(t * 2 + 1) * step);
+                return math.distance(p, eA) < eR || math.distance(p, eB) < eR;
+            }
+
+            static int Edge(int3 t, int3 bn) => math.cmin(math.min(t, bn - 1 - t));
+
+            /// Сглаживание мягких тканей коробкой радиуса R по трём осям, дважды; кость и ткань у глаза — опоры (участвуют, но не меняются; без кости вес кожи разбавляется и смещение пропадает).
+            void Blur(int3 bn)
+            {
+                int n = bn.x * bn.y * bn.z;
+                for (int it = 0; it < 2; it++)
+                {
+                    for (int b = 0; b < n; b++) { bool m = cls[b] != 0; fa[b] = m ? val[b] : 0; fa[n + b] = m ? 1 : 0; }
+                    for (int ax = 0; ax < 3; ax++) { Line(bn, ax, 0, n); Line(bn, ax, n, n); }
+                    for (int b = 0; b < n; b++) if ((cls[b] == 2 || cls[b] >= 10) && fa[n + b] > 0) val[b] = (byte)math.clamp((int)math.round(fa[b] / fa[n + b]), 0, 255);
+                }
+            }
+
+            /// Скользящая сумма окна 2R+1 вдоль оси ax по массиву fa[off .. off+n), результат на месте (через fa[2n ..]).
+            void Line(int3 bn, int ax, int off, int n)
+            {
+                int len = ax == 0 ? bn.x : ax == 1 ? bn.y : bn.z, st = ax == 0 ? 1 : ax == 1 ? bn.x : bn.x * bn.y;
+                int ua = ax == 0 ? bn.y : bn.x, ub = ax == 2 ? bn.y : bn.z, sa = ax == 0 ? bn.x : 1, sb = ax == 2 ? bn.x : bn.x * bn.y;
+                for (int ib = 0; ib < ub; ib++) for (int ia = 0; ia < ua; ia++)
+                {
+                    int b0 = ia * sa + ib * sb; float sum = 0;
+                    for (int k = 0; k < math.min(R, len); k++) sum += fa[off + b0 + k * st];
+                    for (int k = 0; k < len; k++)
+                    {
+                        if (k + R < len) sum += fa[off + b0 + (k + R) * st];
+                        if (k - R - 1 >= 0) sum -= fa[off + b0 + (k - R - 1) * st];
+                        fa[2 * n + b0 + k * st] = sum;
+                    }
+                    for (int k = 0; k < len; k++) fa[off + b0 + k * st] = fa[2 * n + b0 + k * st];
                 }
             }
         }

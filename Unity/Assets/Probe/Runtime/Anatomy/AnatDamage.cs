@@ -47,7 +47,7 @@ namespace VoxProbe
         public class Wound { public int x, y, z, np; public float rate, age, acc, tau, beat; public byte kind; public float3 n; public string src; }   // np — часть 8: сколько раз росло пятно вокруг раны
         public const byte WSkin = 0, WJet = 1, WVein = 2, WNose = 3;
         /// kid — часть 8: ветка подтёка (Branch): случайные числа не берёт (разброс — хеш), каплей не отрывается, свой предел MaxKids.
-        public class Drip { public int x, y, z, px = -1, py = -1, pz = -1, seed; public float vol, t, age; public bool kid; }
+        public class Drip { public int x, y, z, px = -1, py = -1, pz = -1, seed, n, depth; public float vol, t, age; public bool kid; public float3 side; }
         public struct Drop { public float3 p, v; public float vol; }
 
         public struct HitInfo { public byte zone, entryMat; public int cells, removed, split; public float eff, ms; public bool macer; }
@@ -243,6 +243,11 @@ namespace VoxProbe
         public int kids, kidSeq, poolCells;
         /// Выключатель веток и пятен части 8 — для замера «до / после» в одном коде; по умолчанию включено.
         public static bool Branches = true;
+        /// Часть 10: кровь ветвями — ветки чаще (30 % шагов) и ветвятся сами (до 2-го колена), ветка уходит вбок от русла (первые шаги круче, дальше под постоянным углом)
+        /// (не сливается с ним в полосу), дальше стекает по уклону; русло уже (растекание вбок радиусом 1–2, у веток 0–1).
+        /// rng не трогается: ветки — хеш, основной подтёк идёт прежним путём. false — как в части 8.
+        public static bool Rivulets = !AnatBones.B10Off;
+        public const int MaxKidDepth = 2;
         /// Выключатель доработки (синяк шире пятна и растекание крови) — для замера «до / после» в одном коде; по умолчанию включено.
         public static bool Wide = true;
         static float H3(int x, int y, int z) { uint q = (uint)(x * 73856093 ^ y * 19349663 ^ z * 83492791); q ^= q >> 13; q *= 0x5bd1e995; q ^= q >> 15; return (q & 0xFFFF) / 65536f; }
@@ -714,7 +719,8 @@ namespace VoxProbe
                 byte m = M(xx, yy, zz); if (!AnatMat.Cull(m) || m == AnatMat.Covered || !Exposed(xx, yy, zz)) continue;
                 float sc = (a2 * grav.x + b * grav.y + c * grav.z) / math.sqrt(a2 * a2 + b * b + c * c);
                 // часть 8: у ветки разброс и извилистость — хешем координат (rng не трогается), у основного подтёка — как раньше
-                if (d.kid) sc += H3(xx * 3 + d.seed, yy * 5, zz * 7) * 0.32f + (H3(xx + d.seed * 7, yy, zz) - 0.5f) * 0.35f;
+                if (d.kid) sc += H3(xx * 3 + d.seed, yy * 5, zz * 7) * 0.32f + (H3(xx + d.seed * 7, yy, zz) - 0.5f) * 0.35f
+                    + (Rivulets ? math.dot(new float3(a2, b, c), d.side) / math.sqrt(a2 * a2 + b * b + c * c) * (0.3f + 0.35f * math.exp(-d.n / 6f)) : 0);   // вбок от русла: сильно первые шаги, дальше постоянный угол — ветка не сливается с руслом
                 else sc += (float)rng.NextDouble() * 0.32f;
                 if (sc > best) { best2 = best; bc2 = bc; best = sc; bc = new int3(xx, yy, zz); }
                 else if (sc > best2) { best2 = sc; bc2 = new int3(xx, yy, zz); }
@@ -726,6 +732,7 @@ namespace VoxProbe
                 return false;
             }
             if (Wide && Branches) Branch(d, bc, bc2, best2);
+            d.n++;
             d.px = d.x; d.py = d.y; d.pz = d.z; d.x = bc.x; d.y = bc.y; d.z = bc.z;
             return true;
         }
@@ -734,7 +741,7 @@ namespace VoxProbe
         /// неровно — пропуски и вес по хешу координат (rng не трогается). Предел — MaxSpread новых ячеек за бой.
         void Spread(Drip d, float ba, byte now)
         {
-            int rw = d.vol > 18 ? 3 : d.vol > 6 ? 2 : 1;
+            int rw = !Rivulets ? (d.vol > 18 ? 3 : d.vol > 6 ? 2 : 1) : d.kid ? (d.vol > 10 ? 1 : 0) : (d.vol > 18 ? 2 : 1);
             for (int c = -rw; c <= rw; c++) for (int b = -rw; b <= rw; b++) for (int a2 = -rw; a2 <= rw; a2++)
             {
                 if (a2 == 0 && b == 0 && c == 0) continue;
@@ -754,9 +761,12 @@ namespace VoxProbe
         void Branch(Drip d, int3 bc, int3 bc2, float best2)
         {
             if (bc2.x < 0 || best2 < 0.15f || d.vol < 5 || kids >= MaxKids || kidSeq >= MaxKidsAll) return;
-            if (math.lengthsq(bc2 - bc) < 2 || H3(d.x * 7 + kidSeq, d.y * 3, d.z) >= 0.2f) return;
+            if (math.lengthsq(bc2 - bc) < 2 || H3(d.x * 7 + kidSeq, d.y * 3, d.z) >= (Rivulets ? 0.3f : 0.2f)) return;
+            if (Rivulets && d.depth >= MaxKidDepth) return;
+            // вбок от русла: разница направлений без составляющей по уклону
+            float3 sd = (float3)(bc2 - bc); sd -= math.dot(sd, grav) * grav; sd = math.lengthsq(sd) > 1e-4f ? math.normalize(sd) : 0;
             kids++; kidSeq++;
-            drips.Add(new Drip { x = bc2.x, y = bc2.y, z = bc2.z, px = d.x, py = d.y, pz = d.z, vol = math.min(24, d.vol * 0.6f), t = H3(bc2.x, kidSeq, bc2.z), kid = true, seed = kidSeq * 131 });
+            drips.Add(new Drip { x = bc2.x, y = bc2.y, z = bc2.z, px = d.x, py = d.y, pz = d.z, vol = math.min(24, d.vol * 0.6f), t = H3(bc2.x, kidSeq, bc2.z), kid = true, seed = kidSeq * 131, side = sd, depth = d.depth + 1 });
         }
 
         /// Часть 8: пятно крови вокруг раны — при каждом новом подтёке раны (до PoolN раз) радиус растёт до PoolR ячеек; край неровный (хеш),

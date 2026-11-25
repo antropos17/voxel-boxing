@@ -29,6 +29,7 @@ Shader "VoxProbe/Anatomy"
             float4 _AnatPar[64];
             float4 _AnatDmg[12];
             float _AnatTime, _BruiseDay;
+            float _AnatB10Off;   // часть 10: 1 — без русел крови и слоёв мышц (снимки и замер «без»); по умолчанию 0
             // часть 5: переломы головы для трещин на кости — пары (центр в ячейках тела, радиус кольца в ячейках), (ось удара, фаза); число и номер тела головы
             float4 _AnatFrac[32];
             float _AnatFracN, _AnatFracBody;
@@ -173,9 +174,11 @@ Shader "VoxProbe/Anatomy"
             // часть 8: фасция у края ячейки cs вдоль оси e (f — дробная часть по ней): соседняя ячейка — другая мышца
             float Fascia(float3 cs, float f, float3 e, int pt)
             {
-                if (f >= 0.38 && f <= 0.62) return 0;
+                float wd = _AnatB10Off > 0.5 ? 0.38 : 0.5;   // часть 10: прослойка шире — с расстояния боя мышцы слоями
+                if (f >= wd && f <= 1.0 - wd) return 0;
                 int pn = PartAt(floor(cs) + e * (f < 0.5 ? -1.0 : 1.0));
-                return pn >= 32 && pn < 64 && pn != pt ? 1.0 - smoothstep(0.1, 0.38, min(f, 1.0 - f)) : 0;
+                bool other = _AnatB10Off > 0.5 ? pn >= 32 && pn < 64 : pn != 0;   // часть 10: и граница мышцы с жиром, костью, сосудом (0 — воздух вне тела)
+                return other && pn != pt ? 1.0 - smoothstep(wd * 0.26, wd, min(f, 1.0 - f)) : 0;
             }
 
             half4 frag(Vary i) : SV_Target
@@ -257,7 +260,22 @@ Shader "VoxProbe/Anatomy"
                     if (_AnatPar[mat].w > 1.5 && _AnatPar[mat].w < 2.5) bcov *= 0.55;
                     // срез внутренних тканей: редкие пятна разрыва не заливают слои, лужа остаётся лужей
                     if (skin < 0.5 && mat != 41 && mat != 43) bcov *= smoothstep(0.35, 0.7, saturate(i.c.w * 1.7) + (bn - 0.5) * 0.6);
-                    if (mat == 10) bcov *= 0.6;   // часть 8: на срезе мышцы кровь пятнами — мышцы различимы
+                    if (mat == 10) bcov *= _AnatB10Off > 0.5 ? 0.6 : 0.3;   // часть 8: на срезе мышцы кровь пятнами — мышцы различимы; часть 10 — тоньше
+                    // часть 10: кровь по коже — русла. Лист крови (объединение многих подтёков) разбит на сеть ручьёв вдоль вертикали тела:
+                    // изолинии двух шумов, вытянутых по вертикали и искажённых, ветвятся и сливаются; между руслами — тонкий мазок
+                    if (_AnatB10Off < 0.5 && skin > 0.5)
+                    {
+                        float3 rq = float3(pc.x * 0.2, pc.y * 0.035, pc.z * 0.2);
+                        rq.xz += (VNoise(pc * 0.06 + 5.0) - 0.5) * 1.6;
+                        float r1 = 1.0 - smoothstep(0.07, 0.16, abs(VNoise(rq + 11.0) - 0.5));
+                        #ifdef ANAT_LITE
+                        float riv = r1;
+                        #else
+                        float r2 = 1.0 - smoothstep(0.05, 0.12, abs(VNoise(rq * float3(1.9, 1.6, 1.9) + 37.0) - 0.5));
+                        float riv = max(r1, r2 * 0.85);
+                        #endif
+                        bcov *= lerp(0.15, 1.0, riv);
+                    }
                 }
                 if (mat == 18 || mat == 19 || mat == 20)
                 {
@@ -299,19 +317,24 @@ Shader "VoxProbe/Anatomy"
                         else if (F.w > 0.5) { float3 r = am - _AnatFibC[F.w > 1.5 ? 1 : 0].xyz; fd = float3(-r.y, r.x * (F.w > 1.5 ? 0.6 : 1.0), 0); }
                         fd = normalize(fd + float3(0, 1e-4, 0)); fd.x *= sx;
                         float tn = Hash(float3(pt, 1.0, 2.0)), tg = Hash(float3(pt, 4.0, 5.0));
-                        col *= float3(lerp(0.6, 1.3, tn), lerp(0.55, 1.6, tg), lerp(0.6, 1.45, tg)) * lerp(0.6, 1.3, tn) * lerp(1.0, 0.85, bcov);
+                        // часть 10: яркость мышцы — две ступени (светлая / тёмная), соседние мышцы чаще разные — срез читается слоями с расстояния боя
+                        float tl = _AnatB10Off > 0.5 ? lerp(0.6, 1.3, tn) : (frac(tn * 7.0) > 0.5 ? lerp(1.2, 1.4, tn) : lerp(0.5, 0.68, tn));
+                        col *= float3(lerp(0.6, 1.3, tn), lerp(0.55, 1.6, tg), lerp(0.6, 1.45, tg)) * tl * lerp(1.0, 0.85, bcov);
                         float3 q = pcm - fd * dot(pcm, fd);   // поперёк волокон: на продольном срезе — полосы, на поперечном — пучки пятнами
                         float fb = VNoise(q * 6.0 + dot(pcm, fd) * 0.35 + pt * 3.1);
                         col *= lerp(0.82, 1.1, fb);
                         float per = 1.0 - smoothstep(0.025, 0.06, abs(fb - 0.5));
-                        col = lerp(col, float3(0.62, 0.42, 0.36), per * 0.55 * (1.0 - bcov));
-                        #ifndef ANAT_LITE
-                        // фасция: у края ячейки соседняя ячейка — другая мышца
+                        col = lerp(col, float3(0.62, 0.42, 0.36), per * (_AnatB10Off > 0.5 ? 0.55 : 0.2) * (1.0 - bcov));   // часть 10: мелкие прослойки пучков слабее — не забивают границы мышц
+                        // фасция: у края ячейки соседняя ячейка — другая мышца (часть 10: или не мышца — жир, кость, сосуд); в ANAT_LITE тоже
+                        #ifdef ANAT_LITE
+                        if (_AnatB10Off < 0.5)
+                        #endif
+                        {
                         float3 fc = frac(cs);
                         float fas = max(Fascia(cs, fc.x, float3(1, 0, 0), pt), max(Fascia(cs, fc.y, float3(0, 1, 0), pt), Fascia(cs, fc.z, float3(0, 0, 1), pt)));
-                        col = lerp(col, float3(0.78, 0.72, 0.64), fas * 0.85 * (1.0 - 0.5 * bcov));
+                        col = lerp(col, _AnatB10Off > 0.5 ? float3(0.78, 0.72, 0.64) : float3(0.86, 0.8, 0.68), fas * (_AnatB10Off > 0.5 ? 0.85 : 0.95) * (1.0 - 0.5 * bcov));
                         wet = lerp(wet, 0.8, fas);
-                        #endif
+                        }
                     }
                     else
                     {
