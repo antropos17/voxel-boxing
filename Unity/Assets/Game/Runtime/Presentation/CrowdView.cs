@@ -152,7 +152,7 @@ namespace VoxGame
             _root.localPosition = st.center;
             _root.localRotation = Quaternion.Euler(0f, st.yawDeg, 0f);
 
-            var shader = Shader.Find("VoxGame/VertexColor");
+            var shader = GameUtil.FindShader("VoxGame/VertexColor", GameUtil.VoxMaterial);
             _mat = new Material(shader != null ? shader : Shader.Find("Hidden/InternalErrorShader")) { name = "Crowd" };
             _mat.SetFloat("_Ambient", Ambient);
             _mat.SetFloat("_Glow", 0f);

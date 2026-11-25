@@ -24,6 +24,7 @@ namespace VoxGame {
         public int hitsThrown;
         public int hitsLanded;
         public HitResult[] history; // попавшие удары игрока (для ModeManager.ComputeReward); null — пусто
+        public float playerHpLeft;  // здоровье игрока в конце боя (испытание переносит его в следующий бой)
     }
 
     public struct RewardLine {
@@ -61,6 +62,8 @@ namespace VoxGame {
         public const int TrainingCoins = 25;        // тренировка: немного монет, без фарма
         public const int TrainingXp = 15;
         public const float TrainingFoeDamage = 0.2f; // урон соперника на тренировке (доля обычного)
+        public const float RepeatCoinsMult = 0.3f;   // повтор уже побеждённой ступени лестницы платит меньше
+        public const float MinStartHp = 10f;         // испытание не начинает бой почти без здоровья
 
         // ------------------------------------------------------------------ Состояние
 
@@ -89,6 +92,13 @@ namespace VoxGame {
 
         // Урон соперника в бою (доля): на тренировке он бьёт слабо.
         public float FoeDamageMult => Mode == GameMode.Training ? TrainingFoeDamage : 1f;
+
+        // Титульный бой: двенадцатая ступень в первый раз (повтор после пояса — обычный бой).
+        public bool IsTitleFight => Mode == GameMode.Career && FoeLadderIndex == RosterDef.Count - 1
+                                    && Profile.ladderIndex == FoeLadderIndex;
+
+        // Здоровье игрока в начале боя: 100; в испытании — остаток прошлого боя + ModeManager.GetHpRestore.
+        public float StartPlayerHp { get; private set; } = 100f;
 
         public event Action<AppState, AppState> OnStateChanged;   // (было, стало)
 
@@ -207,6 +217,12 @@ namespace VoxGame {
         public bool Pause() {
             if (State != AppState.Fight) return false;
             return Go(AppState.Pause);
+        }
+
+        // Бой не построился (исключение в представлении): назад в меню, без начислений.
+        public bool AbortLoading() {
+            if (State != AppState.Loading) return false;
+            return Go(AppState.MainMenu);
         }
 
         public bool Resume() {
@@ -385,9 +401,11 @@ namespace VoxGame {
             }
 
             var hist = s.history ?? Array.Empty<HitResult>();
-            int baseCoins = Modes.ComputeReward(hist, Mode);
+            int level = HasFoe ? Foe.level : 1;
+            float acc = ModeManager.Accuracy(s.hitsThrown, s.hitsLanded);
+            int baseCoins = Modes.ComputeReward(hist, Mode, level, acc);
             int xp = Mathf.Max(10, baseCoins / 2);
-            FillWinLines(info.lines, hist, baseCoins);
+            FillWinLines(info.lines, hist, baseCoins, level, acc);
             int coins = baseCoins;
 
             switch (Mode) {
@@ -405,6 +423,10 @@ namespace VoxGame {
                         }
                     } else {
                         Profile.wins++;
+                        // повтор побеждённой ступени лестницу не двигает и платит меньше: первую ступень не выгодно фармить
+                        int cut = Mathf.RoundToInt(coins * RepeatCoinsMult) - coins;
+                        coins += cut;
+                        info.lines.Add(new RewardLine("Повтор ступени", cut));
                     }
                     break;
                 case GameMode.Trial:
@@ -464,7 +486,7 @@ namespace VoxGame {
         }
 
         // Разбивка по формуле ModeManager.ComputeReward; расхождение (множитель испытания) — отдельной строкой.
-        static void FillWinLines(List<RewardLine> lines, HitResult[] hist, int total) {
+        static void FillWinLines(List<RewardLine> lines, HitResult[] hist, int total, int level, float accuracy) {
             int kds = 0, hits = 0, sum = 0;
             bool ko = false;
             foreach (var h in hist) {
@@ -472,10 +494,11 @@ namespace VoxGame {
                 if (h.hit) hits++;
                 if (h.isKO) ko = true;
             }
-            lines.Add(new RewardLine("За победу", 100)); sum += 100;
+            int win = ModeManager.WinCoins(level);
+            lines.Add(new RewardLine("За победу · ур. " + Mathf.Max(1, level), win)); sum += win;
             if (hist.Length > 0) {
                 if (kds > 0) { lines.Add(new RewardLine("Нокдауны ×" + kds, kds * 20)); sum += kds * 20; }
-                float acc = (float)hits / hist.Length * 100f;
+                float acc = accuracy >= 0f ? Mathf.Clamp01(accuracy) * 100f : (float)hits / hist.Length * 100f;
                 int accCoins = (int)(acc * 0.5f);
                 if (accCoins > 0) { lines.Add(new RewardLine("Точность " + Mathf.RoundToInt(acc) + "%", accCoins)); sum += accCoins; }
                 if (ko) { lines.Add(new RewardLine("Нокаут", 50)); sum += 50; }
@@ -495,6 +518,8 @@ namespace VoxGame {
                     if (info != null && info.won && Modes.TrialFightsLeft > 0) {
                         TrialIndex++;
                         SetFoe(TrialFoe(_trialSeed, TrialIndex), -1);
+                        // испытание: здоровье переходит в следующий бой, между боями +GetHpRestore
+                        StartPlayerHp = Mathf.Clamp(LastStats.playerHpLeft + Modes.GetHpRestore(GameMode.Trial), MinStartHp, 100f);
                         return BeginLoading();
                     }
                     return Go(AppState.MainMenu);
@@ -520,6 +545,7 @@ namespace VoxGame {
         int QuickLevel() => Mathf.Clamp(Profile.ladderIndex + 1, 1, RosterDef.Count);
 
         void SetFoe(FighterDef f, int ladderIndex) {
+            StartPlayerHp = 100f;
             Foe = f;
             FoeLadderIndex = ladderIndex;
             HasFoe = true;

@@ -104,6 +104,30 @@ namespace VoxGame.Editor
                 Debug.LogWarning(
                     "VoxGame: шейдер VoxGame/VertexColor не найден. " +
                     "Убедись, что VoxGameVertexColor.shader находится в Assets/Game/.");
+            EnsureShaderMaterials();
+        }
+
+        // Материалы в Resources держат шейдеры в сборке плеера: Shader.Find сам по себе не включает шейдер,
+        // и в плеере вернул бы null. GameUtil.FindShader берёт шейдер из этих материалов, если Find не нашёл.
+        [MenuItem("VoxGame/Ensure Shader Materials")]
+        public static void EnsureShaderMaterials()
+        {
+            const string dir = "Assets/Game/Resources/Shaders";
+            if (!AssetDatabase.IsValidFolder("Assets/Game/Resources")) AssetDatabase.CreateFolder("Assets/Game", "Resources");
+            if (!AssetDatabase.IsValidFolder(dir)) AssetDatabase.CreateFolder("Assets/Game/Resources", "Shaders");
+            EnsureMat(dir, GameUtil.VoxMaterial, "VoxGame/VertexColor");
+            EnsureMat(dir, GameUtil.AnatMaterial, "VoxProbe/Anatomy");
+            AssetDatabase.SaveAssets();
+        }
+
+        static void EnsureMat(string dir, string name, string shaderName)
+        {
+            string path = dir + "/" + name + ".mat";
+            var sh = Shader.Find(shaderName);
+            if (sh == null) { Debug.LogWarning("VoxGame: шейдер " + shaderName + " не найден"); return; }
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null) AssetDatabase.CreateAsset(new Material(sh) { name = name }, path);
+            else if (m.shader != sh) { m.shader = sh; EditorUtility.SetDirty(m); }
         }
 
         // Добавляет сцену первой в Build Settings, сохраняя все существующие.

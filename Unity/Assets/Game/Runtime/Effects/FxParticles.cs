@@ -80,7 +80,7 @@ namespace VoxGame
             _mesh.SetIndices(idx, MeshTopology.Triangles, 0, false);
             _mesh.bounds = new Bounds(Vector3.zero, new Vector3(40f, 40f, 40f));
 
-            var shader = Shader.Find("VoxGame/VertexColor");
+            var shader = GameUtil.FindShader("VoxGame/VertexColor", GameUtil.VoxMaterial);
             _mat = new Material(shader != null ? shader : Shader.Find("Hidden/InternalErrorShader")) { name = "FxParticles" };
             _mat.SetFloat("_Glow", Glow);
 

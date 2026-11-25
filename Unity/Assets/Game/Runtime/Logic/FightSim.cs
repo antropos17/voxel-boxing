@@ -86,6 +86,7 @@ namespace VoxGame
             // Игрок промахнулся или соперник в KO/Down — не обрабатываем
             if (removed <= 0 || State.phase == FightPhase.KO)
             {
+                if (removed <= 0) State.SpendPunchStamina();   // мимо — выносливость всё равно уходит
                 var miss = new HitResult { hit = false };
                 _PushEvent(new FightEvent { type = FightEventType.HitMiss, time = _gameTime });
                 return miss;

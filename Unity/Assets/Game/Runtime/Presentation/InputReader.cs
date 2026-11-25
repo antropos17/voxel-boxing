@@ -7,10 +7,13 @@ using ETouch = UnityEngine.InputSystem.EnhancedTouch.Touch;
 
 namespace VoxGame
 {
-    // Читает касания/мышь → очередь PunchInput.
+    // Читает касания/мышь → очередь PunchInput. Своего Update нет: FightDirector зовёт Tick() перед разбором ввода,
+    // поэтому на паузе и вне боя касания не копятся. Init() включает EnhancedTouch (вызывает создатель).
     // Inject() добавляет синтетические жесты для тестов.
     // Не реагирует на касания над кнопками UI.
-    // IsBlocking = true когда палец удерживается в нижней зоне экрана.
+    // IsBlocking = true, когда палец держит нижнюю зону экрана дольше BlockHold и почти не сдвинулся;
+    // касание из нижней зоны, ушедшее дальше порога свайпа, — удар (апперкот снизу), короткий тап там — джеб.
+    // Порог свайпа и сила удара считаются в dp (как CSS-пиксели веб-версии), а не в физических пикселях.
     public class InputReader : MonoBehaviour
     {
         // ---- Очередь --------------------------------------------------------
@@ -26,6 +29,8 @@ namespace VoxGame
             _queue[(_qHead + _qCount) % Q_MAX] = p;
             _qCount++;
         }
+
+        public int Count => _qCount;
 
         // Получить следующий PunchInput. false если очередь пуста.
         public bool Dequeue(out PunchInput p)
@@ -48,25 +53,30 @@ namespace VoxGame
             public int     fingerId;
             public Vector2 start;
             public float   startTime;
-            public bool    isBlock;    // удержание нижней зоны
+            public bool    isBlock;    // началось в нижней зоне и пока не стало свайпом
             public bool    isActive;
         }
         readonly TouchState[] _touches = new TouchState[TRACK_MAX];
         readonly List<RaycastResult> _raycastBuf = new List<RaycastResult>(8);
         PointerEventData _pd;
 
-        // ---- Включение/выключение -------------------------------------------
+        const float BlockHold = 0.12f;   // с: удержание нижней зоны дольше — блок; короче и без сдвига — джеб
 
-        void OnEnable()
+        // ---- Включение -------------------------------------------------------
+
+        public void Init()
         {
-            if (!EnhancedTouchSupport.enabled)
+            if (Application.isPlaying && !EnhancedTouchSupport.enabled)
                 EnhancedTouchSupport.Enable();
         }
 
-        // ---- Update ---------------------------------------------------------
+        // ---- Tick (из FightDirector.Tick) -----------------------------------
 
-        void Update()
+        public void Tick()
         {
+            // вне Play Mode (сквозной проход, снимки) устройств нет — только синтетическая очередь
+            if (!Application.isPlaying) return;
+            if (!EnhancedTouchSupport.enabled) EnhancedTouchSupport.Enable();
             ProcessTouches();
             ProcessMouseFallback();
             RefreshBlockState();
@@ -82,6 +92,9 @@ namespace VoxGame
                 {
                     case UnityEngine.InputSystem.TouchPhase.Began:
                         OnTouchBegan(t.touchId, t.screenPosition);
+                        break;
+                    case UnityEngine.InputSystem.TouchPhase.Moved:
+                        OnTouchMoved(t.touchId, t.screenPosition);
                         break;
                     case UnityEngine.InputSystem.TouchPhase.Ended:
                     case UnityEngine.InputSystem.TouchPhase.Canceled:
@@ -100,6 +113,8 @@ namespace VoxGame
             const int MOUSE_ID = -1;
             if (mouse.leftButton.wasPressedThisFrame)
                 OnTouchBegan(MOUSE_ID, mouse.position.ReadValue());
+            else if (mouse.leftButton.isPressed)
+                OnTouchMoved(MOUSE_ID, mouse.position.ReadValue());
             else if (mouse.leftButton.wasReleasedThisFrame)
             {
                 float dur = FindElapsed(MOUSE_ID);
@@ -124,22 +139,41 @@ namespace VoxGame
             };
         }
 
+        // Палец из нижней зоны ушёл дальше порога свайпа — это удар, а не блок.
+        void OnTouchMoved(int id, Vector2 pos)
+        {
+            int slot = FindSlot(id);
+            if (slot < 0 || !_touches[slot].isBlock) return;
+            if (IsSwipe(_touches[slot].start, pos)) _touches[slot].isBlock = false;
+        }
+
         void OnTouchEnded(int id, Vector2 endPos, float duration)
         {
             int slot = FindSlot(id);
             if (slot < 0) return;
             var st = _touches[slot];
             _touches[slot] = default;
-            if (st.isBlock) return; // удержание нижней зоны — не удар
+            // удержание нижней зоны без сдвига — блок, не удар; короткий тап там — обычный джеб
+            if (st.isBlock && !IsSwipe(st.start, endPos) && Time.unscaledTime - st.startTime >= BlockHold) return;
             ClassifyGesture(st.start, endPos, duration);
+        }
+
+        static float Px() => GameUtil.PixelScale(Screen.dpi, Screen.width, Screen.height);
+
+        static bool IsSwipe(Vector2 a, Vector2 b)
+        {
+            float px = Px();
+            return (b - a).magnitude / px >= GameUtil.SwipeThreshold(Screen.width / px, Screen.height / px);
         }
 
         void ClassifyGesture(Vector2 start, Vector2 end, float duration)
         {
+            // всё в dp: порог свайпа и скорость как в веб-версии (CSS-пиксели), на плотных экранах не завышены
+            float px = Px();
             Vector2 delta = end - start;
-            float dist  = delta.magnitude;
-            float swipe = GameUtil.SwipeThreshold(Screen.width, Screen.height);
-            // speed = dist / max(16, dur_ms) px/ms
+            float dist  = delta.magnitude / px;
+            float swipe = GameUtil.SwipeThreshold(Screen.width / px, Screen.height / px);
+            // speed = dist / max(16, dur_ms) dp/ms
             float speed = dist / Mathf.Max(16f, duration * 1000f);
             float pw    = PunchInput.CalcPw(speed);
 
@@ -198,7 +232,7 @@ namespace VoxGame
         {
             IsBlocking = false;
             for (int i = 0; i < TRACK_MAX; i++)
-                if (_touches[i].isActive && _touches[i].isBlock)
+                if (_touches[i].isActive && _touches[i].isBlock && Time.unscaledTime - _touches[i].startTime >= BlockHold)
                 {
                     IsBlocking = true;
                     return;

@@ -41,6 +41,9 @@ namespace VoxGame.Editor
                 ui.PrepareForShot(w, h);
                 if (!Application.isPlaying) ui.FitToCamera(cam, w, h);
                 Canvas.ForceUpdateCanvases();
+                // холст снимка другого размера: обрезку портрета лестницы пересчитать (в игре это делает Tick экрана)
+                foreach (var rs in ui.GetComponentsInChildren<RosterScreen>(false)) rs.Tick(0f, 0f);
+                Canvas.ForceUpdateCanvases();
             }
 
             var rt = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32);

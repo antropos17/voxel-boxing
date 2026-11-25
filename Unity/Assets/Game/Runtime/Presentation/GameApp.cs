@@ -48,6 +48,7 @@ namespace VoxGame {
         public InputReader FightInput => Fight != null ? Fight.GetComponent<InputReader>() : null;   // синтетические удары
         public SoundPlayer UiSound => _uiSound;
         public ShopResult LastShopResult { get; private set; } = ShopResult.Unavailable;
+        public PreviewStudio Studio => _studio;   // портреты бойцов и перчатки для меню (кэш с пределом)
         public bool Vibration => Flow != null && Flow.Profile.vibrationEnabled;
 
         // ------------------------------------------------------------------ Поля
@@ -61,6 +62,7 @@ namespace VoxGame {
         CrowdView _menuCrowd;
         float _orbit;
         SoundPlayer _uiSound;
+        PreviewStudio _studio;
 
         GameObject _fightSlot, _resultSlot;   // пустые экраны на место уничтоженных HUD и итогов
         readonly HitResult[] _hits = new HitResult[MaxHits];
@@ -98,6 +100,9 @@ namespace VoxGame {
 
             BuildScreens();
             BuildMenuScene();
+            _studio = new PreviewStudio(transform);
+            Roster.OnSelect = ShowPortrait;
+            Shop.OnGloveSelected = ShowGlovePreview;
 
             _uiSound = new SoundPlayer();
             _uiSound.Init(transform, seed);
@@ -173,43 +178,90 @@ namespace VoxGame {
                 _bootTried = true;
                 var cam = Camera.main;
                 if (cam == null) { Debug.LogWarning("VoxGame: в сцене нет камеры MainCamera — игра не запущена"); return; }
+                // ориентация плеера: поворот разрешён в обе стороны (портрет и ландшафт), даже если в настройках портрет
+                Screen.autorotateToPortrait = Screen.autorotateToLandscapeLeft = Screen.autorotateToLandscapeRight = true;
+                Screen.autorotateToPortraitUpsideDown = false;
+                Screen.orientation = ScreenOrientation.AutoRotation;
                 Init(cam);
             }
+            // «Назад» на Android (и Escape): в бою — пауза, в меню — шаг назад
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            if (kb != null && kb.escapeKey.wasPressedThisFrame) BackPressed();
             Tick(Time.deltaTime);
+        }
+
+        // Игра свернута (звонок, «Домой», шторка): бой встаёт на паузу, прогресс пишется на диск.
+        // В редакторе потеря фокуса окна игры — не сворачивание: там не трогаем.
+        void OnApplicationPause(bool paused) {
+            if (paused && !Application.isEditor) Suspend();
+        }
+
+        void OnApplicationFocus(bool focus) {
+            if (!focus && !Application.isEditor) Suspend();
+        }
+
+        public void Suspend() {
+            if (Flow == null) return;
+            if (Flow.State == AppState.Fight) Flow.Pause();
+            Flow.Save();
+        }
+
+        public void BackPressed() {
+            if (Flow == null) return;
+            if (Flow.State == AppState.Fight) { if (Flow.Pause()) _uiSound?.Play(SoundId.Ui); }
+            else Flow.Back();
         }
 
         public void Tick(float realDt) {
             if (Flow == null) return;
             float udt = Mathf.Clamp(realDt, 0f, MaxFrameDt);
 
-            switch (Flow.State) {
-                case AppState.Loading:
-                    TickLoading(udt);
-                    break;
-                case AppState.Fight:
-                case AppState.Victory:
-                case AppState.Result:
-                    TickFight(udt);
-                    break;
-                // Pause и Settings из паузы: бой не тикает — стоит
-            }
+            // Подсистемы под отдельной защитой: исключение в одной не останавливает остальные и цикл кадра.
+            try {
+                switch (Flow.State) {
+                    case AppState.Loading:
+                        TickLoading(udt);
+                        break;
+                    case AppState.Fight:
+                    case AppState.Victory:
+                    case AppState.Result:
+                        TickFight(udt);
+                        break;
+                    // Pause и Settings из паузы: бой не тикает — стоит
+                }
+            } catch (Exception e) { Report("бой", e); }
 
-            if (Fight == null) {
-                UpdateOrbit(udt);
-                _menuCrowd.Tick(udt, udt);
-            }
-            _uiSound.Tick(udt);
+            try {
+                if (Fight == null) {
+                    UpdateOrbit(udt);
+                    _menuCrowd.Tick(udt, udt);
+                }
+            } catch (Exception e) { Report("фон меню", e); }
+            try { _uiSound.Tick(udt); } catch (Exception e) { Report("звук", e); }
 
-            UI.Tick(udt, udt);
-            MainMenu.Tick(udt, udt);
-            ModeSelect.Tick(udt, udt);
-            Roster.Tick(udt, udt);
-            Player.Tick(udt, udt);
-            Shop.Tick(udt, udt);
-            Settings.Tick(udt, udt);
-            Pause.Tick(udt, udt);
-            Reward.Tick(udt, udt);
-            Loading.Tick(udt, udt);
+            try {
+                UI.Tick(udt, udt);
+                MainMenu.Tick(udt, udt);
+                ModeSelect.Tick(udt, udt);
+                Roster.Tick(udt, udt);
+                Player.Tick(udt, udt);
+                Shop.Tick(udt, udt);
+                Settings.Tick(udt, udt);
+                Pause.Tick(udt, udt);
+                Reward.Tick(udt, udt);
+                Loading.Tick(udt, udt);
+            } catch (Exception e) { Report("интерфейс", e); }
+        }
+
+        // Ошибка подсистемы пишется в лог один раз на место (не каждый кадр); число ошибок — для проверок.
+        public int ErrorCount { get; private set; }
+        string _lastErr;
+        void Report(string where, Exception e) {
+            ErrorCount++;
+            string key = where + e.GetType().Name + e.Message;
+            if (key == _lastErr) return;
+            _lastErr = key;
+            Debug.LogError("VoxGame: сбой (" + where + "): " + e);
         }
 
         // Экран загрузки виден хотя бы кадр, на следующем тике строится бой (голова — здесь, не в бою),
@@ -217,7 +269,16 @@ namespace VoxGame {
         void TickLoading(float udt) {
             _loadT += udt;
             _loadTicks++;
-            if (!_built && _loadTicks >= 2) BuildFight();
+            if (!_built && _loadTicks >= 2) {
+                try { BuildFight(); }
+                catch (Exception e) {
+                    // бой не построился: убрать недостроенное и вернуться в меню, а не застрять в пустом бою
+                    Report("постройка боя", e);
+                    try { DisposeFight(); } catch (Exception e2) { Report("уборка боя", e2); }
+                    Flow.AbortLoading();
+                    return;
+                }
+            }
             if (_built && _loadT >= LoadingHold) Flow.FightLoaded();
         }
 
@@ -240,11 +301,37 @@ namespace VoxGame {
         // Вызывается изнутри FightDirector.Tick: только флаг, переход — после Tick.
         void OnFightResultShown() => _resultShown = true;
 
-        void OnHudPause() => Flow.Pause();
+        // Щелчок паузы — звуком меню: звук боя на паузе глушится в том же нажатии.
+        void OnHudPause() { if (Flow.Pause()) _uiSound.Play(SoundId.Ui); }
 
         // ------------------------------------------------------------------ Переходы
 
+        // Переход уже случился в GameFlow: исключение здесь не должно оставить игрока на старом экране.
         void OnState(AppState prev, AppState next) {
+            try { ApplyState(prev, next); }
+            catch (Exception e) {
+                Report("переход " + prev + " → " + next, e);
+                try { UI.ShowScreen(ScreenOf(next)); } catch (Exception e2) { Report("экран", e2); }
+            }
+        }
+
+        static ScreenId ScreenOf(AppState s) {
+            switch (s) {
+                case AppState.ModeSelect: return ScreenId.ModeSelect;
+                case AppState.Roster:     return ScreenId.FighterSelect;
+                case AppState.Loading:    return ScreenId.Loading;
+                case AppState.Fight:      return ScreenId.Fight;
+                case AppState.Pause:      return ScreenId.Pause;
+                case AppState.Result:     return ScreenId.Result;
+                case AppState.Reward:     return ScreenId.Reward;
+                case AppState.Shop:       return ScreenId.Shop;
+                case AppState.Settings:   return ScreenId.Settings;
+                case AppState.Player:     return ScreenId.Player;
+                default:                  return ScreenId.MainMenu;
+            }
+        }
+
+        void ApplyState(AppState prev, AppState next) {
             var p = Flow.Profile;
             // надписи и вспышки удара лежат поверх всех экранов: на паузе, в настройках и в итогах их не видно
             if (Fight != null && Fight.Fx != null) Fight.Fx.SetOverlayVisible(next == AppState.Fight || next == AppState.Victory);
@@ -261,6 +348,7 @@ namespace VoxGame {
                 case AppState.Roster:
                     DisposeFight();
                     Roster.SetData(Flow.Roster, p);
+                    ShowPortrait(Roster.Selected);
                     UI.ShowScreen(ScreenId.FighterSelect);
                     break;
                 case AppState.Loading:
@@ -293,6 +381,7 @@ namespace VoxGame {
                     DisposeFight();
                     Shop.SetData(p);
                     Shop.SelectGlove(p.equippedGloveId);
+                    ShowGlovePreview(Shop.SelectedGloveId);
                     UI.ShowScreen(ScreenId.Shop);
                     break;
                 case AppState.Settings:
@@ -322,20 +411,41 @@ namespace VoxGame {
             }
         }
 
+        // ------------------------------------------------------------------ Картинки меню
+
+        // Портрет выбранного бойца лестницы; закрытый — заглушка «?» (лицо следующих соперников не раскрываем).
+        void ShowPortrait(int index) {
+            if (_studio == null || Roster == null) return;
+            try {
+                if (index < 0 || index >= RosterDef.Count || !Roster.IsAvailable(index)) { Roster.SetPortrait(null); return; }
+                Roster.SetPortrait(_studio.Portrait(index, Flow.Roster.Get(index)));
+            } catch (Exception e) { Report("портрет", e); Roster.SetPortrait(null); }
+        }
+
+        void ShowGlovePreview(string id) {
+            if (_studio == null || Shop == null || string.IsNullOrEmpty(id)) return;
+            try { Shop.SetPreview(id, _studio.Glove(id)); }
+            catch (Exception e) { Report("превью перчатки", e); }
+        }
+
         // ------------------------------------------------------------------ Бой
 
         void BuildFight() {
-            _built = true;
             var go = new GameObject("Fight");
             go.transform.SetParent(transform, false);
             Fight = go.AddComponent<FightDirector>();
             Fight.enabled = false;   // бой тикает только из GameApp.Tick, собственный Update не нужен
             Fight.FoeDamageMult = Flow.FoeDamageMult;
-            // перчатки и улучшения применяются из профиля (PlayerProfile.GetCombatStats внутри FightDirector.Init)
-            Fight.Init(Flow.Foe, Flow.Profile, _cam, UI, Flow.Modes, 1f, 1f, Flow.FightLadderIndex, Flow.FightLadderCount);
+            Fight.PlayerStartHp = Flow.StartPlayerHp;
+            var prof = Flow.Profile;
+            Fight.ShowControlsHint = Flow.Mode == GameMode.Training || prof.wins + prof.losses < HintFights;
+            // перчатки и улучшения применяются из профиля (PlayerProfile.GetCombatStats внутри FightDirector.Init);
+            // пояс выносят только в первом титульном бою (повтор двенадцатой ступени — обычный бой)
+            Fight.Init(Flow.Foe, Flow.Profile, _cam, UI, Flow.Modes, 1f, 1f,
+                       Flow.IsTitleFight ? Flow.FightLadderIndex : -1, Flow.FightLadderCount);
             if (_viewW > 0 && _viewH > 0) Fight.SetViewSize(_viewW, _viewH);
 
-            Fight.Hud.OnPause += OnHudPause;   // += : звук кнопки паузы ставит сам FightDirector
+            Fight.Hud.OnPause += OnHudPause;
             Fight.OnFoeHit += CollectHit;
             Fight.OnResultShown = OnFightResultShown;
             ResetFightCounters();
@@ -351,7 +461,10 @@ namespace VoxGame {
             _menuScene.gameObject.SetActive(false);
             UI.ShowScreen(ScreenId.Loading);   // FightDirector.Init показал HUD — загрузка остаётся до FightLoaded
             ApplyAudio();
+            _built = true;   // только после успешной постройки: иначе загрузка пустила бы в бой без HUD
         }
+
+        const int HintFights = 2;   // подсказка жестов в первых боях (и всегда на тренировке)
 
         void ResetFightCounters() {
             _hitCount = 0;
@@ -387,6 +500,7 @@ namespace VoxGame {
                 hitsThrown = Fight.HitsThrown,
                 hitsLanded = Fight.HitsLanded,
                 history = hist,
+                playerHpLeft = Fight.State != null ? Fight.State.playerHp : 0f,
             };
         }
 
@@ -437,7 +551,8 @@ namespace VoxGame {
         // Общий обработчик кнопок (UIKit.OnButtonClick). Кнопки боя озвучивает FightDirector.
         void OnUiClick() {
             if (Flow == null || _uiSound == null) return;
-            if (Flow.State == AppState.Fight || Flow.State == AppState.Victory) return;
+            var s = _clickState != AppState.Boot ? _clickState : Flow.State;
+            if (s == AppState.Fight || s == AppState.Victory) return;
             _uiSound.Play(SoundId.Ui);
         }
 
@@ -450,10 +565,14 @@ namespace VoxGame {
             string arg = null;
             int colon = id.IndexOf(':');
             if (colon >= 0) { arg = id.Substring(colon + 1); id = id.Substring(0, colon); }
+            // щелчок звучит как у настоящей кнопки: по состоянию до нажатия (UIKit.Click — первый слушатель кнопки)
+            var before = Flow.State;
             bool ok = Dispatch(id, arg);
-            if (ok) UIKit.Click();
+            if (ok) { _clickState = before; UIKit.Click(); _clickState = AppState.Boot; }
             return ok;
         }
+
+        AppState _clickState = AppState.Boot;   // Boot — брать текущее состояние
 
         bool Dispatch(string id, string arg) {
             var s = Flow.State;
@@ -587,6 +706,8 @@ namespace VoxGame {
             DisposeFight();
             _uiSound?.Dispose();
             _uiSound = null;
+            _studio?.Dispose();
+            _studio = null;
             _menuCrowd?.Dispose();
             _menuRing?.Dispose();
             _menuCrowd = null;

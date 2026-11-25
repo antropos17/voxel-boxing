@@ -272,7 +272,7 @@ namespace VoxGame
         static float Smooth(float t) => t * t * (3f - 2f * t);
 
         // Виньетка: прозрачный центр, плотные края (растягивается по экрану — эллипс).
-        static Texture2D MakeVignette()
+        internal static Texture2D MakeVignette()
         {
             var tex = new Texture2D(TexSize, TexSize, TextureFormat.RGBA32, false) { name = "FxVignette", wrapMode = TextureWrapMode.Clamp };
             var px = new Color32[TexSize * TexSize];

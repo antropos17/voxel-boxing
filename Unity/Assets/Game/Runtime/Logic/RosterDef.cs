@@ -7,6 +7,10 @@ namespace VoxGame
     {
         public const int Count = 12;
 
+        // Стиль боя по ступени: в начале простые (Кирпич, Молот), к поясу хитрые (Гранит, Тихий); соседи не повторяются.
+        // Индексы FightAI.Styles: 0 Кирпич, 1 Шкаф, 2 Молот, 3 Бетон, 4 Утюг, 5 Гранит, 6 Бульдозер, 7 Тихий.
+        public static readonly int[] LadderStyles = { 0, 2, 4, 3, 1, 2, 6, 4, 5, 1, 7, 5 };
+
         public FighterDef[] Fighters { get; private set; }
 
         public RosterDef(uint seed)
@@ -41,6 +45,7 @@ namespace VoxGame
                     top    = top,
                     beard  = beard,
                     nick   = nicks[i],
+                    style  = LadderStyles[i],
                 };
                 uint s = FighterGen.Hash(seed, (uint)(i + 100));
                 Fighters[i] = FighterGen.Generate(s, i + 1, picks);

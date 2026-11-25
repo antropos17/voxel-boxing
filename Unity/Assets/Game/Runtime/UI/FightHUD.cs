@@ -22,10 +22,15 @@ namespace VoxGame {
         Text _kdLbl;
         Text _telegraphL, _telegraphR;
         Image _telBgL, _telBgR;   // плашки подсказки замаха (в них «!»)
-        Text _comboLbl;
         Text _countLbl;    // крупный счёт рефери
         Text _bannerLbl;   // центральный баннер
-        Image _vignette;
+        RawImage _vignette;
+        RectTransform _hintBg;   // подсказка жестов на тёмной подложке
+        Text _hintLbl;
+        float _hintTimer;
+        Image _blockImg;
+        bool _cacheBlock;
+        static Texture2D s_vigTex;   // радиальная виньетка: одна на всё время работы (не копится между боями)
 
         Button _blockBtn, _dodgeL, _dodgeR, _pauseBtn;
 
@@ -44,20 +49,20 @@ namespace VoxGame {
         int   _cacheMega   = -1;
         int   _cacheTMin   = -1, _cacheTSec = -1;
         int   _cacheKd     = -1;
-        int   _cacheCombo  = -1;
         bool  _cacheMegaRdy;
 
-        // Готовые строки таймера «M:SS» (0:00…9:59) и серии «×N»: в кадре боя строки не создаются.
-        const int TimerMax = 600, ComboMax = 99;
-        static readonly string[] TimerStr = BuildTimer(), ComboStr = BuildCombo();
+        // Готовые строки таймера «M:SS» (0:00…9:59), счёта рефери и нокдаунов: в кадре боя строки не создаются.
+        // Серию показывает FxBanners («СЕРИЯ ×N») — в HUD её нет, иначе она дублировалась и садилась на рефери.
+        const int TimerMax = 600, CountMax = 10, KdMax = 9;
+        static readonly string[] TimerStr = BuildTimer(), CountStr = BuildList("", CountMax), KdStr = BuildList("KD×", KdMax);
         static string[] BuildTimer() {
             var a = new string[TimerMax];
             for (int i = 0; i < TimerMax; i++) a[i] = (i / 60) + ":" + (i % 60 / 10) + (i % 10);
             return a;
         }
-        static string[] BuildCombo() {
-            var a = new string[ComboMax + 1];
-            for (int i = 0; i <= ComboMax; i++) a[i] = "×" + i;
+        static string[] BuildList(string prefix, int max) {
+            var a = new string[max + 1];
+            for (int i = 0; i <= max; i++) a[i] = prefix + i;
             return a;
         }
 
@@ -81,6 +86,16 @@ namespace VoxGame {
             UIKit.SetAnchors(rt, 0f, 0f, 1f, 1f);
             rt.offsetMin = rt.offsetMax = Vector2.zero;
 
+            // Красная виньетка при низком HP: первая — под полосами и кнопками, центр прозрачный
+            if (s_vigTex == null) { s_vigTex = FxScreen.MakeVignette(); s_vigTex.hideFlags = HideFlags.DontSave; }
+            var vg = new GameObject("Vignette", typeof(RectTransform), typeof(RawImage));
+            vg.transform.SetParent(transform, false);
+            _vignette = vg.GetComponent<RawImage>();
+            _vignette.texture = s_vigTex;
+            _vignette.color = new Color(0.75f, 0f, 0f, 0f); // начально невидима
+            _vignette.raycastTarget = false;
+            Place(vg.GetComponent<RectTransform>(), 0f, 0f, 1f, 1f);
+
             // Полосы: соперник, игрок, выносливость, тонкая мега-шкала
             (_foeHpBg, _foeHpFill) = UIKit.Bar(transform, "FoeHp", new Color32(45, 18, 18, 200), UIKit.HpRed);
             _foeNameLbl = UIKit.Label(_foeHpBg, "FoeName", UIKit.FontSm, UIKit.TextMain,
@@ -96,7 +111,7 @@ namespace VoxGame {
             (_megaBg, _megaFill) = UIKit.Bar(transform, "Mega", new Color32(50, 30, 10, 200), UIKit.MegaGold);
 
             _megaReadyLbl = UIKit.Label(transform, "MegaRdy", UIKit.FontSm, UIKit.MegaGold, semiBold: true);
-            _megaReadyLbl.text = "МЕГА ГОТОВ";
+            _megaReadyLbl.text = "МЕГА ГОТОВ · свайп!";
             _megaReadyLbl.gameObject.SetActive(false);
 
             _timerLbl = UIKit.Label(transform, "Timer", UIKit.FontMd, UIKit.TextMain, semiBold: true);
@@ -109,13 +124,16 @@ namespace VoxGame {
             _telegraphL = TelegraphBadge("TelL", out _telBgL);
             _telegraphR = TelegraphBadge("TelR", out _telBgR);
 
-            _comboLbl = UIKit.Label(transform, "Combo", UIKit.FontLg, UIKit.Accent, semiBold: true);
-            _comboLbl.text = "";
-            _comboLbl.gameObject.SetActive(false);
+            // Подсказка жестов: тёмная подложка, белый текст; над кнопками, гаснет сама
+            _hintBg = UIKit.Panel(transform, "Hint", new Color(0.05f, 0.04f, 0.07f, 0.78f));
+            _hintLbl = UIKit.Label(_hintBg, "HintText", UIKit.FontSm, UIKit.TextMain, semiBold: true);
+            Stretch(_hintLbl.rectTransform, 10f, 6f, -10f, -6f);
+            _hintBg.gameObject.SetActive(false);
 
             // Кнопки управления на плотной тёмной подложке со светлой рамкой: читаются поверх трусов, перчаток и ринга
             _blockBtn = ControlBtn("BtnBlock", "БЛОК", 30, UIKit.Accent);
             _blockBtn.onClick.AddListener(() => OnBlock?.Invoke());
+            _blockImg = _blockBtn.GetComponent<Image>();
             _dodgeL = ControlBtn("BtnDgL", "\u25C4", 44, UIKit.TextMain);
             _dodgeL.onClick.AddListener(() => OnDodgeLeft?.Invoke());
             _dodgeR = ControlBtn("BtnDgR", "\u25BA", 44, UIKit.TextMain);
@@ -128,17 +146,15 @@ namespace VoxGame {
             _countLbl = UIKit.Label(transform, "Count", 132, UIKit.TextMain, semiBold: true);
             _countLbl.gameObject.SetActive(false);
 
-            // Баннер: «БОЙ!», «НОКДАУН!», «В НОКАУТ!»
-            _bannerLbl = UIKit.Label(transform, "Banner", UIKit.FontXl, UIKit.Accent, semiBold: true);
+            // Баннер «БОЙ!»: главный сигнал старта — крупно, золотом, с тёмной обводкой и тенью (читается на коже)
+            _bannerLbl = UIKit.Label(transform, "Banner", BannerFont, UIKit.MegaGold, semiBold: true);
+            var bo = _bannerLbl.GetComponent<Outline>();
+            bo.effectColor = new Color(0f, 0f, 0f, 0.95f);
+            bo.effectDistance = new Vector2(3f, -3f);
+            var bs = _bannerLbl.gameObject.AddComponent<Shadow>();
+            bs.effectColor = new Color(0.25f, 0f, 0f, 0.75f);
+            bs.effectDistance = new Vector2(3f, -6f);
             _bannerLbl.gameObject.SetActive(false);
-
-            // Полупрозрачный красный оверлей при низком HP игрока.
-            var go = new GameObject("Vignette", typeof(RectTransform), typeof(Image));
-            go.transform.SetParent(transform, false);
-            _vignette = go.GetComponent<Image>();
-            _vignette.color = new Color(0.55f, 0f, 0f, 0f); // начально невидима
-            _vignette.raycastTarget = false;
-            Place(go.GetComponent<RectTransform>(), 0f, 0f, 1f, 1f);
 
             OnLayout(false);
         }
@@ -202,7 +218,7 @@ namespace VoxGame {
             // «МЕГА ГОТОВ»
             if (d.megaReady != _cacheMegaRdy) {
                 _cacheMegaRdy = d.megaReady;
-                _megaReadyLbl.gameObject.SetActive(d.megaReady);
+                _megaReadyLbl.gameObject.SetActive(d.megaReady && _megaOn);
             }
 
             // Имена (не меняются, но защищаем от повторной записи)
@@ -212,7 +228,13 @@ namespace VoxGame {
             // Нокдауны
             if (d.foeKnockdowns != _cacheKd) {
                 _cacheKd = d.foeKnockdowns;
-                _kdLbl.text = d.foeKnockdowns > 0 ? "KD×" + d.foeKnockdowns : "";
+                _kdLbl.text = d.foeKnockdowns > 0 ? KdStr[Mathf.Min(d.foeKnockdowns, KdMax)] : "";
+            }
+
+            // Блок включён (кнопка-переключатель или удержание низа): кнопка подсвечена
+            if (d.playerBlocking != _cacheBlock) {
+                _cacheBlock = d.playerBlocking;
+                _blockImg.color = d.playerBlocking ? BlockOnColor : BlockOffColor;
             }
 
             // Таймер M:SS (только при смене секунды)
@@ -222,14 +244,6 @@ namespace VoxGame {
                 _cacheTMin = tMin;
                 _cacheTSec = tSec;
                 WriteTimer(tMin, tSec);
-            }
-
-            // Комбо ×N (при combo ≥ 2)
-            if (d.combo != _cacheCombo) {
-                _cacheCombo = d.combo;
-                bool show = d.combo >= 2;
-                _comboLbl.gameObject.SetActive(show);
-                if (show) _comboLbl.text = ComboStr[Mathf.Min(d.combo, ComboMax)];
             }
 
             // Телеграф: плашка «!» при замахе соперника; даже слабая подсказка стиля читается (не прозрачнее 0.55)
@@ -245,10 +259,14 @@ namespace VoxGame {
                 if (showR) { _telBgR.color = bc; _telegraphR.color = tc; }
             }
 
-            // Виньетка: появляется при hp < 55%
-            float vign = plrRatio < 0.55f ? (0.55f - plrRatio) / 0.55f * 0.65f : 0f;
-            _vignette.color = new Color(0.55f, 0f, 0f, vign);
+            // Виньетка по краям: появляется при hp < 55%
+            float vign = plrRatio < 0.55f ? (0.55f - plrRatio) / 0.55f * 0.85f : 0f;
+            _vignette.color = new Color(0.75f, 0f, 0f, vign);
         }
+
+        const int BannerFont = 76;
+        static readonly Color BlockOffColor = new Color32(16, 14, 22, 235);
+        static readonly Color BlockOnColor  = new Color32(170, 95, 20, 245);
 
         // Tick обновляет таймеры баннеров (udt — реальное время).
         public void Tick(float dt, float udt) {
@@ -260,13 +278,49 @@ namespace VoxGame {
                 _countTimer -= udt;
                 if (_countTimer <= 0f) _countLbl.gameObject.SetActive(false);
             }
+            if (_hintTimer > 0f) {
+                _hintTimer -= udt;
+                if (_hintTimer <= 0f) _hintBg.gameObject.SetActive(false);
+            }
         }
 
         // ------------------------------------------------------------------ Публичные методы
 
+        // Подсказка жестов на seconds секунд (реальное время).
+        public void ShowHint(string text, float seconds) {
+            _hintLbl.text = text;
+            _hintBg.gameObject.SetActive(true);
+            _hintTimer = seconds;
+        }
+
+        public void HideHint() {
+            if (_hintTimer <= 0f) return;
+            _hintTimer = 0f;
+            _hintBg.gameObject.SetActive(false);
+        }
+
+        public bool HintVisible => _hintBg.gameObject.activeSelf;
+
+        // Мега-шкала и «МЕГА ГОТОВ» скрыты в режиме без мега-удара (испытание).
+        public void SetMegaVisible(bool on) {
+            _megaBg.gameObject.SetActive(on);
+            if (!on) { _megaReadyLbl.gameObject.SetActive(false); _cacheMegaRdy = false; }
+            _megaOn = on;
+        }
+        bool _megaOn = true;
+
+        // «Заново» из паузы: погасить счёт рефери, баннер и подсказку, сбросить кэши.
+        public void ResetTransient() {
+            _countTimer = _bannerTimer = _hintTimer = 0f;
+            _countLbl.gameObject.SetActive(false);
+            _bannerLbl.gameObject.SetActive(false);
+            _hintBg.gameObject.SetActive(false);
+            _cacheKd = -1; _cacheMegaRdy = false; _megaReadyLbl.gameObject.SetActive(false);
+        }
+
         // Показать крупный счёт рефери на 0.75 с (для нокдаун-отсчёта).
         public void ShowCount(int n) {
-            _countLbl.text = n.ToString();
+            _countLbl.text = CountStr[Mathf.Clamp(n, 0, CountMax)];
             _countLbl.gameObject.SetActive(true);
             _countTimer = 0.75f;
         }
@@ -302,7 +356,7 @@ namespace VoxGame {
                 UIKit.SetCorner(_pauseBtn.GetComponent<RectTransform>(), 1f, 1f, 1f, 1f, 92f, 92f, -8f, -8f);
                 Place(_telBgL, 0.150f, 0.440f, 0.230f, 0.660f);
                 Place(_telBgR, 0.770f, 0.440f, 0.850f, 0.660f);
-                Place(_comboLbl,   0.640f, 0.520f, 0.820f, 0.660f);
+                Place(_hintBg,     0.190f, 0.035f, 0.810f, 0.255f);
                 Place(_countLbl,   0.350f, 0.440f, 0.650f, 0.880f);
                 Place(_bannerLbl,  0.200f, 0.280f, 0.800f, 0.440f);
                 // Кнопки под большими пальцами по углам, середина низа свободна; «БЛОК» над «◄»,
@@ -323,8 +377,7 @@ namespace VoxGame {
                 UIKit.SetCorner(_pauseBtn.GetComponent<RectTransform>(), 1f, 1f, 1f, 1f, 92f, 92f, -8f, -8f);
                 Place(_telBgL, 0.025f, 0.560f, 0.185f, 0.660f);
                 Place(_telBgR, 0.815f, 0.560f, 0.975f, 0.660f);
-                // комбо — под полосами справа, не на сопернике
-                Place(_comboLbl,   0.600f, 0.760f, 0.960f, 0.812f);
+                Place(_hintBg,     0.030f, 0.125f, 0.970f, 0.235f);
                 Place(_countLbl,   0.200f, 0.560f, 0.800f, 0.800f);
                 Place(_bannerLbl,  0.040f, 0.390f, 0.960f, 0.470f);
                 // кнопки раздельно по низу (высота ~105 опорных px): между ними видно соперника

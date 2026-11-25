@@ -96,6 +96,7 @@ namespace VoxGame {
             int mult = Mathf.Max(1, m.ComputeReward(null, GameMode.Trial) / Mathf.Max(1, m.ComputeReward(null, GameMode.Career)));
             string s = fights + " " + MenuKit.Plural(fights, "бой", "боя", "боёв") + " подряд, монеты ×" + mult;
             s += m.MegaAllowed ? "." : ", мега-удар запрещён.";
+            s += " Между боями здоровье +" + Mathf.RoundToInt(m.GetHpRestore(GameMode.Trial)) + ".";
             return s;
         }
 

@@ -43,7 +43,7 @@ namespace VoxGame
             _root.localPosition = center;
             _root.localRotation = Quaternion.Euler(0f, yawDeg, 0f);
 
-            var shader = Shader.Find("VoxGame/VertexColor");
+            var shader = GameUtil.FindShader("VoxGame/VertexColor", GameUtil.VoxMaterial);
             var ringMat = NewMat(shader, 0.42f, 0f, 1000f, 2000f);
             var hallMat = NewMat(shader, 0.34f, 0f, 5.5f, 21f);
             var glowMat = NewMat(shader, 1f, 1f, 1000f, 2000f);

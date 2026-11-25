@@ -25,14 +25,9 @@ namespace VoxGame {
             _rt.offsetMax = Vector2.zero;
         }
 
-        // Обновление по реальным данным экрана (вызывается при изменении ориентации).
+        // Обновление по реальным данным экрана (UIRoot.Init и UIRoot.Tick при смене safe-area или размера экрана).
         public void Refresh() {
             Apply(Screen.safeArea, new Vector2(Screen.width, Screen.height));
-        }
-
-        void Awake() {
-            _rt = GetComponent<RectTransform>();
-            Refresh();
         }
     }
 }

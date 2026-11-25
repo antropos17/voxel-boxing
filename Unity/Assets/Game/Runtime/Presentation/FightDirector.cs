@@ -42,6 +42,9 @@ namespace VoxGame
         // и сигнал «экран итогов показан» (вызывается внутри Tick — обработчик только ставит флаг).
         public float FoeDamageMult = 1f;
         public Action OnResultShown;
+        // Здоровье игрока в начале боя (испытание переносит остаток) и подсказка жестов в начале боя.
+        public float PlayerStartHp = 100f;
+        public bool  ShowControlsHint;
 
         // Замер кадра удара: весь Tick в кадре, где был v.Hit, и его части (мс).
         public float lastHitFrameMs, maxHitFrameMs;
@@ -134,6 +137,7 @@ namespace VoxGame
         bool  _resultShown;
         int   _restartCount;
         bool  _blockFromButton;
+        float _punchCd;             // перезарядка удара игрока, с реального времени
         uint  _aimSeq;              // разброс точки прицеливания
 
         // История ударов для ComputeReward
@@ -169,12 +173,8 @@ namespace VoxGame
             _modeManager = modeManager;
 
             // Материалы
-            var anatShader = Shader.Find("VoxProbe/Anatomy");
-            _anatMat = new Material(anatShader != null ? anatShader
-                                                       : Shader.Find("Hidden/InternalErrorShader"));
-            var voxShader = Shader.Find("VoxGame/VertexColor");
-            _voxMat = new Material(voxShader != null ? voxShader
-                                                     : Shader.Find("Hidden/InternalErrorShader"));
+            _anatMat = new Material(GameUtil.FindShader("VoxProbe/Anatomy", GameUtil.AnatMaterial));
+            _voxMat = new Material(GameUtil.FindShader("VoxGame/VertexColor", GameUtil.VoxMaterial));
 
             // Корень сцены
             var sg = new GameObject("FightScene");
@@ -211,13 +211,15 @@ namespace VoxGame
                 dmgMult         = pcs.dmgMult,
                 speedMult       = pcs.speedMult,
                 staminaCostMult = pcs.staminaCostMult,
-                megaGainMult    = pcs.megaGainMult,
+                // режим без мега-удара (испытание): шкала не копится
+                megaGainMult    = MegaAllowed ? pcs.megaGainMult : 0f,
                 defenseMult     = pcs.incomingDmgMult,
             };
 
             // Симулятор и ИИ
             _sim = new FightSim(foe.level, foe.seed, prms);
             ApplyFoeTuning(foeHpMult, foeStunMult);
+            _sim.State.playerHp = Mathf.Clamp(PlayerStartHp, 1f, 100f);
             int styleIdx = Mathf.Clamp(foe.styleIdx, 0, FightAI.Styles.Length - 1);
             _aiStyle = FightAI.Styles[styleIdx];
             _ai = new FightAI(_aiStyle, foe.level, foe.seed);
@@ -225,11 +227,13 @@ namespace VoxGame
 
             // Ввод
             _inputReader = GetComponent<InputReader>() ?? gameObject.AddComponent<InputReader>();
+            _inputReader.Init();
 
             // UI: FightHUD и ResultScreen сами регистрируются в UIRoot через Init
             var hudGO = new GameObject("FightHUD");
             _hud = hudGO.AddComponent<FightHUD>();
             _hud.Init(_uiRoot);
+            _hud.SetMegaVisible(MegaAllowed);
             _hud.OnBlock       += () => _blockFromButton = !_blockFromButton;
             _hud.OnDodgeLeft   += () => DoDodge(-1);
             _hud.OnDodgeRight  += () => DoDodge(1);
@@ -248,7 +252,7 @@ namespace VoxGame
             _sound.StartLoop();
             _sound.Play(SoundId.Bell);
             if (cam.GetComponent<AudioListener>() == null) cam.gameObject.AddComponent<AudioListener>();
-            _hud.OnPause += () => _sound.Play(SoundId.Ui);
+            // щелчок кнопки паузы озвучивает GameApp звуком меню: звук боя на паузе глушится в том же нажатии
 
             // Пояс перед камерой и постановщик развязки
             _belt = new BeltView();
@@ -277,7 +281,18 @@ namespace VoxGame
 
             _uiRoot.ShowScreen(ScreenId.Fight);
             _hud.ShowBanner("БОЙ!", 1.5f);
+            if (ShowControlsHint) _hud.ShowHint(MegaAllowed ? ControlsHint : ControlsHintNoMega, HintSeconds);
         }
+
+        // Подсказка жестов (первые бои и тренировка): гаснет через HintSeconds или после HintPunches ударов.
+        public const string ControlsHint =
+            "Тап — джеб · свайп вбок — хук\nвверх — апперкот · вниз — сверху\nдержи низ экрана — блок\nшкала полна: любой свайп — МЕГА";
+        public const string ControlsHintNoMega =
+            "Тап — джеб · свайп вбок — хук\nвверх — апперкот · вниз — сверху\nдержи низ экрана — блок";
+        const float HintSeconds = 8f;
+        const int   HintPunches = 5;
+
+        bool MegaAllowed => _modeManager == null || _modeManager.MegaAllowed;
 
         float _foeHpMult = 1f, _foeStunMult = 1f;
 
@@ -334,8 +349,11 @@ namespace VoxGame
             if (!Finished) _fightTime += sdt;
             if (_finaleNext) { _finaleNext = false; BeginFinale(true); }
 
-            // Ввод игрока (луч идёт в голову в её положении прошлого кадра)
+            // Ввод игрока (луч идёт в голову в её положении прошлого кадра); касания читаются здесь, не в своём Update
+            _inputReader.Tick();
+            if (_punchCd > 0f) _punchCd -= realDt;
             if (!Finished) ProcessInput();
+            if (ShowControlsHint && _hitsTotal >= HintPunches) _hud.HideHint();
 
             // ИИ: TickAI продвигает игровое время и восстановление; настоящий ИИ задаёт фазу
             _sim.TickAI(sdt);
@@ -447,14 +465,22 @@ namespace VoxGame
             st.playerBlocking = _inputReader.IsBlocking || _blockFromButton;
             _playerGloves.SetBlock(st.playerBlocking);
 
+            // Перезарядка удара (темп зависит от «Скорости» и перчаток): ждёт один удар в очереди, лишние — прочь,
+            // иначе набитые подряд тапы долетали бы секундами позже.
+            if (_punchCd > 0f)
+            {
+                while (_inputReader.Count > 1) _inputReader.Dequeue(out _);
+                return;
+            }
+
             while (_inputReader.Dequeue(out PunchInput p))
             {
                 if (st.phase == FightPhase.KO) break;
                 // лежачего и встающего не бьют
                 if (st.phase == FightPhase.Down || st.phase == FightPhase.Rise) continue;
 
-                // Мега: любой свайп при полной шкале
-                p.isMega    = st.megaReady && p.type != PunchType.Jab;
+                // Мега: любой свайп при полной шкале (в режиме без меги — никогда)
+                p.isMega    = st.megaReady && MegaAllowed && p.type != PunchType.Jab;
                 p.isFlurry  = false;
 
                 int strength = p.type == PunchType.Jab ? 0 : (p.isMega ? 2 : 1);
@@ -553,7 +579,10 @@ namespace VoxGame
                     }
                     else if (result.isKnockdown)
                     {
-                        int riseAt = 4 + (int)(_sim.State.knockdowns % 3);
+                        // начатый до нокдауна удар соперника не долетает
+                        _strikePending = false;
+                        var ks = _sim.State;
+                        int riseAt = RefereeLogic.RiseCount(ks.knockdowns, ks.hpMax > 0f ? ks.hp / ks.hpMax : 0f);
                         _referee.OnKnockdown(riseAt);
                         _crowd.SetMood(CrowdMood.Tense);
                         _crowd.Burst(0.8f);
@@ -572,8 +601,10 @@ namespace VoxGame
                     }
                 }
 
-                float gloveDur = p.type == PunchType.Jab ? 0.085f : (p.isMega ? 0.4f : 0.2f);
+                float speed = Mathf.Max(0.5f, st.fightParams.speedMult);
+                float gloveDur = (p.type == PunchType.Jab ? 0.085f : (p.isMega ? 0.4f : 0.2f)) / speed;
                 _playerGloves.Punch(p.side, p.isMega ? PunchType.Mega : p.type, gloveDur, contact);
+                _punchCd = FightState.PunchCooldown(p.type, p.isMega, speed);
 
                 // Один удар за тик
                 break;
@@ -702,7 +733,7 @@ namespace VoxGame
             _strikePending = false;
 
             var st = _sim.State;
-            if (st.phase == FightPhase.KO || Finished) return;
+            if (!FightState.FoeCanStrike(st.phase) || Finished) return;
 
             // Уклон в правильную сторону нейтрализует удар
             bool dodgeOk = st.playerDodge > 0.04f && st.playerDodgeSide != 0
@@ -785,8 +816,18 @@ namespace VoxGame
                     _sound.Play(SoundId.Bell);
                     break;
                 case RefereeEventType.FightStopped:
-                    // отсчёт до десяти: развязка начинается здесь (нокаут начал её раньше)
-                    if (!Finished) _sound.Play(SoundId.Bell);
+                    // отсчёт до десяти: развязка начинается здесь (нокаут начал её раньше); соперник не встал — нокаут
+                    if (!Finished)
+                    {
+                        PlayerWon = _referee.PlayerWon;
+                        _sim.State.phase = FightPhase.KO;
+                        _strikePending = false;
+                        _crowd.SetMood(CrowdMood.Cheer);
+                        _crowd.Burst(1f);
+                        _sound.Play(SoundId.Bell);
+                        _sound.Play(SoundId.CrowdKnockout);
+                        OnKnockout?.Invoke();
+                    }
                     Finished = true;
                     BeginFinale(_referee.PlayerWon);
                     break;
@@ -804,10 +845,11 @@ namespace VoxGame
             int reward;
             if (win && _modeManager != null)
             {
-                // Правильный расчёт через ModeManager: base 100 + KD×20 + точность%×0.5 + KO +50; Trial ×2
+                // Расчёт через ModeManager: база по уровню + KD×20 + точность%×0.5 + KO +50; Trial ×2
                 var hist = new HitResult[_hitCount];
                 System.Array.Copy(_hitHistory, hist, _hitCount);
-                reward = _modeManager.ComputeReward(hist, _modeManager.CurrentMode);
+                reward = _modeManager.ComputeReward(hist, _modeManager.CurrentMode, _foeDef.level,
+                                                    ModeManager.Accuracy(_hitsTotal, _hitsLanded));
             }
             else
             {
@@ -902,11 +944,11 @@ namespace VoxGame
             _v.Restore();
             AnatSkin.Reset();
             _foeBody.ResetGear();
-            float prevMega = _sim.State.megaMeter;
+            // «Заново» — тот же бой с нуля: мега-шкала не переносится
             var prms = _sim.State.fightParams;
             _sim = new FightSim(_foeDef.level, _foeDef.seed + (uint)(_restartCount + 1), prms);
             ApplyFoeTuning(_foeHpMult, _foeStunMult);
-            _sim.CarryMegaMeter(prevMega);
+            _sim.State.playerHp = Mathf.Clamp(PlayerStartHp, 1f, 100f);
             _ai  = new FightAI(_aiStyle, _foeDef.level, _foeDef.seed);
             _referee.Reset();
             _victory.Reset();
@@ -936,7 +978,12 @@ namespace VoxGame
             _hitCount     = 0;
             _blockFromButton = false;
             _strikePending   = false;
+            _strikeCmd       = default;
             _prevAIPhase     = FightPhase.Idle;
+            _camFollow       = 0f;
+            _camDodge        = 0f;
+            _punchCd         = 0f;
+            _hud.ResetTransient();
             lastHitFrameMs   = 0f;
             maxHitFrameMs    = 0f;
             _restartCount++;

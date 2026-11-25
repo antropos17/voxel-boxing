@@ -129,6 +129,12 @@ namespace VoxGame
             }
         }
 
+        // Счёт подъёма для OnKnockdown: обычно 5–6; на последнем допустимом нокдауне (второй) при здоровье соперника
+        // ниже STOP_HP_FRAC он не встаёт — рефери досчитывает до 10 и останавливает бой.
+        public const float STOP_HP_FRAC = 0.5f;
+        public static int RiseCount(int knockdowns, float hpFrac) =>
+            knockdowns >= 2 && hpFrac < STOP_HP_FRAC ? -1 : 4 + knockdowns % 3;
+
         // Нокдаун: соперник упал. riseAtCount — счёт подъёма (обычно 4..9),
         // или -1 если не встанет (отсчёт до 10).
         public void OnKnockdown(int riseAtCount)

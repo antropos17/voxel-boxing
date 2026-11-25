@@ -41,6 +41,14 @@ namespace VoxGame
         static readonly Vector3 ReachDirL = new Vector3(0.62f, -0.80f, -0.20f), ReachPoleL = new Vector3(0.55f, -1f, -0.1f);
         Vector3 _reachDir = ReachDirP, _reachPole = ReachPoleP;
         const float SideLowNY = -0.55f;   // сустав за боковым краем — не выше этой доли полувысоты кадра (минус — вниз)
+        const float SideLowNYP = -0.85f;  // в портрете рука входит снизу или из самого нижнего угла, не с середины края
+        float _sideLowNY = SideLowNYP;
+        // Досягаемость: голова соперника в 1.3 м, а рука игрока — 0.6 м. Цель удара и точка хвата рефери переносятся
+        // по лучу из камеры ближе (на экране — та же точка, перчатка крупнее и закрывает место удара), иначе плечо
+        // тянулось жердью через полкадра. Плечо удлиняется не больше UpperMaxStretch, при растяжении — и толще.
+        const float PunchMaxZP = 0.74f, PunchMaxZL = 0.80f, VictoryMaxZ = 0.70f;
+        const float UpperMaxStretch = 1.35f;
+        float _punchMaxZ = PunchMaxZP;
         const float ReachLen = 0.48f, ReachElbowDeg = 110f;   // в вытянутой руке локоть не прямее этого угла
 
         readonly Transform _cam;
@@ -143,6 +151,8 @@ namespace VoxGame
             _restAU = port ? RestAUP : RestAUL;
             _reachDir = port ? ReachDirP : ReachDirL;
             _reachPole = port ? ReachPoleP : ReachPoleL;
+            _sideLowNY = port ? SideLowNYP : SideLowNY;
+            _punchMaxZ = port ? PunchMaxZP : PunchMaxZL;
             float rz = port ? RestZP : RestZL, rnx = port ? RestNXP : RestNXL, rny = port ? RestNYP : RestNYL;
             float bnx = port ? BlockNXP : BlockNXL;
             for (int s = 0; s < 2; s++)
@@ -173,7 +183,7 @@ namespace VoxGame
                 case PunchType.Upper: t += new Vector3(0f, -0.075f, -0.04f); break;            // под подбородком
                 default:              t += new Vector3(0f, 0f, -0.08f); break;                 // перед лицом
             }
-            _goal[s]  = t;
+            _goal[s]  = Reach(t, _punchMaxZ);
             _kind[s]  = kind;
             _timer[s] = Mathf.Max(duration, 0.08f);
             _outT[s]  = Mathf.Max(_timer[s] * 0.5f, 0.045f);
@@ -186,9 +196,12 @@ namespace VoxGame
         public void RaiseVictory(int side, Vector3 worldWrist)
         {
             _vicSide  = side < 0 ? 0 : 1;
-            _vicWrist = _cam.InverseTransformPoint(worldWrist);
+            _vicWrist = Reach(_cam.InverseTransformPoint(worldWrist), VictoryMaxZ);
             _vicOn    = true;
         }
+
+        // Точка (оси камеры) по лучу из камеры не дальше maxZ: на экране то же место, рука до неё достаёт.
+        static Vector3 Reach(Vector3 t, float maxZ) => t.z > maxZ ? t * (maxZ / t.z) : t;
 
         // Отпустить руку сразу (переигровка).
         public void ClearVictory()
@@ -329,6 +342,10 @@ namespace VoxGame
             w = pos - ga * go;
             if (lockW > 0f) { w = Vector3.Lerp(w, _vicWrist, lockW); pos = w + ga * go; }
             Vector3 sh = Shoulder(s, au, az, w, reachW);
+            // сустав дальше, чем достаёт рука с предельно вытянутым плечом, — подтянуть его к запястью
+            float reach = GloveLooks.UpperLenCm * 0.01f * Scale * UpperMaxStretch + GloveLooks.ForeLenCm * 0.01f * Scale - 0.01f;
+            Vector3 ws = sh - w;
+            if (ws.sqrMagnitude > reach * reach) sh = w + ws.normalized * reach;
             el = Elbow(w, sh, pole, maxDeg);
             Vector3 fa = Dir(w - el, ga), ua = Dir(el - sh, fa);
 
@@ -344,9 +361,12 @@ namespace VoxGame
             SetLenScale(_upper[s], ((el - sh).magnitude + UpperOver) / (GloveLooks.UpperLenCm * 0.01f));
         }
 
+        // Длина звена по Y; растянутое звено толще (как ближе к камере), чтобы не читалось жердью.
         void SetLenScale(Transform t, float sy)
         {
-            if (Mathf.Abs(t.localScale.y - sy) > 1e-4f) t.localScale = new Vector3(Scale, sy, Scale);
+            if (Mathf.Abs(t.localScale.y - sy) <= 1e-4f) return;
+            float th = Scale * Mathf.Max(1f, Mathf.Sqrt(sy / Scale));
+            t.localScale = new Vector3(th, sy, th);
         }
 
         // Локоть по двухзвенной обратной кинематике (оси камеры): sh — плечевой сустав, w — запястье, pole — куда гнётся.
@@ -363,7 +383,7 @@ namespace VoxGame
             // теорема косинусов: при угле в локте ElbowMinDeg плечо длиной lmin
             float c = Mathf.Cos(maxDeg * Mathf.Deg2Rad);
             float lmin = l2 * c + Mathf.Sqrt(Mathf.Max(0f, d * d - l2 * l2 * (1f - c * c)));
-            l1 = Mathf.Max(l1, lmin);
+            l1 = Mathf.Min(Mathf.Max(l1, lmin), l1 * UpperMaxStretch);
             if (d < l1 - l2 + 0.02f) l1 = d + l2 - 0.02f;    // запястье у самого сустава: треугольник не вырождается
             float a = (l1 * l1 - l2 * l2 + d * d) / (2f * d);
             float h = Mathf.Sqrt(Mathf.Max(0f, l1 * l1 - a * a));
@@ -407,8 +427,8 @@ namespace VoxGame
             float needSide = mSideD < -1e-4f ? (mSideW + AnchorGap) / -mSideD : float.MaxValue;
             float needBot  = mBotD  < -1e-4f ? (mBotW  + AnchorGap) / -mBotD  : float.MaxValue;
             // через боковой край — только в его нижней части (ниже SideLowNY высоты кадра), иначе «третья рука» сбоку
-            float k = d.y - SideLowNY * _tanV * d.z;
-            if (k < -1e-4f) needSide = Mathf.Max(needSide, (w.y - SideLowNY * _tanV * w.z) / -k);
+            float k = d.y - _sideLowNY * _tanV * d.z;
+            if (k < -1e-4f) needSide = Mathf.Max(needSide, (w.y - _sideLowNY * _tanV * w.z) / -k);
             float need = Mathf.Min(needSide, needBot);
             float r = need == float.MaxValue ? ReachLen : Mathf.Max(ReachLen, need);
             return w + d * r;

@@ -81,7 +81,8 @@ namespace VoxGame {
                 _lineR[i].gameObject.SetActive(on);
                 if (!on) continue;
                 _lineL[i].text = r.lines[i].label;
-                _lineR[i].text = "+" + r.lines[i].value;
+                int v = r.lines[i].value;
+                _lineR[i].text = v >= 0 ? "+" + v : "−" + (-v);
             }
 
             bool max = p.level >= PlayerProfile.MaxPlayerLevel;

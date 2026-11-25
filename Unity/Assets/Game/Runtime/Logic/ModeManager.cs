@@ -71,13 +71,24 @@ namespace VoxGame {
 
         // --- Награда за бой ---
 
+        // База за победу растёт с уровнем соперника: 100 за первую ступень, 210 за двенадцатую.
+        public const int WinBase = 90, WinPerLevel = 10;
+        public static int WinCoins(int foeLevel) => WinBase + WinPerLevel * Mathf.Max(1, foeLevel);
+
+        // Точность боя: попадания / брошенные удары; -1 — ударов не было (тогда считается по истории).
+        public static float Accuracy(int hitsThrown, int hitsLanded) =>
+            hitsThrown > 0 ? Mathf.Clamp01((float)hitsLanded / hitsThrown) : -1f;
+
         /// <summary>
-        /// Монеты за победу: base 100 + нокдауны×20 + точность%×0.5 + KO +50.
+        /// Монеты за победу: база по уровню (WinCoins) + нокдауны×20 + точность%×0.5 + KO +50.
         /// Trial: ×2. Поражение: 0.
+        /// accuracy — доля попаданий из всех брошенных ударов (0..1); меньше нуля — по history
+        /// (история представления хранит только попадания, поэтому точность передаётся отдельно).
         /// </summary>
-        public int ComputeReward(HitResult[] history, GameMode mode) {
+        public int ComputeReward(HitResult[] history, GameMode mode, int foeLevel = 1, float accuracy = -1f) {
             if (history == null || history.Length == 0) {
-                return mode == GameMode.Trial ? 200 : 100;
+                int b = WinCoins(foeLevel);
+                return mode == GameMode.Trial ? b * 2 : b;
             }
 
             int kds = 0, hits = 0;
@@ -88,10 +99,10 @@ namespace VoxGame {
                 if (r.isKO) wasKO = true;
             }
 
-            float accuracy = (float)hits / history.Length * 100f;
-            int reward = 100
+            float acc = accuracy >= 0f ? Mathf.Clamp01(accuracy) * 100f : (float)hits / history.Length * 100f;
+            int reward = WinCoins(foeLevel)
                 + kds * 20
-                + (int)(accuracy * 0.5f)
+                + (int)(acc * 0.5f)
                 + (wasKO ? 50 : 0);
 
             if (mode == GameMode.Trial) reward *= 2;

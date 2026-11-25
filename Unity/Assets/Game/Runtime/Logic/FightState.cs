@@ -154,6 +154,23 @@ namespace VoxGame
             megaReady = megaMeter >= 100f;
         }
 
+        // Брошенный мимо удар тоже стоит выносливости (с тем же множителем перчаток и улучшения).
+        public void SpendPunchStamina()
+        {
+            playerStamina = Mathf.Max(0f, playerStamina - STAMINA_HIT_COST * fightParams.staminaCostMult);
+        }
+
+        // Удар соперника доходит до игрока, только пока соперник на ногах: начатый до нокдауна удар отменяется.
+        public static bool FoeCanStrike(FightPhase p) => p != FightPhase.Down && p != FightPhase.Rise && p != FightPhase.KO;
+
+        // Перезарядка между ударами игрока, с: джеб, силовой, мега; speedMult (перчатки + «Скорость») делит её.
+        public const float PUNCH_CD_JAB = 0.16f, PUNCH_CD_POWER = 0.30f, PUNCH_CD_MEGA = 0.50f;
+        public static float PunchCooldown(PunchType type, bool mega, float speedMult)
+        {
+            float cd = mega ? PUNCH_CD_MEGA : type == PunchType.Jab ? PUNCH_CD_JAB : PUNCH_CD_POWER;
+            return cd / Mathf.Max(0.5f, speedMult);
+        }
+
         // Нокдаун: stun >= stunMax И kd < 2
         public void OnKnockdown()
         {

@@ -92,6 +92,35 @@ unity close "$P"
 - Первый открытый редактор 23.11.2026 закрылся сам через ~2 мин после готовности (в журнале штатный выход: сохранение раскладки, «Pipeline Server stopped», без ошибок); причина не найдена. Второй открытый работал стабильно весь замер.
 - Тесты этапа B (`[Ignore]`) фильтр `VoxProbe.Tests.Anatomy` тоже захватывает — они пропускаются.
 
+## Игровой слой: как запустить игру
+
+Код — `Assets/Game/` (сборки `VoxGame`, `VoxGame.Editor`, `VoxGame.Tests`), анатомическую голову берёт из `Assets/Probe/` без правок. Сцена — `Assets/Game/Game.unity`: открыть и нажать Play (меню → режим → лестница → бой → награда → магазин). Единственный `Update` — у `GameApp`, остальное тикает из него.
+
+Пункты меню `VoxGame` в редакторе:
+
+- `Setup Game Scene` — пересоздать сцену, добавить её первой в Build Settings, создать материалы `Resources/Shaders/*.mat` (держат шейдеры в сборке плеера; отдельно — `Ensure Shader Materials`);
+- `Game Walk W4` — сквозной проход без Play Mode: 36 шагов через `GameApp.Press` и синтетические удары, снимки всех экранов; итоговая строка `GAME_WALK ok …`;
+- `Fight Shots W1` — снимки боя и замер кадра удара (`GAME_HIT_FRAME_MS`, `GAME_HIT_BREAKDOWN`, `GAME_LAYER_PARTS`);
+- `Referee Shots W2`, `Roster Sheet W2`, `Roster Screen Shots W2`, `Fx Shots W3`, `Gloves Sheet W3`, `Portraits Sheet W5` — снимки по темам.
+
+Снимки — `Shots/game/` (портрет 540×1170 `-p`, ландшафт 1170×540 `-l`). Сохранение прохода и замеров — во временной папке, не в профиле игрока.
+
+```bash
+U="X:/Programs/Unity/6000.3.21f1/Editor/Unity.exe"
+P="X:/Projects 2027/Voxel Boxing - Fight 2027/Unity"
+# в открытом редакторе: проход, лист портретов, пределы, утечки, распределения памяти
+unity command script eval --timeout 590 --code 'VoxGame.Editor.GameWalk.Walk(); return VoxGame.Editor.GameWalk.LastLog;' --project-path "$P" --caller plugin --skill unity-cli --format json
+unity command script eval --timeout 300 --code 'VoxGame.Editor.ShotsTaker.PortraitsSheet(); return VoxGame.Editor.ShotsTaker.LastLog;' --project-path "$P" --caller plugin --skill unity-cli --format json
+unity command script eval --timeout 590 --code 'VoxGame.Editor.ShotsTaker.LimitsProbe(); return VoxGame.Editor.ShotsTaker.LastLog;' --project-path "$P" --caller plugin --skill unity-cli --format json
+unity command script eval --timeout 590 --code 'VoxGame.Editor.ShotsTaker.LeakProbe(); return VoxGame.Editor.ShotsTaker.LastLog;' --project-path "$P" --caller plugin --skill unity-cli --format json
+unity command script eval --timeout 590 --code 'VoxGame.Editor.ShotsTaker.AllocProbe(); return VoxGame.Editor.ShotsTaker.LastLog;' --project-path "$P" --caller plugin --skill unity-cli --format json
+# тесты игрового слоя и анатомии пакетно (редактор закрыт)
+"$U" -batchmode -nographics -projectPath "$P" -runTests -testPlatform EditMode -testFilter "VoxGame.Tests" -testResults "$P/Logs/game-tests.xml" -logFile "$P/Logs/game-tests.log"
+"$U" -batchmode -nographics -projectPath "$P" -runTests -testPlatform EditMode -testFilter "VoxProbe.Tests.Anatomy" -testResults "$P/Logs/anat-tests.xml" -logFile "$P/Logs/anat-tests.log"
+```
+
+Шрифт интерфейса — Inter (SIL OFL 1.1), файлы и лицензия в `Assets/Game/Resources/Fonts/`; запись в `CREDITS.md` в корне.
+
 ## Просмотр головы
 
 Интерактивный режим той же сборки: `-anatView`. Без флага сборка, как раньше, делает замерный облёт.

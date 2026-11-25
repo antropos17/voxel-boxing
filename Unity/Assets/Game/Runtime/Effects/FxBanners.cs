@@ -171,6 +171,13 @@ namespace VoxGame
         // Слово удара: по горизонтали у точки удара (мир), по высоте — на уровне груди соперника.
         public void ShowAt(string word, Vector3 world, BannerStyle style)
         {
+            // на экране одно слово удара: прежнее гаснет сразу, иначе два слова ложатся друг на друга
+            for (int i = 0; i < MaxBanners; i++)
+                if (_banners[i].alive && _banners[i].mode == Word)
+                {
+                    _banners[i].alive = false;
+                    _banners[i].text.gameObject.SetActive(false);
+                }
             var s = Take(_banners);
             Setup(s, word, style);
             s.mode = Word;

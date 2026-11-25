@@ -207,8 +207,8 @@ namespace VoxGame
         // Принудительный выбор признаков (−1 — по зерну). Лестница через это делает бойцов попарно различимыми.
         public struct LookPicks
         {
-            public int trunks, gloves, body, top, beard, nick;
-            public static readonly LookPicks Free = new LookPicks { trunks = -1, gloves = -1, body = -1, top = -1, beard = -1, nick = -1 };
+            public int trunks, gloves, body, top, beard, nick, style;
+            public static readonly LookPicks Free = new LookPicks { trunks = -1, gloves = -1, body = -1, top = -1, beard = -1, nick = -1, style = -1 };
         }
 
         // ---- Публичный API -----------------------------------------------
@@ -236,7 +236,7 @@ namespace VoxGame
             // Каждый атрибут хеширует seed с уникальной солью
             int nameIdx    = (int)(Hash(seed,  7) % (uint)Names.Length);
             int nickIdx    = p.nick >= 0 ? p.nick % Nicknames.Length : (int)(Hash(seed, 8) % (uint)Nicknames.Length);
-            int styleIdx   = (int)(Hash(seed,  0) % 8);
+            int styleIdx   = p.style >= 0 ? p.style % 8 : (int)(Hash(seed,  0) % 8);
             int trunksIdx  = p.trunks >= 0 ? p.trunks % TrunksMain.Length : (int)(Hash(seed, 3) % (uint)TrunksMain.Length);
             int gloveIdx   = p.gloves >= 0 ? p.gloves % GloveMain.Length : (int)(Hash(seed, 5) % (uint)GloveMain.Length);
             int typeIdx    = p.body >= 0 ? p.body % BodyTypeCount : (int)(Hash(seed, 13) % BodyTypeCount);
@@ -436,8 +436,8 @@ namespace VoxGame
             float hpRaw = 220f + 50f * (level - 1);
             int   hp    = Mathf.Clamp(1 + (int)((hpRaw - 220f) / 61f), 1, 10);
 
-            // Урон: 9 (ур.1) .. 26.6 (ур.12) → диапазон ~17.6
-            float dmgRaw = 9f + 1.6f * (level - 1);
+            // Урон: 9 (ур.1) .. 26.6 (ур.12) → диапазон ~17.6, с множителем стиля (как бьёт в бою)
+            float dmgRaw = (9f + 1.6f * (level - 1)) * FightAI.Styles[Mathf.Clamp(styleIdx, 0, FightAI.Styles.Length - 1)].d;
             int   dmg    = Mathf.Clamp(1 + (int)((dmgRaw - 9f) / 1.96f), 1, 10);
 
             // Скорость: wind уменьшается с уровнем (меньше = быстрее)

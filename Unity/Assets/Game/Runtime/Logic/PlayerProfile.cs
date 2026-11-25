@@ -186,6 +186,9 @@ namespace VoxGame {
             }
             if (!boughtGloveIds.Contains("classic"))
                 boughtGloveIds.Add("classic");
+            // надетая перчатка должна быть куплена и быть в каталоге (правка файла, старый формат)
+            if (!boughtGloveIds.Contains(equippedGloveId) || GlovesCatalog.Get(equippedGloveId).id != equippedGloveId)
+                equippedGloveId = "classic";
         }
 
         /// <summary>Скопировать профиль в SaveData для сохранения.</summary>

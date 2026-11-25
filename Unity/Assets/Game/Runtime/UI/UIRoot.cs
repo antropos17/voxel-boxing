@@ -74,6 +74,8 @@ namespace VoxGame {
             _safeLayer.offsetMax = Vector2.zero;
 
             _safeArea = saGO.AddComponent<SafeAreaFitter>();
+            _safeArea.Refresh();
+            RememberScreen();
 
             EnsureEventSystem();
 
@@ -132,13 +134,19 @@ namespace VoxGame {
         // Вызывается из GameApp.Tick (в старых сценах снимков — из FightDirector.Tick).
         // dt — игровое время, udt — реальное.
         public void Tick(float dt, float udt) {
+            // safe-area меняется и без смены ориентации: поворот на 180°, панель навигации, разделённый экран
+            if (_viewW == 0 && !_inShotMode && ScreenChanged()) { RememberScreen(); _safeArea.Refresh(); }
             bool landscape = Landscape;
             if (landscape != _prevLandscape) {
                 _prevLandscape = landscape;
-                if (_viewW == 0) _safeArea.Refresh();
                 BroadcastLayout(landscape);
             }
         }
+
+        Rect _lastSafe;
+        int  _lastW, _lastH;
+        bool ScreenChanged() => Screen.safeArea != _lastSafe || Screen.width != _lastW || Screen.height != _lastH;
+        void RememberScreen() { _lastSafe = Screen.safeArea; _lastW = Screen.width; _lastH = Screen.height; }
 
         void BroadcastLayout(bool landscape) {
             foreach (var kv in _screens) {
