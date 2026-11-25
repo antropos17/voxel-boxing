@@ -51,7 +51,8 @@ namespace VoxGame {
             _canvas = gameObject.AddComponent<Canvas>();
             _canvas.renderMode   = RenderMode.ScreenSpaceCamera;
             _canvas.worldCamera  = renderCam;
-            _canvas.planeDistance = 0.5f;
+            // холст у самой ближней плоскости: руки игрока (от 0.2 м) не перекрывают кнопки
+            _canvas.planeDistance = renderCam.nearClipPlane + 0.03f;
             _canvas.sortingOrder  = 0;
 
             _scaler = gameObject.AddComponent<CanvasScaler>();
@@ -150,7 +151,7 @@ namespace VoxGame {
         // Используется в пакетном режиме, если Screen Space Camera не работает в RenderTexture.
         public void FitToCamera(Camera cam, int w, int h) {
             _canvas.renderMode = RenderMode.WorldSpace;
-            float dist  = cam.nearClipPlane + 0.1f;
+            float dist  = cam.nearClipPlane + 0.03f;
             float camH  = 2f * dist * Mathf.Tan(cam.fieldOfView * Mathf.Deg2Rad * 0.5f);
             float camW  = camH * ((float)w / h);
             var rt      = _canvas.GetComponent<RectTransform>();

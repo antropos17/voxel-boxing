@@ -101,15 +101,12 @@ namespace VoxGame {
             _comboLbl.text = "";
             _comboLbl.gameObject.SetActive(false);
 
-            // Кнопки полупрозрачные: за ними видно соперника и ринг
-            _blockBtn = UIKit.Btn(transform, "BtnBlock", "БЛОК",
-                UIKit.FontMd, new Color32(52, 36, 14, 90), UIKit.Accent);
+            // Кнопки управления на плотной тёмной подложке со светлой рамкой: читаются поверх трусов, перчаток и ринга
+            _blockBtn = ControlBtn("BtnBlock", "БЛОК", 30, UIKit.Accent);
             _blockBtn.onClick.AddListener(() => OnBlock?.Invoke());
-            _dodgeL = UIKit.Btn(transform, "BtnDgL", "\u25C4",
-                UIKit.FontMd, new Color32(22, 24, 44, 85), UIKit.TextMain);
+            _dodgeL = ControlBtn("BtnDgL", "\u25C4", 44, UIKit.TextMain);
             _dodgeL.onClick.AddListener(() => OnDodgeLeft?.Invoke());
-            _dodgeR = UIKit.Btn(transform, "BtnDgR", "\u25BA",
-                UIKit.FontMd, new Color32(22, 24, 44, 85), UIKit.TextMain);
+            _dodgeR = ControlBtn("BtnDgR", "\u25BA", 44, UIKit.TextMain);
             _dodgeR.onClick.AddListener(() => OnDodgeRight?.Invoke());
             _pauseBtn = UIKit.Btn(transform, "BtnPause", "II",
                 UIKit.FontSm, new Color32(22, 24, 44, 110), UIKit.TextMain);
@@ -132,6 +129,18 @@ namespace VoxGame {
             Place(go.GetComponent<RectTransform>(), 0f, 0f, 1f, 1f);
 
             OnLayout(false);
+        }
+
+        Button ControlBtn(string name, string caption, int fontSize, Color textColor) {
+            var b = UIKit.Btn(transform, name, caption, fontSize, new Color32(16, 14, 22, 235), textColor);
+            var frame = b.gameObject.AddComponent<Outline>();          // рамка по краю подложки
+            frame.effectColor    = new Color(1f, 1f, 1f, 0.42f);
+            frame.effectDistance = new Vector2(2f, -2f);
+            var lbl = b.GetComponentInChildren<Text>();
+            var o = lbl.GetComponent<Outline>();
+            o.effectColor    = new Color(0f, 0f, 0f, 0.9f);
+            o.effectDistance = new Vector2(2f, -2f);
+            return b;
         }
 
         Text TelegraphBadge(string name, out Image bg) {
@@ -284,10 +293,11 @@ namespace VoxGame {
                 Place(_comboLbl,   0.640f, 0.520f, 0.820f, 0.660f);
                 Place(_countLbl,   0.350f, 0.440f, 0.650f, 0.880f);
                 Place(_bannerLbl,  0.200f, 0.280f, 0.800f, 0.440f);
-                // Кнопки под большими пальцами по углам, середина низа свободна
-                Place(_dodgeL,   0.008f, 0.030f, 0.118f, 0.290f);
-                Place(_blockBtn, 0.126f, 0.030f, 0.262f, 0.230f);
-                Place(_dodgeR,   0.882f, 0.030f, 0.992f, 0.290f);
+                // Кнопки под большими пальцами по углам, середина низа свободна; «БЛОК» над «◄»,
+                // чтобы перчатки игрока (от ~0.25 ширины) их не перекрывали. Высота ≥ 100 опорных px.
+                Place(_dodgeL,   0.008f, 0.030f, 0.122f, 0.270f);
+                Place(_blockBtn, 0.008f, 0.295f, 0.122f, 0.500f);
+                Place(_dodgeR,   0.878f, 0.030f, 0.992f, 0.270f);
             } else {
                 Place(_timerLbl, 0.360f, 0.957f, 0.640f, 0.998f);
                 Place(_foeHpBg,  0.035f, 0.922f, 0.800f, 0.953f);
@@ -305,10 +315,10 @@ namespace VoxGame {
                 Place(_comboLbl,   0.600f, 0.760f, 0.960f, 0.812f);
                 Place(_countLbl,   0.200f, 0.560f, 0.800f, 0.800f);
                 Place(_bannerLbl,  0.040f, 0.390f, 0.960f, 0.470f);
-                // кнопки раздельно по низу: между ними видно соперника
-                Place(_dodgeL,   0.025f, 0.015f, 0.215f, 0.095f);
-                Place(_blockBtn, 0.355f, 0.015f, 0.645f, 0.085f);
-                Place(_dodgeR,   0.785f, 0.015f, 0.975f, 0.095f);
+                // кнопки раздельно по низу (высота ~105 опорных px): между ними видно соперника
+                Place(_dodgeL,   0.025f, 0.012f, 0.235f, 0.108f);
+                Place(_blockBtn, 0.330f, 0.012f, 0.670f, 0.108f);
+                Place(_dodgeR,   0.765f, 0.012f, 0.975f, 0.108f);
             }
         }
 

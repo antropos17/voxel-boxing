@@ -47,9 +47,10 @@ namespace VoxGame
         // ---- Постановка сцены ----------------------------------------------
 
         // Глаза игрока: на высоте головы соперника (её начало — уровень ушей), в EyeDist от его оси.
-        const float EyeDist = 1.20f;
+        // 1.40 м: в портрете голова ниже полос HUD, фигура видна до середины бедра над кнопками.
+        const float EyeDist = 1.40f;
         Vector3 _eye = new Vector3(0f, 1.62f, EyeDist);
-        const float PortPitch = 14.5f, LandPitch = 9.5f;                    // наклон взгляда вниз, градусы
+        const float PortPitch = 13f, LandPitch = 9.5f;                      // наклон взгляда вниз, градусы
         // Красный угол ринга виден за соперником справа: в 3 м от игрока, 9.5° от оси взгляда;
         // диагональ ринга повёрнута к оси взгляда на 12°.
         const float CornerDist = 3.0f, CornerOff = 9.5f, CornerDiag = 12f;
@@ -276,6 +277,7 @@ namespace VoxGame
             AnatSkin.Step(sdt);
             _v.Tick(sdt);
             AnatSkin.SetGlobals(_v.root);
+            _foeBody.gear.SyncToSkull();   // накладки головы — по позе черепа этого кадра
             double anatMs = _tickSw.Elapsed.TotalMilliseconds - t0;
 
             // Рефери (реальное время)
@@ -640,6 +642,7 @@ namespace VoxGame
             if (_v == null) return;
             _v.Restore();
             AnatSkin.Reset();
+            _foeBody.ResetGear();
             float prevMega = _sim.State.megaMeter;
             var prms = _sim.State.fightParams;
             _sim = new FightSim(_foeDef.level, _foeDef.seed + (uint)(_restartCount + 1), prms);

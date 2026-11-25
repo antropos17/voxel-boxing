@@ -13,9 +13,12 @@ namespace VoxGame
         public const float ArmCell   = 0.8f;   // шаг решётки руки, см
         public const float GloveCell = 0.55f;  // шаг решётки перчатки, см
 
-        // Тон кожи анатомической головы (AnatMat: «кожа», sRGB). Внешность головы пока не настраивается,
-        // поэтому тело берёт тот же тон, а не FighterDef.colors.skin, иначе шея и плечи разного цвета.
-        public static readonly Color32 HeadSkin = new Color32(222, 168, 128, 255);
+        // Тон кожи анатомической головы (AnatMat: «кожа», sRGB). Внешность головы не настраивается,
+        // поэтому тело всегда этого тона, иначе шея и плечи разного цвета.
+        public static readonly Color32 HeadSkin = FighterGen.HeadSkin;
+
+        // Цвет татуировок
+        public static readonly Color32 Ink = new Color32(38, 46, 70, 255);
 
         // Номера цветов перчатки
         public const byte GMain = 1, GCuff = 2, GPalm = 3, GLace = 4, GStud = 5;
@@ -67,18 +70,47 @@ namespace VoxGame
 
         // ---- Сетки ----------------------------------------------------------------------------
 
-        public static Mesh UpperArmMesh(Color32 skin)
+        // Плечо. thick — толщина (поперёк оси руки), band — татуировка-браслет с зубцами.
+        public static Mesh UpperArmMesh(Color32 skin, float thick = 1f, bool band = false)
         {
-            var mn = new Vector3(-6.4f, -5.6f, -6.4f); var mx = new Vector3(6.4f, 34.4f, 6.4f);
-            var m = VoxModel.FromSdf(mn, mx, ArmCell, UpperArm, (x, y, z) => 1);
-            return m.BuildMesh("upperArm", new[] { default, skin }, mn * 0.01f, ArmCell * 0.01f);
+            float k = Mathf.Max(0.5f, thick);
+            var mn = new Vector3(-6.4f * k, -5.6f, -6.4f * k); var mx = new Vector3(6.4f * k, 34.4f, 6.4f * k);
+            var m = VoxModel.FromSdf(mn, mx, ArmCell,
+                (x, y, z) => UpperArm(x / k, y, z / k) * Mathf.Min(1f, k),
+                (x, y, z) => band ? ArmBandPaint(x, y, z) : (byte)1);
+            return m.BuildMesh("upperArm", new[] { default, skin, Ink }, mn * 0.01f, ArmCell * 0.01f);
         }
 
-        public static Mesh ForeArmMesh(Color32 skin)
+        // Браслет: широкая полоса с зубцами вниз к локтю и тонкая линия под ней
+        static byte ArmBandPaint(float x, float y, float z)
         {
-            var mn = new Vector3(-5.6f, -4.8f, -5.6f); var mx = new Vector3(5.6f, 30.4f, 5.6f);
-            var m = VoxModel.FromSdf(mn, mx, ArmCell, ForeArm, (x, y, z) => 1);
-            return m.BuildMesh("foreArm", new[] { default, skin }, mn * 0.01f, ArmCell * 0.01f);
+            float a = Mathf.Atan2(z, x);
+            float tooth = Mathf.Abs(Mathf.Repeat(a * 6f / Mathf.PI, 2f) - 1f);   // 0..1, шесть зубцов по кругу
+            if (y > 11.6f && y < 13.4f + 1.9f * tooth) return 2;
+            if (y > 9.8f && y < 10.7f) return 2;
+            return 1;
+        }
+
+        // Предплечье. thick — толщина, wraps — бинты у запястья (видны между локтем и манжетой перчатки).
+        public static Mesh ForeArmMesh(Color32 skin, float thick = 1f, bool wraps = false, Color32 wrapColor = default)
+        {
+            float k = Mathf.Max(0.5f, thick);
+            var mn = new Vector3(-5.6f * k, -4.8f, -5.6f * k); var mx = new Vector3(5.6f * k, 30.4f, 5.6f * k);
+            var m = VoxModel.FromSdf(mn, mx, ArmCell,
+                (x, y, z) =>
+                {
+                    float d = ForeArm(x / k, y, z / k) * Mathf.Min(1f, k);
+                    return wraps && y > 14.2f ? d - 0.35f : d;   // бинт чуть толще кожи
+                },
+                (x, y, z) =>
+                {
+                    if (!wraps || y < 14.2f) return 1;
+                    // витки бинта наискось: два тона
+                    float a = Mathf.Atan2(z, x) / Mathf.PI;
+                    return Mathf.Repeat(y * 0.55f + a, 1f) < 0.5f ? (byte)2 : (byte)3;
+                });
+            Color32 wd = Color.Lerp(wrapColor, Color.black, 0.18f);
+            return m.BuildMesh("foreArm", new[] { default, skin, wrapColor, wd }, mn * 0.01f, ArmCell * 0.01f);
         }
 
         public static Mesh GloveMesh(int thumb, Color a, Color b, float k = 1f, float kx = 1f, bool studs = false)

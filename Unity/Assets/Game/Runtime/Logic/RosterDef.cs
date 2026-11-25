@@ -1,39 +1,50 @@
 namespace VoxGame
 {
     // Лестница карьеры: 12 бойцов, уровни 1–12.
-    // Гарантии: уникальные имена; соседи не совпадают одновременно по (headStyle, trunks, style).
+    // Гарантии: уникальные имена и прозвища; у всех 12 разные палитры трусов и разные пары
+    // «верх головы (причёска или убор) + борода»; соседи различаются телосложением и перчатками.
     public class RosterDef
     {
+        public const int Count = 12;
+
         public FighterDef[] Fighters { get; private set; }
 
         public RosterDef(uint seed)
         {
-            Fighters = new FighterDef[12];
+            Fighters = new FighterDef[Count];
 
             // Уникальные имена через перемешивание пула
-            var names = new string[12];
+            var names = new string[Count];
             FighterGen.FillUniqueNames(FighterGen.Hash(seed, 0xABCDu), names);
 
-            // Генерируем бойцов
-            for (int i = 0; i < 12; i++)
-            {
-                uint s = FighterGen.Hash(seed, (uint)(i + 100));
-                Fighters[i] = FighterGen.Generate(s, i + 1);
-                ApplyName(ref Fighters[i], names[i]);
-            }
+            // Перестановки признаков: первые 12 элементов каждой не повторяются
+            int[] trunks = FighterGen.Perm(FighterGen.TrunksPaletteCount, FighterGen.Hash(seed, 0x7121u));
+            int[] gloves = FighterGen.Perm(FighterGen.GlovePaletteCount,  FighterGen.Hash(seed, 0x6107u));
+            int[] nicks  = FighterGen.Perm(FighterGen.NicknameCount,      FighterGen.Hash(seed, 0x4E1Cu));
+            int[] tops   = Chain(FighterGen.TopCount,      FighterGen.Hash(seed, 0x70F5u));
+            int[] bodies = Chain(FighterGen.BodyTypeCount, FighterGen.Hash(seed, 0xB0D1u));
+            int[] beards = FighterGen.Perm(FighterGen.BeardCount, FighterGen.Hash(seed, 0xBEA4u));
 
-            // Гарантируем различимость соседей (до 200 попыток на бойца)
-            for (int i = 1; i < 12; i++)
+            var usedHead = new bool[FighterGen.TopCount * 8];
+            for (int i = 0; i < Count; i++)
             {
-                uint attempt = 0;
-                while (attempt < 200u && TripleMatch(Fighters[i - 1], Fighters[i]))
+                // борода по кругу; если пара «верх + борода» уже была — следующая борода
+                int top = tops[i], beard = beards[i % beards.Length];
+                while (usedHead[top * 8 + beard]) beard = (beard + 1) % FighterGen.BeardCount;
+                usedHead[top * 8 + beard] = true;
+
+                var picks = new FighterGen.LookPicks
                 {
-                    attempt++;
-                    uint s2 = FighterGen.Hash(seed ^ (attempt * 0xDEADBEEFu), (uint)(i + 100 + attempt * 13u));
-                    var regen = FighterGen.Generate(s2, i + 1);
-                    ApplyName(ref regen, names[i]);  // имя остаётся из пула
-                    Fighters[i] = regen;
-                }
+                    trunks = trunks[i],
+                    gloves = gloves[i % gloves.Length],
+                    body   = bodies[i],
+                    top    = top,
+                    beard  = beard,
+                    nick   = nicks[i],
+                };
+                uint s = FighterGen.Hash(seed, (uint)(i + 100));
+                Fighters[i] = FighterGen.Generate(s, i + 1, picks);
+                ApplyName(ref Fighters[i], names[i]);
             }
         }
 
@@ -51,24 +62,27 @@ namespace VoxGame
 
         // --- приватные вспомогательные ------------------------------------
 
-        // Тройное совпадение = неразличимые соседи
-        static bool TripleMatch(in FighterDef a, in FighterDef b)
+        // Цепочка перестановок 0..n−1 длиной не меньше Count: каждое значение встречается не чаще ceil(Count/n) раз,
+        // соседние не совпадают (на стыке перестановок совпадение убирается обменом со следующим).
+        static int[] Chain(int n, uint seed)
         {
-            return a.headStyle == b.headStyle
-                && a.colors.trunks == b.colors.trunks
-                && a.styleIdx == b.styleIdx;
+            int blocks = (Count + n - 1) / n + 1;
+            var a = new int[blocks * n];
+            for (int b = 0; b < blocks; b++)
+            {
+                int[] p = FighterGen.Perm(n, FighterGen.Hash(seed, (uint)b));
+                System.Array.Copy(p, 0, a, b * n, n);
+            }
+            for (int i = 1; i < a.Length - 1; i++)
+                if (a[i] == a[i - 1]) { int t = a[i]; a[i] = a[i + 1]; a[i + 1] = t; }
+            return a;
         }
 
         // Заменить имя и пересобрать cardText (nickname и остальное не меняются)
         static void ApplyName(ref FighterDef f, string name)
         {
             f.name     = name;
-            f.cardText = $"«{f.nickname}» · {StyleName(f.styleIdx)} · HP {220 + 50 * (f.level - 1)} · Ур.{f.level}";
+            f.cardText = FighterGen.CardText(f);
         }
-
-        static readonly string[] StyleNames =
-            { "Кирпич", "Шкаф", "Молот", "Бетон", "Утюг", "Гранит", "Бульдозер", "Тихий" };
-
-        static string StyleName(int idx) => StyleNames[idx];
     }
 }

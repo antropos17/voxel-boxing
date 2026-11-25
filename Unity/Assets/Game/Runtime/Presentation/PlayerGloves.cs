@@ -38,7 +38,11 @@ namespace VoxGame
 
         // Удар
         readonly float[] _ext = new float[2], _timer = new float[2], _outT = new float[2];
-        readonly Vector3[] _goal = new Vector3[2];
+        readonly Vector3[] _goal = new Vector3[2], _lunge = new Vector3[2];
+        const float LungeMin  = 0.55f;  // наименьший вынос плеча в ударе, м
+        const float LungeKeep = 0.40f;  // расстояние плечо → цель в конце удара (рука 0.49 м, остаётся сгиб в локте)
+
+        static Vector3 Shoulder(float sg) => new Vector3(sg * 0.17f, -0.30f, 0.10f);
         readonly PunchType[] _kind = new PunchType[2];
 
         bool  _blocking;
@@ -78,8 +82,9 @@ namespace VoxGame
             // в портрете кадр узкий: перчатки дальше и ближе к углам, иначе две перчатки занимают весь низ
             bool port = aspect < 1f;
             float z = port ? 0.64f : RestZ;
+            // в портрете перчатки подняты над кнопками HUD (низ кадра ~13% занят кнопками)
             float xAng = port ? hHalf * 0.80f : Mathf.Min(hHalf * 0.57f, 22f * Mathf.Deg2Rad);
-            float x = z * Mathf.Tan(xAng), y = -z * Mathf.Tan(vHalf * (port ? 0.74f : 0.84f));
+            float x = z * Mathf.Tan(xAng), y = -z * Mathf.Tan(vHalf * (port ? 0.55f : 0.84f));
             float bx = Mathf.Min(x, 0.085f), by = -0.40f * Mathf.Tan(vHalf * 0.42f);
             for (int s = 0; s < 2; s++)
             {
@@ -108,6 +113,9 @@ namespace VoxGame
                 default:              t += new Vector3(0f, 0f, -0.08f); break;                 // перед лицом
             }
             _goal[s]  = t;
+            // корпус идёт за ударом: плечо выносится к цели настолько, чтобы рука доставала до головы соперника
+            Vector3 sh = Shoulder(sg), to = t - sh;
+            _lunge[s] = to.normalized * Mathf.Max(LungeMin, to.magnitude - LungeKeep);
             _kind[s]  = kind;
             _timer[s] = Mathf.Max(duration, 0.08f);
             _outT[s]  = Mathf.Max(_timer[s] * 0.5f, 0.045f);
@@ -152,7 +160,7 @@ namespace VoxGame
                 Vector3 pos = _base[s];
                 Vector3 kn = new Vector3(-sg * 0.14f, 0.78f, 0.61f);
                 Vector3 back = new Vector3(sg * 0.8f, 0.2f, -0.55f);
-                Vector3 shoulder = new Vector3(sg * 0.17f, -0.30f, 0.10f);
+                Vector3 shoulder = Shoulder(sg);
 
                 if (e > 0f)
                 {
@@ -177,7 +185,7 @@ namespace VoxGame
                     back = Vector3.Lerp(back, pb, e);
                     // корпус идёт за ударом; плечо не рисуется, поэтому вынос с запасом: рука достаёт до головы
                     // соперника, а не застывает огромной перчаткой перед камерой
-                    shoulder += new Vector3(0f, 0.08f, 0.55f) * e;
+                    shoulder += _lunge[s] * e;
                 }
 
                 BoxerParts.SolveArm(null, _fore[s], _glove[s],
