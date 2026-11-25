@@ -1,0 +1,68 @@
+{
+  "stages": [
+    {"stage": "1-jaw", "hits": 13, "miss": 0, "done": true, "tris": 147880, "pieces": 1, "pieceTris": 6476, "made": 1, "trimmed": 0, "bodiesOff": 1},
+    {"stage": "2-face", "hits": 14, "miss": 0, "done": true, "tris": 149586, "pieces": 6, "pieceTris": 10928, "made": 6, "trimmed": 0, "bodiesOff": 6},
+    {"stage": "3-vault", "hits": 1, "miss": 0, "done": true, "tris": 157850, "pieces": 6, "pieceTris": 10928, "made": 6, "trimmed": 0, "bodiesOff": 6},
+    {"stage": "4-half", "hits": 20, "miss": 0, "done": true, "tris": 156238, "pieces": 12, "pieceTris": 18124, "made": 12, "trimmed": 0, "bodiesOff": 7},
+    {"stage": "5-stump", "hits": 30, "miss": 0, "done": true, "tris": 51928, "pieces": 24, "pieceTris": 75212, "made": 28, "trimmed": 4, "bodiesOff": 8}
+  ],
+  "platform": "WindowsPlayer", "seed": 77, "asyncMesh": false, "vsync": false, "cpu": "Intel(R) Core(TM) Ultra 9 185H", "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU", "res": "540x1170",
+  "bones": true, "fractures": ["0.3 с: перелом — тело челюсти", "0.5 с: перелом — тело челюсти, уровень 2", "0.5 с: перелом — угол и мыщелок челюсти", "0.6 с: перелом — тело челюсти, уровень 3", "0.7 с: перелом — угол и мыщелок челюсти, уровень 2", "1.1 с: перелом — угол и мыщелок челюсти, уровень 3", "3.4 с: перелом — дно глазницы Л", "3.8 с: перелом — верхняя челюсть, Ле Фор I", "3.9 с: перелом — верхняя челюсть, Ле Фор II", "4.0 с: перелом — носовые кости", "4.1 с: перелом — лобная", "4.1 с: перелом — носовые кости, уровень 2", "4.2 с: перелом — дно глазницы П", "4.2 с: перелом — носовые кости, уровень 3", "4.4 с: перелом — верхняя челюсть, Ле Фор III", "4.6 с: перелом — дно глазницы Л, уровень 2", "4.6 с: перелом — скуловая Л", "9.1 с: перелом — чешуя височной Л", "9.1 с: перелом — скуловая Л, уровень 2", "9.2 с: перелом — лобная, уровень 2", "9.6 с: перелом — дно глазницы Л, уровень 3", "9.7 с: перелом — чешуя височной Л, уровень 2", "9.9 с: перелом — теменная Л", "10.1 с: перелом — скуловая Л, уровень 3", "10.5 с: перелом — теменная Л, уровень 2", "13.0 с: перелом — теменная Л, уровень 3", "13.4 с: перелом — затылочная (без смещения: предел отломков)", "13.7 с: перелом — чешуя височной П (без смещения: предел отломков)", "13.7 с: перелом — скуловая П (без смещения: предел отломков)", "13.9 с: перелом — лобная, уровень 3", "14.1 с: перелом — затылочная, уровень 2 (без смещения: предел отломков)", "14.1 с: перелом — теменная П (без смещения: предел отломков)", "14.3 с: перелом — затылочная, уровень 3 (без смещения: предел отломков)", "14.9 с: перелом — теменная П, уровень 2 (без смещения: предел отломков)"],
+  "hits": 78, "trisIntact": 131858, "trisStump": 51928, "pieceTrisStump": 75212,
+  "hitMsMax": 12.643, "hitMsMedian": 6.245,
+  "worstFrameMsEditorStyle": 18.636, "medianFrameMsEditorStyle": 11.072, "tickMsMax": 23.869, "tickMsMedian": 4.711,
+  "wallFrameMsMax": 25.169, "wallFrameMsMedian": 8.787, "wallFrames": 234,
+  "islandMsMax": 18.44, "pieceMsMax": 0.281, "piecesPeak": 24, "islandRequests": 78, "islandFull": 60,
+  "buildMs": 294.517, "runSeconds": 3.263, "gcCollections": 4,
+  "memMB": { "monoStart": 8.355, "monoEnd": 9.457, "totalStart": 311.686, "totalEnd": 259.145, "monoBeforeView": 2.316, "totalBeforeView": 79.584, "gcHeapEnd": 9.484 },
+  "hitParts": {
+    "pick": { "max": 1.822, "median": 0.067, "sum": 8.403 },
+    "locate": { "max": 0.093, "median": 0.01, "sum": 1.026 },
+    "spot": { "max": 1.128, "median": 0.567, "sum": 47.591 },
+    "apply": { "max": 2.321, "median": 0.289, "sum": 27.481 },
+    "lids": { "max": 0.02, "median": 0, "sum": 0.123 },
+    "fail": { "max": 0.016, "median": 0.001, "sum": 0.13 },
+    "smear": { "max": 1.08, "median": 0.055, "sum": 8.163 },
+    "macer": { "max": 2.241, "median": 0.675, "sum": 54.011 },
+    "break": { "max": 2.974, "median": 0.002, "sum": 42.022 },
+    "rip": { "max": 2.767, "median": 1.002, "sum": 74.838 },
+    "dmgVis": { "max": 4.227, "median": 1.273, "sum": 107.898 },
+    "boreStop": { "max": 1.186, "median": 0.202, "sum": 22.384 },
+    "boreCut": { "max": 2.102, "median": 0.21, "sum": 29.076 },
+    "boreCsf": { "max": 1.373, "median": 0.5, "sum": 42.873 },
+    "boreVis": { "max": 2.573, "median": 0.06, "sum": 27.594 },
+    "rest": { "max": 0.87, "median": 0.207, "sum": 19.754 },
+    "restVis": { "max": 0.001, "median": 0, "sum": 0.014 },
+    "mesh": { "max": 0.039, "median": 0.017, "sum": 1.496 },
+    "x.visFlood": { "max": 1.584, "median": 0.542, "sum": 52.603 },
+    "x.visTouch": { "max": 0.556, "median": 0.122, "sum": 11.901 },
+    "x.visBodies": { "max": 2.994, "median": 0.607, "sum": 69.345 },
+    "meshWaitInHit": { "max": 0, "median": 0 }, "meshApplyInHit": { "max": 0, "median": 0 }
+  },
+  "tickParts": {
+    "step": { "max": 0.822, "median": 0.098 },
+    "drops": { "max": 0.373, "median": 0.03 },
+    "detach": { "max": 0.003, "median": 0.001 },
+    "islWait": { "max": 0.001, "median": 0 },
+    "islStep": { "max": 4.129, "median": 0 },
+    "request": { "max": 0.167, "median": 0 },
+    "pieces": { "max": 0.111, "median": 0.028 },
+    "flush": { "max": 9.611, "median": 4.426 },
+    "meshWait": { "max": 9.502, "median": 4.324 }, "meshApply": { "max": 0.142, "median": 0.062 }, "chunkMax": { "max": 9.361, "median": 4.184 }, "chFill": { "max": 1.692, "median": 0.323 }, "chState": { "max": 0.932, "median": 0.418 }, "chInit": { "max": 3.178, "median": 0.165 }, "chFaces": { "max": 8.01, "median": 3.144 }, "chVerts": { "max": 35300, "median": 19394 }, "chVcalls": { "max": 19856, "median": 11420 }
+  },
+  "meshProf": { "chunks": 4412, "fillMs": 1151.256, "stateMs": 1500.064, "initMs": 694.129, "facesMs": 4303.21, "writeMs": 140.121, "corners": 7058943, "grads": 979587, "fields": 7048686, "states": 7030494, "verts": 33306448 },
+  "worstFrames": [
+    { "hit": 15, "ms": 18.634, "hitMs": 11.49, "step": 0.098, "drops": 0.257, "flush": 6.779 },
+    { "hit": 46, "ms": 18.546, "hitMs": 8.75, "step": 0.119, "flush": 9.611 },
+    { "hit": 41, "ms": 17.961, "hitMs": 12.643, "step": 0.259, "flush": 4.988 },
+    { "hit": 22, "ms": 16.259, "hitMs": 9.943, "step": 0.112, "flush": 6.153 },
+    { "hit": 39, "ms": 15.72, "hitMs": 11.352, "step": 0.316, "flush": 3.98 }
+  ],
+  "worstHits": [
+    { "hit": 41, "ms": 12.643, "removes": 3319, "takes": 5746, "pick": 0.189, "spot": 1.027, "apply": 0.308, "smear": 0.43, "macer": 0.969, "break": 1.898, "rip": 1.554, "dmgVis": 4.227, "boreStop": 0.419, "boreCut": 0.477, "boreCsf": 0.669, "boreVis": 0.19, "rest": 0.247, "x.visFlood": 1.33, "x.visTouch": 0.233, "x.visBodies": 2.822 },
+    { "hit": 15, "ms": 11.49, "removes": 4492, "takes": 0, "pick": 0.087, "spot": 0.587, "apply": 0.553, "macer": 1.102, "break": 2.936, "dmgVis": 1.175, "boreStop": 0.373, "boreCut": 0.814, "boreCsf": 0.931, "boreVis": 2.573, "rest": 0.274, "x.visFlood": 0.79, "x.visTouch": 0.163, "x.visBodies": 2.747 },
+    { "hit": 39, "ms": 11.352, "removes": 4086, "takes": 8802, "pick": 0.067, "spot": 0.859, "apply": 0.641, "macer": 1.923, "break": 2.306, "rip": 2.123, "dmgVis": 1.904, "boreStop": 0.238, "boreCut": 0.171, "boreCsf": 0.698, "boreVis": 0.071, "rest": 0.292, "x.visFlood": 1.488, "x.visTouch": 0.433 },
+    { "hit": 29, "ms": 10.717, "removes": 4630, "takes": 8951, "pick": 0.076, "spot": 0.584, "apply": 0.82, "macer": 1.126, "break": 2.974, "rip": 2.196, "dmgVis": 1.659, "boreStop": 0.158, "boreCut": 0.132, "boreCsf": 0.623, "boreVis": 0.081, "rest": 0.245, "x.visFlood": 1.417, "x.visTouch": 0.287 },
+    { "hit": 47, "ms": 10.358, "removes": 4064, "takes": 8958, "pick": 0.058, "spot": 0.686, "apply": 0.782, "macer": 1.683, "break": 2.272, "rip": 1.918, "dmgVis": 1.824, "boreStop": 0.172, "boreCut": 0.136, "boreCsf": 0.515, "boreVis": 0.062, "rest": 0.216, "x.visFlood": 1.504, "x.visTouch": 0.327 }
+  ]
+}
