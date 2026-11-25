@@ -1,5 +1,5 @@
 {
- "url": "http://127.0.0.1:5519/",
+ "url": "http://127.0.0.1:41826/",
  "mobile": false,
  "headless": false,
  "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36",
@@ -7,50 +7,48 @@
  "download": {
   "Build/Web.loader.js": 118133,
   "Build/Web.framework.js.unityweb": 68755,
-  "Build/Web.wasm.unityweb": 7562375,
-  "Build/Web.data.unityweb": 3744507
+  "Build/Web.wasm.unityweb": 7568930,
+  "Build/Web.data.unityweb": 3745666
  },
- "downloadTotal": 11493770,
- "readyMs": 1900,
- "menuMs": 2183,
+ "downloadTotal": 11501484,
+ "readyMs": 1997,
+ "menuMs": 2302,
  "punches": 47,
  "fightSec": 26,
  "endState": "Victory",
  "raf": {
-  "frames": 5059,
-  "avgMs": 5.91,
-  "p50": 5.8,
-  "p99": 11.5,
-  "worst": 85.7,
-  "over33": 2,
+  "frames": 6395,
+  "avgMs": 4.73,
+  "p50": 4.2,
+  "p99": 8.5,
+  "worst": 83.4,
+  "over33": 4,
   "over50": 2
  },
  "wasmHeapPeakMB": 443,
- "jsHeapMB": 59,
+ "jsHeapMB": 60,
  "unityStats": [
   "WEB_STATE MainMenu\n",
   "WEB_STATE ModeSelect\n",
   "WEB_STATE Loading\n",
   "WEB_STATE Fight\n",
-  "WEB_STAT run frames=854 avgMs=5,9 worstMs=63,0 slow33=1 hits=4 hitFrameWorstMs=23,0 hitTickAvgMs=12,9 hitTickWorstMs=18,7 monoMB=15 allocMB=100\n",
-  "WEB_STAT run frames=1706 avgMs=5,9 worstMs=63,0 slow33=1 hits=12 hitFrameWorstMs=30,0 hitTickAvgMs=13,9 hitTickWorstMs=24,7 monoMB=16 allocMB=103\n",
-  "WEB_STAT run frames=2576 avgMs=5,8 worstMs=63,0 slow33=1 hits=12 hitFrameWorstMs=30,0 hitTickAvgMs=13,9 hitTickWorstMs=24,7 monoMB=16 allocMB=103\n",
-  "WEB_STAT run frames=3408 avgMs=5,9 worstMs=85,0 slow33=2 hits=19 hitFrameWorstMs=30,0 hitTickAvgMs=14,6 hitTickWorstMs=24,7 monoMB=16 allocMB=121\n",
-  "WEB_STAT run frames=4239 avgMs=5,9 worstMs=85,0 slow33=2 hits=20 hitFrameWorstMs=30,0 hitTickAvgMs=15,1 hitTickWorstMs=24,7 monoMB=16 allocMB=121\n",
+  "WEB_STAT run frames=1167 avgMs=4,3 worstMs=83,0 slow33=1 hits=5 hitFrameWorstMs=22,0 hitTickAvgMs=13,2 hitTickWorstMs=17,7 monoMB=15 allocMB=135\n",
+  "WEB_STAT run frames=2309 avgMs=4,3 worstMs=83,0 slow33=3 hits=12 hitFrameWorstMs=48,0 hitTickAvgMs=17,8 hitTickWorstMs=39,7 monoMB=16 allocMB=103\n",
+  "WEB_STAT run frames=3508 avgMs=4,3 worstMs=83,0 slow33=3 hits=12 hitFrameWorstMs=48,0 hitTickAvgMs=17,8 hitTickWorstMs=39,7 monoMB=16 allocMB=103\n",
+  "WEB_STAT run frames=4513 avgMs=4,4 worstMs=83,0 slow33=4 hits=19 hitFrameWorstMs=48,0 hitTickAvgMs=17,3 hitTickWorstMs=39,7 monoMB=16 allocMB=121\n",
+  "WEB_STAT run frames=5412 avgMs=4,6 worstMs=83,0 slow33=4 hits=20 hitFrameWorstMs=48,0 hitTickAvgMs=17,6 hitTickWorstMs=39,7 monoMB=16 allocMB=121\n",
   "WEB_STATE Victory\n",
-  "WEB_STAT end frames=4843 avgMs=5,9 worstMs=85,0 slow33=2 hits=20 hitFrameWorstMs=30,0 hitTickAvgMs=15,1 hitTickWorstMs=24,7 monoMB=16 allocMB=121\n",
+  "WEB_STAT end frames=6196 avgMs=4,7 worstMs=83,0 slow33=4 hits=20 hitFrameWorstMs=48,0 hitTickAvgMs=17,6 hitTickWorstMs=39,7 monoMB=16 allocMB=121\n",
   "WEB_STATE Reward\n",
   "WEB_STATE MainMenu\n",
   "WEB_STATE ModeSelect\n",
   "WEB_STATE Loading\n",
   "WEB_STATE Fight\n",
-  "WEB_STAT run frames=867 avgMs=5,8 worstMs=14,0 slow33=0 hits=4 hitFrameWorstMs=14,0 hitTickAvgMs=9,5 hitTickWorstMs=10,0 monoMB=16 allocMB=99\n",
+  "WEB_STAT run frames=1194 avgMs=4,2 worstMs=13,0 slow33=0 hits=4 hitFrameWorstMs=13,0 hitTickAvgMs=9,3 hitTickWorstMs=10,5 monoMB=16 allocMB=99\n",
   "WEB_STATE Victory\n",
-  "WEB_STAT end frames=1169 avgMs=5,8 worstMs=19,0 slow33=0 hits=7 hitFrameWorstMs=19,0 hitTickAvgMs=11,4 hitTickWorstMs=14,7 monoMB=16 allocMB=134\n"
+  "WEB_STAT end frames=1607 avgMs=4,2 worstMs=18,0 slow33=0 hits=7 hitFrameWorstMs=18,0 hitTickAvgMs=11,3 hitTickWorstMs=14,6 monoMB=16 allocMB=134\n"
  ],
  "errors": [
-  "Failed to load resource: the server responded with a status of 404 (Not Found)",
-  "NotSupportedError: screen.orientation.lock() is not available on this device.",
-  "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  "NotSupportedError: screen.orientation.lock() is not available on this device."
  ]
 }
