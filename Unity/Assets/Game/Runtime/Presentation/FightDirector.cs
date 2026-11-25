@@ -607,7 +607,7 @@ namespace VoxGame
 
             // Взгляд: по стойке, а за упавшим соперником — вниз, к его голове
             bool low = st.phase == FightPhase.Down || st.phase == FightPhase.KO;
-            _camFollow = Mathf.Lerp(_camFollow, low ? 0.8f : 0f, 1f - Mathf.Exp(-3.5f * realDt));
+            _camFollow = Mathf.Lerp(_camFollow, low ? 0.6f : 0f, 1f - Mathf.Exp(-3.5f * realDt));
             Quaternion stand = Quaternion.Euler(land ? LandPitch : PortPitch, 180f, _camDodge * -25f);
             Vector3 look = Vector3.Lerp(eye + stand * Vector3.forward * 1.1f, _foeBody.headMount.position, _camFollow);
             _cam.transform.SetPositionAndRotation(eye, Quaternion.LookRotation(look - eye, stand * Vector3.up));
@@ -629,7 +629,8 @@ namespace VoxGame
             _hudData.foeAttackSide  = _strikeCmd.side;
             _hudData.telegraphAlpha = st.phase == FightPhase.Windup ? _aiStyle.hn : 0f;
             _hudData.playerBlocking = st.playerBlocking;
-            _hudData.combo          = st.comboCount;
+            // лежачему комбо не показываем: надпись висела бы над упавшим соперником
+            _hudData.combo          = st.phase == FightPhase.Down || st.phase == FightPhase.KO ? 0 : st.comboCount;
         }
 
         // ---- Перезапуск ----------------------------------------------------

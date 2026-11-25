@@ -21,6 +21,7 @@ namespace VoxGame {
         Text _timerLbl;
         Text _kdLbl;
         Text _telegraphL, _telegraphR;
+        Image _telBgL, _telBgR;   // плашки подсказки замаха (в них «!»)
         Text _comboLbl;
         Text _countLbl;    // крупный счёт рефери
         Text _bannerLbl;   // центральный баннер
@@ -92,13 +93,9 @@ namespace VoxGame {
             _kdLbl = UIKit.Label(transform, "KD", UIKit.FontSm, UIKit.Accent, semiBold: true);
             _kdLbl.text = "";
 
-            // Подсказка замаха соперника: «!» с той стороны, откуда идёт удар
-            _telegraphL = UIKit.Label(transform, "TelL", UIKit.FontXl + 18, UIKit.HpRed, semiBold: true);
-            _telegraphL.text = "!";
-            _telegraphL.gameObject.SetActive(false);
-            _telegraphR = UIKit.Label(transform, "TelR", UIKit.FontXl + 18, UIKit.HpRed, semiBold: true);
-            _telegraphR.text = "!";
-            _telegraphR.gameObject.SetActive(false);
+            // Подсказка замаха соперника: красная плашка с крупным «!» с той стороны, откуда идёт удар
+            _telegraphL = TelegraphBadge("TelL", out _telBgL);
+            _telegraphR = TelegraphBadge("TelR", out _telBgR);
 
             _comboLbl = UIKit.Label(transform, "Combo", UIKit.FontLg, UIKit.Accent, semiBold: true);
             _comboLbl.text = "";
@@ -135,6 +132,16 @@ namespace VoxGame {
             Place(go.GetComponent<RectTransform>(), 0f, 0f, 1f, 1f);
 
             OnLayout(false);
+        }
+
+        Text TelegraphBadge(string name, out Image bg) {
+            var rt = UIKit.Panel(transform, name, new Color(0.86f, 0.12f, 0.12f, 0.5f));
+            bg = rt.GetComponent<Image>();
+            var t = UIKit.Label(rt, "Mark", 92, UIKit.TextMain, semiBold: true);
+            Stretch(t.rectTransform, 0f, 0f, 0f, 0f);
+            t.text = "!";
+            rt.gameObject.SetActive(false);
+            return t;
         }
 
         // Якоря в долях экрана, без отступов.
@@ -204,20 +211,17 @@ namespace VoxGame {
                 if (show) _comboLbl.text = "×" + d.combo;
             }
 
-            // Телеграф: «!» при замахе соперника
+            // Телеграф: плашка «!» при замахе соперника; даже слабая подсказка стиля читается (не прозрачнее 0.55)
             bool telActive = d.foePhase == FightPhase.Windup && d.telegraphAlpha > 0.05f;
+            bool showL = telActive && d.foeAttackSide < 0, showR = telActive && d.foeAttackSide > 0;
+            if (_telBgL.gameObject.activeSelf != showL) _telBgL.gameObject.SetActive(showL);
+            if (_telBgR.gameObject.activeSelf != showR) _telBgR.gameObject.SetActive(showR);
             if (telActive) {
-                bool showL = d.foeAttackSide < 0;
-                bool showR = d.foeAttackSide > 0;
-                Color c = UIKit.HpRed;
-                c.a = d.telegraphAlpha;
-                _telegraphL.gameObject.SetActive(showL);
-                _telegraphR.gameObject.SetActive(showR);
-                if (showL) _telegraphL.color = c;
-                if (showR) _telegraphR.color = c;
-            } else {
-                _telegraphL.gameObject.SetActive(false);
-                _telegraphR.gameObject.SetActive(false);
+                float a = Mathf.Max(0.55f, d.telegraphAlpha);
+                var bc = new Color(0.86f, 0.12f, 0.12f, 0.8f * a);
+                var tc = new Color(1f, 1f, 1f, a);
+                if (showL) { _telBgL.color = bc; _telegraphL.color = tc; }
+                if (showR) { _telBgR.color = bc; _telegraphR.color = tc; }
             }
 
             // Виньетка: появляется при hp < 55%
@@ -275,8 +279,8 @@ namespace VoxGame {
                 Place(_kdLbl,    0.030f, 0.825f, 0.250f, 0.895f);
                 _kdLbl.alignment = TextAnchor.MiddleLeft;
                 UIKit.SetCorner(_pauseBtn.GetComponent<RectTransform>(), 1f, 1f, 1f, 1f, 84f, 84f, -8f, -8f);
-                Place(_telegraphL, 0.200f, 0.400f, 0.300f, 0.640f);
-                Place(_telegraphR, 0.700f, 0.400f, 0.800f, 0.640f);
+                Place(_telBgL, 0.150f, 0.440f, 0.230f, 0.660f);
+                Place(_telBgR, 0.770f, 0.440f, 0.850f, 0.660f);
                 Place(_comboLbl,   0.640f, 0.520f, 0.820f, 0.660f);
                 Place(_countLbl,   0.350f, 0.440f, 0.650f, 0.880f);
                 Place(_bannerLbl,  0.200f, 0.280f, 0.800f, 0.440f);
@@ -295,9 +299,10 @@ namespace VoxGame {
                 Place(_kdLbl,    0.600f, 0.812f, 0.800f, 0.848f);
                 _kdLbl.alignment = TextAnchor.MiddleRight;
                 UIKit.SetCorner(_pauseBtn.GetComponent<RectTransform>(), 1f, 1f, 1f, 1f, 92f, 92f, -8f, -8f);
-                Place(_telegraphL, 0.020f, 0.560f, 0.200f, 0.680f);
-                Place(_telegraphR, 0.800f, 0.560f, 0.980f, 0.680f);
-                Place(_comboLbl,   0.280f, 0.300f, 0.720f, 0.360f);
+                Place(_telBgL, 0.025f, 0.560f, 0.185f, 0.660f);
+                Place(_telBgR, 0.815f, 0.560f, 0.975f, 0.660f);
+                // комбо — под полосами справа, не на сопернике
+                Place(_comboLbl,   0.600f, 0.760f, 0.960f, 0.812f);
                 Place(_countLbl,   0.200f, 0.560f, 0.800f, 0.800f);
                 Place(_bannerLbl,  0.040f, 0.390f, 0.960f, 0.470f);
                 // кнопки раздельно по низу: между ними видно соперника

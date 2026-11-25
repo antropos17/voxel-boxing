@@ -90,7 +90,7 @@ namespace VoxGame
             d = VoxModel.Ell(x, y - 29, z + 1, 15.0f, 16.5f, 10.8f);
             d = VoxModel.Smin(d, VoxModel.Ell(x, y - 12, z - 1.5f, 13.2f, 13.5f, 9.6f), 5);
             d = VoxModel.Smin(d, VoxModel.Ell(x, y - 2, z, 14.4f, 7.5f, 10.4f), 4);
-            d = VoxModel.Smin(d, VoxModel.Ell(ax - 7.4f, y - 33.8f, z - 6.4f, 8.8f, 5.8f, 3.5f), 2.2f);   // грудные
+            d = VoxModel.Smin(d, VoxModel.Ell(ax - 7.4f, y - 33.8f, z - 6.0f, 8.8f, 5.8f, 3.0f), 2.2f);   // грудные
             d = VoxModel.Smin(d, VoxModel.Ell(ax - 10.5f, y - 27, z + 3.5f, 6.5f, 13, 7), 4);            // широчайшие
             d = VoxModel.Smin(d, VoxModel.Ell(x, y - 34, z + 4.5f, 15.5f, 13, 8.6f), 4);                 // спина
             d = VoxModel.Smin(d, VoxModel.Ell(x, y - 45.5f, z + 3.0f, 11.5f, 4.8f, 6.0f), 4);            // надплечья
@@ -234,7 +234,11 @@ namespace VoxGame
                 Vector3 kn = phase == FightPhase.Strike ? (gt - sh).normalized
                            : low ? (fwd * 0.4f - up).normalized
                            : (up * 0.6f + fwd * 0.8f - right * sg * 0.15f).normalized;
-                Vector3 pole = low ? right * sg * 0.9f - fwd * 0.4f : right * sg * 0.75f - up - fwd * 0.2f;
+                // локоть: в стойке — вниз и в сторону; при опущенных руках (раскрылся, шатается) — вниз и назад,
+                // иначе локти торчат в стороны «руки в боки»
+                float armLow = Mathf.InverseLerp(1.42f, 1.22f, glovePos[s].y);
+                Vector3 pole = low ? right * sg * 0.9f - fwd * 0.4f
+                                   : Vector3.Lerp(right * sg * 0.75f - up - fwd * 0.2f, right * sg * 0.25f - up - fwd * 0.7f, armLow);
                 Vector3 back = right * sg * 0.85f + fwd * 0.5f;
                 BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale);
             }
