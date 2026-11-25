@@ -196,9 +196,9 @@ namespace VoxGame.Tests
             Assert.IsTrue(p.IsAlive((uint)FxParticles.MaxParticles));
             Assert.AreEqual(1u, p.OldestAliveSeq());
 
-            p.BloodBurst(Vector3.up, Vector3.forward, 500, 2f);
-            Assert.LessOrEqual(p.AliveCount, 200);
-            Assert.LessOrEqual(FxParticles.MaxParticles, 200);
+            p.BloodBurst(Vector3.up, Vector3.forward, 2000, 2f);
+            Assert.LessOrEqual(p.AliveCount, FxParticles.MaxParticles);
+            Assert.LessOrEqual(FxParticles.MaxParticles, 640);
         }
 
         [Test]
@@ -234,7 +234,7 @@ namespace VoxGame.Tests
             var b = new FxBanners(root.transform, null);
             try
             {
-                for (int i = 0; i < 8; i++) b.ShowCenter(FxBanners.HookWords[i % FxBanners.HookWords.Length], BannerStyle.Power);
+                for (int i = 0; i < 8; i++) b.ShowCenter(FxBanners.MegaNames[i % FxBanners.MegaNames.Length], BannerStyle.Power);
                 b.ShowCenter(FxBanners.Crushed, BannerStyle.Huge);
                 Assert.AreEqual(FxBanners.MaxBanners, b.ActiveBanners);
                 Assert.LessOrEqual(FxBanners.MaxBanners, 5);
@@ -258,10 +258,13 @@ namespace VoxGame.Tests
         [Test]
         public void PrebuiltStrings_NoAllocationPerCall()
         {
-            Assert.AreSame(FxBanners.ComboText(4), FxBanners.ComboText(4));
-            Assert.AreEqual("СЕРИЯ ×4", FxBanners.ComboText(4));
+            Assert.AreSame(FxPops.ComboText(4), FxPops.ComboText(4));
+            Assert.AreEqual("КОМБО ×4", FxPops.ComboText(4));
             Assert.AreSame(FxBanners.NumberText(37), FxBanners.NumberText(37));
-            Assert.AreEqual("37", FxBanners.NumberText(37));
+            Assert.AreEqual("−37", FxBanners.NumberText(37));
+            Assert.AreEqual("ХУК −12", FxPops.PopText((int)PunchType.Hook, false, 12));
+            Assert.AreEqual("ВСТРЕЧНЫЙ АППЕРКОТ −7", FxPops.PopText((int)PunchType.Upper, true, 7));
+            Assert.AreSame(FxPops.PopText(0, false, 3), FxPops.PopText(0, false, 3));
             Assert.AreEqual(FxBanners.NumberText(FxBanners.NumberTextMax), FxBanners.NumberText(100000));
         }
 
@@ -288,6 +291,154 @@ namespace VoxGame.Tests
                 s.Dispose();
                 Object.DestroyImmediate(root);
             }
+        }
+
+        // ---- Удар: кольца, кровь, надписи ---------------------------------
+
+        static FxDirector BuildFx(out GameObject scene, out GameObject canvas, out GameObject camGo)
+        {
+            scene = new GameObject("FxScene");
+            canvas = new GameObject("FxCanvas", typeof(RectTransform));
+            camGo = new GameObject("FxCam");
+            var cam = camGo.AddComponent<Camera>();
+            camGo.transform.SetPositionAndRotation(new Vector3(0f, 1.62f, 1.4f), Quaternion.Euler(4f, 180f, 0f));
+            var fx = new FxDirector();
+            fx.Build(scene.transform, canvas.transform, cam);
+            fx.SetView(0.4615f);
+            return fx;
+        }
+
+        static void Free(FxDirector fx, GameObject a, GameObject b, GameObject c)
+        {
+            fx.Dispose();
+            Object.DestroyImmediate(a); Object.DestroyImmediate(b); Object.DestroyImmediate(c);
+        }
+
+        // Серия ударов подряд (каждый кадр, мега через раз): пулы частиц, колец и надписей не выходят за пределы,
+        // а после прогрева удар и кадр эффектов не выделяют память.
+        [Test]
+        public void HitSeries_PoolsCapped_NoAllocation()
+        {
+            var fx = BuildFx(out var a, out var b, out var c);
+            try
+            {
+                for (int i = 0; i < 120; i++)
+                {
+                    var h = Hit(i % 3 == 0 ? PunchType.Jab : i % 3 == 1 ? PunchType.Hook : PunchType.Upper, mega: i % 2 == 0, power: 1.4f);
+                    h.punch = i % 3 == 0 ? PunchType.Jab : PunchType.Hook;
+                    h.fracture = i % 4 == 0; h.headBurst = i % 9 == 0; h.counter = i % 5 == 0; h.combo = i;
+                    fx.OnPlayerHit(h);
+                    fx.OnFracture(i % 7);
+                    fx.SyncInjuries(i / 10, i > 50, i / 60);
+                    fx.Tick(Dt);
+                    Assert.LessOrEqual(fx.Particles.AliveCount, FxParticles.MaxParticles);
+                    Assert.LessOrEqual(fx.Particles.DrawnCount, FxParticles.MaxParticles);
+                    Assert.LessOrEqual(fx.Rings.Active, FxRings.MaxRings);
+                    Assert.LessOrEqual(fx.Pops.ActivePops, 1, "на экране одна плашка удара");
+                    Assert.LessOrEqual(fx.Pops.ActiveChips, FxPops.MaxChips);
+                    Assert.LessOrEqual(fx.Banners.ActiveBanners, FxBanners.MaxBanners);
+                }
+                Assert.AreEqual(FxParticles.MaxParticles, fx.Particles.AliveCount, "серия мег заполнила пул");
+
+                long before = System.GC.GetAllocatedBytesForCurrentThread();
+                for (int i = 0; i < 60; i++)
+                {
+                    var h = Hit(i % 2 == 0 ? PunchType.Hook : PunchType.Jab, mega: i % 6 == 0, power: 1.3f);
+                    h.punch = i % 2 == 0 ? PunchType.Hook : PunchType.Jab;
+                    h.combo = i; h.damage = i;
+                    fx.OnPlayerHit(h);
+                    fx.Tick(Dt);
+                }
+                long bytes = System.GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.AreEqual(0, bytes, "удар и кадр эффектов без выделений памяти");
+
+                Run(fx, 6f);
+                Assert.AreEqual(0, fx.Particles.AliveCount);
+                Assert.AreEqual(0, fx.Rings.Active);
+                Assert.AreEqual(0, fx.Pops.ActivePops);
+                Assert.IsFalse(fx.Pops.ComboVisible);
+            }
+            finally { Free(fx, a, b, c); }
+        }
+
+        // Сила удара: джеб — одно кольцо, без линий скорости и вспышки; апперкот — два кольца, линии; мега — три, виньетка.
+        [Test]
+        public void Impact_ScalesWithPower()
+        {
+            var fx = BuildFx(out var a, out var b, out var c);
+            try
+            {
+                var jab = Hit(PunchType.Jab, power: 0.4f); jab.punch = PunchType.Jab; jab.damage = 3f;
+                fx.OnPlayerHit(jab);
+                Assert.AreEqual(2, fx.Rings.Active, "кольцо и диск");
+                Assert.AreEqual(0f, fx.Overlay.LinesAlpha);
+                Assert.AreEqual(0f, fx.Overlay.FlashAlpha);
+                Assert.AreEqual("ДЖЕБ −3", fx.Pops.LastPopText);
+                int jabBlood = fx.Particles.Count(FxKind.Blood) + fx.Particles.Count(FxKind.Mist);
+                fx.Reset();
+
+                var up = Hit(PunchType.Upper, power: 1.3f); up.punch = PunchType.Upper; up.damage = 11f; up.combo = 3;
+                fx.OnPlayerHit(up);
+                Assert.AreEqual(3, fx.Rings.Active);
+                Assert.Greater(fx.Overlay.LinesAlpha, 0.3f);
+                Assert.Greater(fx.Overlay.FlashAlpha, 0.05f);   // белая вспышка есть (FxDirector.WhiteFlash)
+                Assert.AreEqual("АППЕРКОТ −11", fx.Pops.LastPopText);
+                fx.Tick(Dt);
+                Assert.AreEqual("КОМБО ×3", fx.Pops.ComboShown);
+                int upBlood = fx.Particles.Count(FxKind.Blood) + fx.Particles.Count(FxKind.Mist);
+                Assert.Greater(upBlood, jabBlood * 2);
+                fx.Reset();
+
+                var mega = Hit(PunchType.Mega, mega: true, power: 1.3f); mega.punch = PunchType.Hook; mega.damage = 30f;
+                fx.OnPlayerHit(mega);
+                Assert.AreEqual(4, fx.Rings.Active);
+                Assert.AreEqual("МЕГА-ХУК!", fx.Banners.LastBannerText);
+                Assert.Greater(fx.Particles.Count(FxKind.Fire), 0);
+                Assert.Greater(fx.Particles.Count(FxKind.Blood) + fx.Particles.Count(FxKind.Mist), upBlood * 2);
+                fx.Tick(0.15f);
+                Assert.Greater(fx.Overlay.MegaAlpha, 0.15f);   // виньетка мега ещё горит (пик FxScreen.MegaA0)
+            }
+            finally { Free(fx, a, b, c); }
+        }
+
+        // Без эффектов (Visuals = false) представление не строится, а время и камера — те же, что с эффектами.
+        [Test]
+        public void VisualsOff_SameTimeAndCamera()
+        {
+            var on = BuildFx(out var a, out var b, out var c);
+            bool was = FxDirector.Visuals;
+            FxDirector.Visuals = false;
+            var off = BuildFx(out var a2, out var b2, out var c2);
+            FxDirector.Visuals = was;
+            try
+            {
+                Assert.IsNull(off.Particles);
+                Assert.IsNull(off.Rings);
+                for (int i = 0; i < 90; i++)
+                {
+                    if (i % 15 == 0)
+                    {
+                        var h = Hit(i % 30 == 0 ? PunchType.Hook : PunchType.Jab, mega: i == 60, power: 1.2f);
+                        on.OnPlayerHit(h); off.OnPlayerHit(h);
+                    }
+                    if (i == 40) { on.OnKnockdown(); off.OnKnockdown(); }
+                    Assert.AreEqual(on.Tick(Dt), off.Tick(Dt));
+                    Assert.AreEqual(on.FovKick, off.FovKick);
+                    Assert.AreEqual(on.CamRoll, off.CamRoll);
+                    Assert.AreEqual(on.CamOffset, off.CamOffset);
+                }
+            }
+            finally { Free(on, a, b, c); Free(off, a2, b2, c2); }
+        }
+
+        // Бой на фиксированном seed с эффектами и без: исход, урон и разрушение головы побитно те же.
+        [Test]
+        public void FightOutcome_SameWithAndWithoutEffects()
+        {
+            string with = VoxGame.Editor.ShotsTaker.HitFxOutcome(true, 24);
+            string without = VoxGame.Editor.ShotsTaker.HitFxOutcome(false, 24);
+            StringAssert.Contains("landed=", with);
+            Assert.AreEqual(with, without);
         }
 
         // ---- Сборка целиком ------------------------------------------------

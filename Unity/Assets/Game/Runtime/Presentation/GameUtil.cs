@@ -53,6 +53,6 @@ namespace VoxGame
             return Shader.Find("Hidden/InternalErrorShader");
         }
 
-        public const string VoxMaterial = "GameVertexColor", AnatMaterial = "GameAnatomy";
+        public const string VoxMaterial = "GameVertexColor", AnatMaterial = "GameAnatomy", FxAddMaterial = "GameFxAdditive";
     }
 }
