@@ -5,31 +5,27 @@ namespace VoxGame
 {
     public enum BannerStyle { Power, Mega, Counter, Combo, Call, Big, Huge, Info }
 
-    // Крупные надписи удара (≤ MaxBanners) и всплывающие числа урона (≤ MaxNumbers).
+    // Крупные надписи событий (≤ MaxBanners: мега, нокдаун, нокаут, добивание) и всплывающие числа урона меги (≤ MaxNumbers).
+    // Плашка обычного удара «ХУК −12», счётчик серии и метки травм — FxPops.
     // Пулы собраны заранее; при переполнении вытесняется самая старая. Строки заготовлены — в кадре нет новых строк.
     // Анимация на реальном времени: выскакивание 0 → 1.15 → 1, лёгкий наклон, выцветание.
     public class FxBanners
     {
         public const int MaxBanners = 5;
         public const int MaxNumbers = 12;
-        public const int ComboMin = 3;           // с какой серии показывать «СЕРИЯ ×N»
-        public const int ComboTextMax = 30;
         public const int NumberTextMax = 199;
 
         // Раскладка (доли экрана и опорные пиксели холста). Голова соперника занимает верх кадра под полосами HUD,
-        // поэтому надписи ниже лица: слово удара — на уровне груди, центральные — у пояса; лицо остаётся открытым.
+        // поэтому надписи ниже лица: центральные — у пояса; лицо остаётся открытым.
         public const float CenterYPort = 0.40f, CenterYLand = 0.34f;   // центральные надписи (в ландшафте выше подсказки жестов)
-        public const float WordYPort = 0.55f, WordYLand = 0.45f;       // слово удара (по горизонтали — у точки удара)
         public const float NumberSide = 0.13f;   // число урона сбоку от точки удара, доля ширины
         public const float StackStep = 92f;      // сдвиг вверх старых центральных надписей при новой
-        public const float WorldDrift = 40f;     // всплытие слова удара за жизнь
         public const float NumberRise = 110f;    // всплытие числа за жизнь
         public const float NumberLife = 0.85f;
         public const float PopIn = 0.08f, PopSettle = 0.10f, PopPeak = 1.15f, FadeOut = 0.25f;
+        public const float SlamFrom = 1.7f, SlamIn = 0.12f;   // крупные события, как #banner веба: ×1,7 → ×1 за 12 % жизни
         public const float TiltMax = 7f;         // градусы
         public const float BannerWidth = 600f;   // шире холста портрета: длинное слово не переносится по буквам
-        public const float WorldXMin = 0.36f, WorldXMax = 0.64f;   // слово удара не уходит за край
-        public const float WorldXMinLand = 0.30f, WorldXMaxLand = 0.70f;
 
         // ---- Слова (свои) --------------------------------------------------
 
@@ -37,40 +33,25 @@ namespace VoxGame
         public const string Crushed   = "СОКРУШИЛ!";
         public const string Knockdown = "НОКДАУН!";
         public const string Knockout  = "В НОКАУТ!";
-        public const string Counter   = "КОНТРА!";
         public const string Fracture  = "ХРУСТ!";
-        public const string ToJaw     = "В ЧЕЛЮСТЬ!";
-        public const string ToTeeth   = "ПО ЗУБАМ!";
-        public const string ToNose    = "В НОС!";
-        public const string ToEye     = "В ГЛАЗ!";
         public const string Miss      = "УКЛОН!";
         public const string Blocked   = "В ЗАЩИТУ";
         public const string Champion  = "ЧЕМПИОН!";
         public const string BeltWon   = "ПОЯС ТВОЙ!";
         public const string Victory   = "ПОБЕДА!";
 
-        public static readonly string[] HookWords  = { "ХРЯСЬ!", "БАХ!", "ВЛЕПИЛ!", "ТРЕСК!" };
-        public static readonly string[] UpperWords = { "СНИЗУ!", "ПОДБРОСИЛ!", "В ПОДБОРОДОК!" };
-        public static readonly string[] MegaWords  = { "ГРОМ!", "РАЗНОС!", "НАПОВАЛ!" };
+        // мега — названием удара, как MNAME веба
+        public static readonly string[] MegaNames = { "МЕГА-ДЖЕБ!", "МЕГА-ХУК!", "МЕГА-АППЕРКОТ!" };
 
-        static readonly string[] ComboStr = BuildCombo();
         static readonly string[] NumberStr = BuildNumbers();
-
-        static string[] BuildCombo()
-        {
-            var a = new string[ComboTextMax + 1];
-            for (int i = 0; i <= ComboTextMax; i++) a[i] = "СЕРИЯ ×" + i;
-            return a;
-        }
 
         static string[] BuildNumbers()
         {
             var a = new string[NumberTextMax + 1];
-            for (int i = 0; i <= NumberTextMax; i++) a[i] = i.ToString();
+            for (int i = 0; i <= NumberTextMax; i++) a[i] = "−" + i;
             return a;
         }
 
-        public static string ComboText(int n) => ComboStr[Mathf.Clamp(n, 0, ComboTextMax)];
         public static string NumberText(int n) => NumberStr[Mathf.Clamp(n, 0, NumberTextMax)];
 
         // ---- Слоты ---------------------------------------------------------
@@ -79,11 +60,13 @@ namespace VoxGame
         {
             public RectTransform rt;
             public Text text;
+            public Shadow shadow;
             public bool alive;
-            public int mode;              // Center, Word или Number
+            public int mode;              // Center или Number
+            public bool slam;             // крупное событие: влетает с ×1,7
             public float age, life, size, rise, tilt;
             public float y, yLand;        // своя высота центральной надписи (доля экрана), 0 — по умолчанию
-            public Vector3 world;         // точка удара (слово и число)
+            public Vector3 world;         // точка удара (число)
             public Vector2 jitter;
             public float stack, stackTarget;
             public Color color;
@@ -92,7 +75,7 @@ namespace VoxGame
 
         readonly Slot[] _banners = new Slot[MaxBanners];
         readonly Slot[] _numbers = new Slot[MaxNumbers];
-        const int Center = 0, Word = 1, Number = 2;
+        const int Center = 0, Number = 2;
 
         readonly Camera _cam;
         float _aspect = 0.4615f;   // ширина / высота кадра (из SetView: снимки рисуются не в размер Screen)
@@ -142,7 +125,7 @@ namespace VoxGame
             rt.pivot = new Vector2(0.5f, 0.5f);
             rt.sizeDelta = new Vector2(w, h);
             t.gameObject.SetActive(false);
-            return new Slot { rt = rt, text = t };
+            return new Slot { rt = rt, text = t, shadow = sh };
         }
 
         // ---- Показ ---------------------------------------------------------
@@ -168,24 +151,6 @@ namespace VoxGame
             Place(s, 0f);
         }
 
-        // Слово удара: по горизонтали у точки удара (мир), по высоте — на уровне груди соперника.
-        public void ShowAt(string word, Vector3 world, BannerStyle style)
-        {
-            // на экране одно слово удара: прежнее гаснет сразу, иначе два слова ложатся друг на друга
-            for (int i = 0; i < MaxBanners; i++)
-                if (_banners[i].alive && _banners[i].mode == Word)
-                {
-                    _banners[i].alive = false;
-                    _banners[i].text.gameObject.SetActive(false);
-                }
-            var s = Take(_banners);
-            Setup(s, word, style);
-            s.mode = Word;
-            s.world = world;
-            s.rise = WorldDrift;
-            Place(s, 0f);
-        }
-
         // Пропорции кадра; живые надписи сразу переставляются (поворот экрана, снимки портрет/ландшафт).
         public void SetView(float aspect)
         {
@@ -201,7 +166,7 @@ namespace VoxGame
             var s = Take(_numbers);
             string str = NumberText(value);
             if (!ReferenceEquals(s.text.text, str)) s.text.text = str;
-            s.text.fontSize = tier >= 2 ? 50 : tier == 1 ? 40 : 30;
+            s.text.fontSize = tier >= 2 ? 54 : tier == 1 ? 40 : 30;
             s.color = tier >= 2 ? new Color(1f, 0.32f, 0.18f) : tier == 1 ? (Color)UIKit.MegaGold : UIKit.TextMain;
             s.life = NumberLife;
             s.size = 1f;
@@ -228,6 +193,7 @@ namespace VoxGame
             best.seq = ++_seq;
             best.stack = best.stackTarget = 0f;
             best.y = best.yLand = 0f;
+            best.slam = false;
             best.text.gameObject.SetActive(true);
             best.rt.SetAsLastSibling();
             return best;
@@ -243,7 +209,7 @@ namespace VoxGame
                 case BannerStyle.Counter: font = 62; life = 0.90f; c = UIKit.Accent; break;
                 case BannerStyle.Combo:   font = 40; life = 0.80f; c = UIKit.Accent; break;
                 case BannerStyle.Call:    font = 76; life = 1.30f; c = new Color(1f, 0.27f, 0.20f); break;
-                case BannerStyle.Big:     font = 76; life = 1.60f; c = UIKit.TextMain; break;
+                case BannerStyle.Big:     font = 64; life = 1.45f; c = new Color32(236, 226, 200, 255); break;
                 case BannerStyle.Huge:    font = 80; life = 2.20f; c = UIKit.MegaGold; break;
                 case BannerStyle.Info:    font = 30; life = 0.60f; c = UIKit.TextSub; break;
                 default:                  font = 52; life = 0.75f; c = UIKit.TextMain; break;
@@ -253,6 +219,10 @@ namespace VoxGame
             s.color = c;
             s.size = 1f;
             s.tilt = (Rand01() * 2f - 1f) * TiltMax * (style == BannerStyle.Info || style == BannerStyle.Combo ? 0.4f : 1f);
+            // нокдаун, нокаут, добивание — как #banner веба: прямо, влетает с ×1,7, тень кровью
+            s.slam = style == BannerStyle.Big || style == BannerStyle.Huge;
+            if (s.slam) s.tilt = 0f;
+            s.shadow.effectColor = s.slam ? new Color(0.78f, 0.14f, 0.11f, 1f) : new Color(0.25f, 0f, 0f, 0.75f);
         }
 
         // ---- Тик -----------------------------------------------------------
@@ -280,7 +250,8 @@ namespace VoxGame
         void Place(Slot s, float age)
         {
             float k;
-            if (age < PopIn) k = PopPeak * EaseOut(age / PopIn);
+            if (s.slam) k = age < s.life * SlamIn ? Mathf.Lerp(SlamFrom, 1f, EaseOut(age / (s.life * SlamIn))) : 1f;
+            else if (age < PopIn) k = PopPeak * EaseOut(age / PopIn);
             else if (age < PopIn + PopSettle) k = Mathf.Lerp(PopPeak, 1f, (age - PopIn) / PopSettle);
             else k = 1f;
             float fadeT = Mathf.Clamp01((s.life - age) / FadeOut);
@@ -306,11 +277,9 @@ namespace VoxGame
                 return new Vector2(0.5f, y > 0f ? y : Land ? CenterYLand : CenterYPort);
             }
             Vector2 p = Project(s.world, new Vector2(0.5f, 0.6f));
-            if (s.mode == Word)
-                return new Vector2(Mathf.Clamp(p.x, Land ? WorldXMinLand : WorldXMin, Land ? WorldXMaxLand : WorldXMax),
-                                   Land ? WordYLand : WordYPort);
             p += new Vector2(s.jitter.x * (Land ? 0.5f : 1f), s.jitter.y);
-            return new Vector2(Mathf.Clamp(p.x, 0.12f, 0.88f), Mathf.Clamp(p.y, 0.15f, 0.80f));
+            float mx = Land ? 0.12f : 0.2f;   // в портрете уже: крупное число мега-удара с отскоком ×1,3 не уходит за край
+            return new Vector2(Mathf.Clamp(p.x, mx, 1f - mx), Mathf.Clamp(p.y, 0.15f, 0.80f));
         }
 
         // Точка мира → доли кадра по положению камеры, её полю зрения и пропорциям из SetView.

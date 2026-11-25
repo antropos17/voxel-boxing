@@ -52,6 +52,7 @@ namespace VoxGame
         public float lastPickMs, lastHitMs, lastAnatTickMs, lastLayerMs;
         // Части слоя в том же кадре: толпа, фигура рефери, накладки головы, эффекты, звук (мс)
         public float lastCrowdMs, lastRefMs, lastGearMs, lastFxMs, lastSoundMs;
+        public float lastFxTickMs;   // время эффектов в последнем кадре (любом, не только кадре удара)
         // Замер аллокаций (включается снаружи): байты за Tick всего и в вызовах анатомии.
         // Счётчик — ProfilerRecorder «GC Allocated In Frame» (в Mono GC.GetAllocatedBytesForCurrentThread всегда 0).
         public static bool MeasureAlloc;
@@ -340,6 +341,7 @@ namespace VoxGame
             double tf = _tickSw.Elapsed.TotalMilliseconds;
             _fx.SyncFoe(st0.hpMax > 0f ? st0.hp / st0.hpMax : 0f, st0.stunMax > 0f ? st0.stunAccum / st0.stunMax : 0f,
                         st0.knockdowns, st0.phase, _foeBody.headMount.position);
+            SyncInjuries();
             float sdt = realDt * _fx.Tick(realDt);
             _fxMs = _tickSw.Elapsed.TotalMilliseconds - tf;
             lastSdt = sdt;
@@ -418,6 +420,7 @@ namespace VoxGame
 
             // Замер кадра удара
             _tickSw.Stop();
+            lastFxTickMs = (float)_fxMs;
             if (_hitThisFrame)
             {
                 lastHitFrameMs = (float)_tickSw.Elapsed.TotalMilliseconds;
@@ -554,7 +557,7 @@ namespace VoxGame
                     if (burst) _headBurstShown = true;
                     var fx = new HitFx
                     {
-                        kind = p.isMega ? PunchType.Mega : p.type, side = p.side,
+                        kind = p.isMega ? PunchType.Mega : p.type, punch = p.type, side = p.side,
                         power = p.type == PunchType.Jab && !p.isMega ? 0.4f : p.pw,
                         mega = p.isMega, counter = counter, fracture = fracture, headBurst = burst,
                         zone = (int)_v.sim.lastZone, damage = result.dmgDealt, combo = st.comboCount,
@@ -562,6 +565,7 @@ namespace VoxGame
                     };
                     double tf = _tickSw.Elapsed.TotalMilliseconds;
                     _fx.OnPlayerHit(fx);
+                    if (fracture) _fx.OnFracture(_v.sim.lastZone);
                     _fxMs += _tickSw.Elapsed.TotalMilliseconds - tf;
                     PlayHitSound(p, result, fracture, st.comboCount);
 
@@ -612,6 +616,17 @@ namespace VoxGame
             }
         }
 
+        // Метки травм: выбитые зубы, оторванная челюсть и глаза — по оторванным телам анатомии (только чтение).
+        // Порядок тел AnatView: голова, нижняя челюсть, левый и правый глаз, затем зубы.
+        void SyncInjuries()
+        {
+            var gone = _v.gone;
+            if (gone == null || gone.Length < 4) return;
+            int teeth = 0;
+            for (int i = 4; i < gone.Length; i++) if (gone[i]) teeth++;
+            _fx.SyncInjuries(teeth, gone[1], (gone[2] ? 1 : 0) + (gone[3] ? 1 : 0));
+        }
+
         // Звук попадания по голове: вид удара, громкость по силе, хруст перелома по зоне, серия.
         void PlayHitSound(in PunchInput p, in HitResult r, bool fracture, int combo)
         {
@@ -638,7 +653,7 @@ namespace VoxGame
                     default:             _sound.Play(SoundId.CrackSkull); break;
                 }
             }
-            if (combo >= FxBanners.ComboMin) _sound.Play(SoundId.Combo, 1f, 1f + 0.06f * combo);
+            if (combo >= 3) _sound.Play(SoundId.Combo, 1f, 1f + 0.06f * combo);
         }
 
         // Развязка: постановщик ведёт рефери, пояс и зал; боевой HUD и кнопки убираются — чистый кадр.

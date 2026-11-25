@@ -117,6 +117,7 @@ namespace VoxGame.Editor
             if (!AssetDatabase.IsValidFolder(dir)) AssetDatabase.CreateFolder("Assets/Game/Resources", "Shaders");
             EnsureMat(dir, GameUtil.VoxMaterial, "VoxGame/VertexColor");
             EnsureMat(dir, GameUtil.AnatMaterial, "VoxProbe/Anatomy");
+            EnsureMat(dir, GameUtil.FxAddMaterial, "VoxGame/FxAdditive");
             AssetDatabase.SaveAssets();
         }
 

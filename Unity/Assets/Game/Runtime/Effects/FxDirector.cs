@@ -6,6 +6,7 @@ namespace VoxGame
     public struct HitFx
     {
         public PunchType kind;      // Jab / Hook / Upper / Mega
+        public PunchType punch;     // вид удара без меги (Jab / Hook / Upper): название на плашке и в «МЕГА-ХУК!»
         public int       side;      // рука: -1 левая, +1 правая (крен камеры на хуке)
         public float     power;     // 0..1+: 1 — обычный силовой (pw×множитель), джеб ≈ 0.3–0.5
         public bool      mega;
@@ -58,10 +59,25 @@ namespace VoxGame
         public const float RollShake    = 1.6f;   // дрожь крена при тряске, градусов на 0.1 м тряски
 
         // Тряска (м, до ShakeScale) и наезд (fovK) по событиям
-        public const float BurstJab = 120f, BurstPower = 190f, BurstMega = 340f, BurstFinisher = 460f;   // опорные px
         public const float JabShake = 0.012f, PowerShake = 0.045f, MegaShake = 0.11f, FractureShake = 0.06f;
         public const float BlockShake = 0.025f, KnockdownShake = 0.08f, KnockoutShake = 0.12f, HurtShake = 0.06f;
         public const float PowerFovK = 0.9f, MegaFovK = 2.4f, FractureFovK = 1.3f, FinisherFovK = 3.0f, KnockoutFovK = 1.6f;
+
+        // ---- Удар: кольца, кровь, надписи (src/e_fx.js impactFx, src/g_game.js hit) ----
+
+        public const float StrJab = 0.3f, StrPowerMax = 1.6f, StrMega = 2.6f;   // сила для колец, как в вебе
+        public const float WebFaceDist = 0.7f;      // м: лицо соперника от камеры веба; масштаб вида = расстояние / это
+        public const float ViewKMin = 1f, ViewKMax = 2.5f;
+        public const float WhiteFlash = 0.15f;      // ×FlashMax 0,7 ≈ 0,1: в линейном цвете Unity это та же яркость, что 0,36 #white веба
+        public const float PopBelow = 0.17f;        // м: плашка удара под центром головы (под подбородком)
+        public const int BloodJab = 12, BloodPower = 30, BloodPowerPerPw = 10, BloodMega = 140, BloodFracture = 30;
+        public const int BloodHeadBurst = 100, BloodCounter = 8, ChunksPower = 3, ChunksMega = 10, ChunksFracture = 6;
+        public const int FireMega = 40, SweatJab = 4;
+        public const float UpUpper = 1.6f, UpHook = 0.2f, UpMega = 0.8f;
+        public const float SpdJab = 0.9f, SpdPower = 1.2f, SpdMega = 1.5f;
+
+        // Без эффектов: частицы, кольца, накладки и надписи не строятся; время (стоп-кадр, слоу-мо) и камера — как с ними.
+        public static bool Visuals = true;
 
         // ---- Добивание -----------------------------------------------------
 
@@ -86,6 +102,8 @@ namespace VoxGame
         public FxParticles Particles { get; private set; }
         public FxBanners   Banners   { get; private set; }
         public FxScreen    Overlay   { get; private set; }
+        public FxRings     Rings     { get; private set; }
+        public FxPops      Pops      { get; private set; }
 
         float _clock;                 // реальное время с начала
         float _freeze, _slow;
@@ -93,7 +111,6 @@ namespace VoxGame
         float _shake, _fovK, _kick;
         float _roll, _rollVel;
         float _lastFinisherBanner = -100f;
-        int   _lastComboShown;
         uint  _rng = 0x9E3779B9u;
 
         // Соперник (из SyncFoe)
@@ -103,8 +120,7 @@ namespace VoxGame
         Transform _fxRoot;
         Camera    _cam;
         float     _aspect = 0.4615f;
-        Vector3   _burstAt;
-        bool      _burstOn;
+        Vector3   _linesAt;
 
         // ---- Построение ----------------------------------------------------
 
@@ -114,7 +130,9 @@ namespace VoxGame
         {
             Dispose();
             _cam = cam;
+            if (!Visuals) return;
             Particles = new FxParticles(sceneRoot);
+            Rings = new FxRings(sceneRoot);
 
             var go = new GameObject("Fx", typeof(RectTransform));
             go.transform.SetParent(canvasRoot, false);
@@ -125,6 +143,7 @@ namespace VoxGame
             _fxRoot.SetAsLastSibling();   // поверх экранов
 
             Overlay = new FxScreen(_fxRoot);      // накладки ниже надписей
+            Pops = new FxPops(_fxRoot, cam);
             Banners = new FxBanners(_fxRoot, cam);
         }
 
@@ -134,23 +153,24 @@ namespace VoxGame
             if (_fxRoot != null && _fxRoot.gameObject.activeSelf != on) _fxRoot.gameObject.SetActive(on);
         }
 
-        // Пропорции кадра (ширина / высота): надписи и звезда удара переставляются сразу.
+        // Пропорции кадра (ширина / высота): надписи и линии скорости переставляются сразу.
         public void SetView(float aspect)
         {
             _aspect = aspect;
             Banners?.SetView(aspect);
-            if (_burstOn && Overlay != null && _cam != null)
-                Overlay.MoveBurst(FxBanners.ProjectView(_cam, _aspect, _burstAt, new Vector2(0.5f, 0.6f)));
+            Pops?.SetView(aspect);
+            if (Overlay != null && Overlay.LinesAlpha > 0f) Overlay.MoveLines(Project(_linesAt));
         }
 
-        // Звезда удара в точке мира; size — опорные px.
-        void Burst(Vector3 at, float size, Color c)
-        {
-            if (Overlay == null) return;
-            _burstAt = at; _burstOn = true;
-            var vp = _cam != null ? FxBanners.ProjectView(_cam, _aspect, at, new Vector2(0.5f, 0.6f)) : new Vector2(0.5f, 0.6f);
-            Overlay.Burst(vp, size, c);
-        }
+        Vector2 Project(Vector3 at) =>
+            _cam != null ? FxBanners.ProjectView(_cam, _aspect, at, new Vector2(0.5f, 0.6f)) : new Vector2(0.5f, 0.6f);
+
+        // Масштаб вида: камера Unity дальше от лица, чем в вебе; кольца и кровь крупнее во столько же раз.
+        float ViewK(Vector3 at) =>
+            _cam != null ? Mathf.Clamp(Vector3.Distance(_cam.transform.position, at) / WebFaceDist, ViewKMin, ViewKMax) : 2f;
+
+        Vector3 ToCam(Vector3 at, Vector3 dir) =>
+            _cam != null ? (_cam.transform.position - at).normalized : (dir.sqrMagnitude > 1e-6f ? -dir.normalized : Vector3.back);
 
         // ---- Tick ----------------------------------------------------------
 
@@ -198,11 +218,13 @@ namespace VoxGame
             {
                 // звёздочки над головой оглушённого
                 if (_foeStunned) Particles.EmitStars(_foeHead, dt);
+                if (_cam != null) Particles.SetCamera(_cam.transform.position);
                 Particles.Tick(dt);
             }
+            Rings?.Tick(dt, realDt, _cam != null ? _cam.transform : null);
             Banners?.Tick(realDt);
+            Pops?.Tick(realDt, realDt * TimeScale);
             Overlay?.Tick(realDt);
-            if (_burstOn && Overlay != null && Overlay.BurstAlpha <= 0f) _burstOn = false;
             return TimeScale;
         }
 
@@ -275,50 +297,74 @@ namespace VoxGame
             if (h.kind == PunchType.Hook) _rollVel += h.side * RollHook * pw;
             else if (h.kind == PunchType.Upper) _rollVel += h.side * RollHook * 0.4f;
 
-            // Частицы
-            if (Particles != null)
-            {
-                int blood = h.mega ? 60 : h.fracture ? 30 : power ? 18 : 7;
-                int sparks = h.mega ? 22 : power ? 10 : 5;
-                if (h.headBurst) blood += 40;
-                if (h.counter) blood += 6;
-                Particles.BloodBurst(h.point, h.dir, blood, h.mega ? 3.2f : power ? 2.4f : 1.6f);
-                Particles.Sparks(h.point, h.dir, sparks, h.mega ? 1.4f : 1f);
-                if (power || h.mega) Particles.Sweat(h.point, h.dir, h.mega ? 10 : 5);
-            }
+            if (!Visuals) return;
+            float str = h.mega ? StrMega : power ? Mathf.Min(StrPowerMax, pw * (h.counter ? 1.25f : 1f)) : StrJab;
+            float k = ViewK(h.point);
+            Vector3 toCam = ToCam(h.point, h.dir);
 
-            // Накладки: звезда удара по силе (джеб — маленькая белая, мега — крупная оранжевая), вспышка и кровь
-            // на объективе — только на самых сильных
+            // Кольца ударной волны: джеб — одно, силовой — два, мега — три; вспышка и линии скорости — с силы 1
+            Rings?.Impact(h.point, str, h.mega ? 3 : power ? 2 : 1, k);
             if (Overlay != null)
             {
-                float k = h.counter ? 1.2f : 1f;
-                if (h.mega) Burst(h.point, BurstMega * k, new Color(1f, 0.78f, 0.30f, 1f));
-                else if (power) Burst(h.point, BurstPower * pw * k, new Color(1f, 0.93f, 0.55f, 0.9f));
-                else Burst(h.point, BurstJab * k, new Color(1f, 1f, 1f, 0.7f));
+                if (str >= 1f)
+                {
+                    _linesAt = h.point;
+                    Overlay.Lines(Project(h.point), Mathf.Min(1f, str / 1.3f));
+                    Overlay.Flash(WhiteFlash);
+                }
+                if (h.mega) { Overlay.MegaGlow(); Overlay.Splat(3); }
                 if (h.headBurst) { Overlay.Flash(0.5f); Overlay.Splat(4); }
-                else if (h.mega) Overlay.Splat(2);
                 else if (h.counter) Overlay.Flash(0.15f);
             }
 
-            // Надписи
-            if (Banners != null)
+            // Кровь: капли-штрихи и морось из точки удара назад к камере и вбок по удару; кубики мяса на силовых
+            if (Particles != null)
             {
-                if (h.damage >= 0.5f)
-                    Banners.ShowNumber(Mathf.RoundToInt(h.damage), h.point, h.mega ? 2 : power ? 1 : 0);
-
-                string word = PickWord(h, power);
-                if (word != null)
-                {
-                    var style = h.mega ? BannerStyle.Mega : h.counter ? BannerStyle.Counter : BannerStyle.Power;
-                    if (h.counter && !h.mega) Banners.ShowCenter(word, style);
-                    else Banners.ShowAt(word, h.point, style);
-                }
-
-                // серия — только на заметных отметках (3, 5, 10, 15…): счёт каждого удара уже показывает HUD
-                if (h.combo >= FxBanners.ComboMin && h.combo != _lastComboShown && (h.combo == FxBanners.ComboMin || h.combo % 5 == 0))
-                    Banners.ShowCenter(FxBanners.ComboText(h.combo), BannerStyle.Combo);
+                int blood = h.mega ? BloodMega : power ? BloodPower + Mathf.RoundToInt(BloodPowerPerPw * (pw - 1f)) : BloodJab;
+                if (h.fracture) blood += BloodFracture;
+                if (h.headBurst) blood += BloodHeadBurst;
+                if (h.counter) blood += BloodCounter;
+                float up = h.mega ? UpMega : h.punch == PunchType.Upper ? UpUpper : UpHook;
+                Particles.BloodBurst(h.point, h.dir, toCam, blood, up, h.mega ? SpdMega : power ? SpdPower : SpdJab, k);
+                int chunks = (h.mega ? ChunksMega : power ? ChunksPower : 0) + (h.fracture ? ChunksFracture : 0);
+                if (chunks > 0) Particles.Chunks(h.point, h.dir, toCam, chunks, 1f, k);
+                if (h.mega) Particles.Fire(h.point, h.dir, toCam, FireMega, k);
+                else if (!power) Particles.Sweat(h.point, h.dir, SweatJab);
             }
-            _lastComboShown = h.combo;
+
+            // Надписи: мега — крупное название и число урона сбоку; обычный удар — плашка «ХУК −12» под подбородком
+            int dmg = Mathf.RoundToInt(h.damage);
+            if (h.mega)
+            {
+                Banners?.ShowCenter(FxBanners.MegaNames[Mathf.Clamp((int)h.punch, 0, FxBanners.MegaNames.Length - 1)], BannerStyle.Mega);
+                if (h.damage >= 0.5f) Banners?.ShowNumber(dmg, h.point, 2);
+            }
+            else if (Pops != null)
+            {
+                Vector3 at = new Vector3(h.point.x, _foeHead.y - PopBelow, h.point.z);
+                Pops.ShowPop(FxPops.PopText((int)h.punch, h.counter, dmg), at, power || h.counter);
+            }
+            if (h.fracture && !h.mega) Banners?.ShowCenter(FxBanners.Fracture, BannerStyle.Power);
+            Pops?.OnCombo(h.combo);
+        }
+
+        // Метки травм: новый перелом в зоне zone (AnatZone), выбитые зубы, оторванная челюсть, выбитые глаза.
+        public void OnFracture(int zone)
+        {
+            if (Pops == null || zone < 0 || zone >= FxPops.ZoneFracture.Length) return;
+            Pops.SetChip(zone, FxPops.ZoneFracture[zone], true);
+        }
+
+        int  _teethShown, _eyesShown;
+        bool _jawShown;
+        const int ChipTeeth = 10, ChipJaw = 11, ChipEyes = 12;
+
+        public void SyncInjuries(int teethOut, bool jawOff, int eyesOut)
+        {
+            if (Pops == null) return;
+            if (teethOut != _teethShown) { _teethShown = teethOut; if (teethOut > 0) Pops.SetChip(ChipTeeth, FxPops.TeethText(teethOut), teethOut > 3); }
+            if (jawOff && !_jawShown) { _jawShown = true; Pops.SetChip(ChipJaw, FxPops.JawOff, true); }
+            if (eyesOut != _eyesShown) { _eyesShown = eyesOut; if (eyesOut > 0) Pops.SetChip(ChipEyes, eyesOut > 1 ? FxPops.EyesOut : FxPops.EyeOut, true); }
         }
 
         // Удар соперника по игроку. power 0..1+, blocked — пришёлся в перчатки.
@@ -351,7 +397,11 @@ namespace VoxGame
         {
             HitStop(BlockFreeze, 0f);
             AddShake(BlockShake);
-            if (hasPoint) Particles?.Sparks(at, Vector3.up, 6, 0.8f);
+            if (hasPoint)
+            {
+                Particles?.Sparks(at, Vector3.up, 6, 0.8f);
+                Rings?.Impact(at, 0.4f, 1, ViewK(at));   // веб: impactFx(точка, 0,25…0,6) и на блоке
+            }
             Banners?.ShowCenter(FxBanners.Blocked, BannerStyle.Info);
         }
 
@@ -372,7 +422,7 @@ namespace VoxGame
             AddFov(PowerFovK);
             Banners?.ShowCenter(FxBanners.Knockdown, BannerStyle.Big);
             Overlay?.Cinema(KnockdownSlow + 0.4f, 0.5f);
-            if (Particles != null) Particles.BloodBurst(_foeHead, Vector3.down, 18, 1.6f);
+            Particles?.BloodBurst(_foeHead, Vector3.down, ToCam(_foeHead, Vector3.down), 30, 0.6f, SpdPower, ViewK(_foeHead));
             FinisherReady = false;
         }
 
@@ -384,9 +434,9 @@ namespace VoxGame
             AddShake(KnockoutShake);
             AddFov(KnockoutFovK);
             Banners?.ShowCenter(FxBanners.Knockout, BannerStyle.Huge);
-            Burst(_foeHead, BurstMega, new Color(1f, 0.85f, 0.4f, 1f));
+            Rings?.Impact(_foeHead, StrMega, 3, ViewK(_foeHead));
             Overlay?.Cinema(KnockoutSlow + 1.2f, 1f);
-            if (Particles != null) Particles.BloodBurst(_foeHead, Vector3.down, 36, 2.6f);
+            Particles?.BloodBurst(_foeHead, Vector3.down, ToCam(_foeHead, Vector3.down), 60, 0.8f, SpdMega, ViewK(_foeHead));
             FinisherReady = false;
         }
 
@@ -398,7 +448,7 @@ namespace VoxGame
             AddFov(FinisherFovK);
             _kick = Mathf.Max(_kick, 1.4f);
             Banners?.ShowCenter(FxBanners.Crushed, BannerStyle.Huge);
-            Burst(_foeHead, BurstFinisher, new Color(1f, 0.70f, 0.25f, 1f));
+            Rings?.Impact(_foeHead, StrMega, 3, ViewK(_foeHead));
             if (Overlay != null)
             {
                 Overlay.Flash(1f);
@@ -407,8 +457,10 @@ namespace VoxGame
             }
             if (Particles != null)
             {
-                Particles.BloodBurst(_foeHead, Vector3.down, 60, 3.4f);
-                Particles.Sparks(_foeHead, Vector3.down, 20, 1.6f);
+                var c = ToCam(_foeHead, Vector3.down);
+                float k = ViewK(_foeHead);
+                Particles.BloodBurst(_foeHead, Vector3.down, c, 120, 0.8f, SpdMega, k);
+                Particles.Fire(_foeHead, Vector3.down, c, FireMega, k);
             }
             FinisherReady = false;
         }
@@ -419,9 +471,12 @@ namespace VoxGame
             _freeze = _slow = 0f; _lastStop = -100f;
             _shake = _fovK = _kick = _roll = _rollVel = 0f;
             TimeScale = 1f; CamOffset = Vector3.zero; CamRoll = 0f; FovKick = 0f;
-            FinisherReady = false; _foeStunned = false; _lastComboShown = 0; _burstOn = false;
+            FinisherReady = false; _foeStunned = false;
+            _teethShown = _eyesShown = 0; _jawShown = false;
             _lastFinisherBanner = -100f;
             Particles?.Clear();
+            Rings?.Clear();
+            Pops?.Clear();
             Banners?.Clear();
             Overlay?.Clear();
         }
@@ -429,6 +484,8 @@ namespace VoxGame
         public void Dispose()
         {
             Particles?.Dispose(); Particles = null;
+            Rings?.Dispose();     Rings = null;
+            Pops?.Dispose();      Pops = null;
             Banners?.Dispose();   Banners = null;
             Overlay?.Dispose();   Overlay = null;
             if (_fxRoot != null) GameUtil.Destroy(_fxRoot.gameObject);
@@ -439,24 +496,6 @@ namespace VoxGame
 
         void AddShake(float s) { if (s > _shake) _shake = s; }
         void AddFov(float k) { if (k > _fovK) _fovK = k; }
-
-        // Слово удара: перелом и зона важнее, силовой — из набора по виду, джеб без слова.
-        string PickWord(in HitFx h, bool power)
-        {
-            if (h.mega) return FxBanners.MegaWords[RandIdx(FxBanners.MegaWords.Length)];
-            if (h.counter) return FxBanners.Counter;
-            if (!power) return null;
-            if (h.fracture) return FxBanners.Fracture;
-            switch ((AnatZone)h.zone)
-            {
-                case AnatZone.Jaw:   return FxBanners.ToJaw;
-                case AnatZone.Mouth: return FxBanners.ToTeeth;
-                case AnatZone.Nose:  return FxBanners.ToNose;
-                case AnatZone.Orbit: return FxBanners.ToEye;
-            }
-            var set = h.kind == PunchType.Upper ? FxBanners.UpperWords : FxBanners.HookWords;
-            return set[RandIdx(set.Length)];
-        }
 
         float Rand01()
         {
