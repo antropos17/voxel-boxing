@@ -1,6 +1,8 @@
-// ForearmShots.cs — рука игрока от первого лица «без | с» поля зрения рук (PlayerGloves.ViewFix false / true).
+// ForearmShots.cs — рука игрока от первого лица «было | стало»: по умолчанию поза руки в портрете (PlayerGloves.PoseFix
+// false / true, поле рук включено в обоих — «было» = fd78630); ForearmViewPair = true — поле рук (ViewFix false / true).
 // Бой — настоящий FightDirector, удары и блок — через InputReader.Inject и кнопку HUD, как в Spring Shots.
-// Итог: Unity/Shots/forearm/<момент>-p.png (слева «без», справа «с»), <момент>-l.png (сверху «без», снизу «с»), sheet.png;
+// Итог: Unity/Shots/forearm/<момент>-p.png (9:19,5) и -p16.png (9:16): слева «было», справа «стало»; <момент>-l.png
+// (сверху «было», снизу «стало»); sheet.png — портреты 9:19,5 и 9:16, sheet-l.png — ландшафт;
 // доля кадра под рукой — в LastLog (FOREARM_AREA): вся рука (плечо + предплечье + перчатка) и только плечо с предплечьем.
 using System.Collections.Generic;
 using System.IO;
@@ -29,10 +31,12 @@ namespace VoxGame.Editor
         }
         static bool _sweep;
 
+        public static bool ForearmViewPair;
+
         [MenuItem("VoxGame/Forearm Shots")]
         public static void ForearmShots()
         {
-            bool was = PlayerGloves.ViewFix;
+            bool was = PlayerGloves.ViewFix, wasP = PlayerGloves.PoseFix;
             var log = new StringBuilder();
             string tmp = Path.Combine(Path.GetTempPath(), "vox-forearm-shots");
             Directory.CreateDirectory(tmp);
@@ -40,20 +44,21 @@ namespace VoxGame.Editor
             {
                 foreach (bool on in new[] { false, true })
                 {
-                    PlayerGloves.ViewFix = on;
+                    if (ForearmViewPair) PlayerGloves.ViewFix = on; else PlayerGloves.PoseFix = on;
                     ForearmFight(tmp, on ? "on" : "off", log);
                 }
             }
-            finally { PlayerGloves.ViewFix = was; }
+            finally { PlayerGloves.ViewFix = was; PlayerGloves.PoseFix = wasP; }
 
             var dir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Shots", "forearm"));
             Directory.CreateDirectory(dir);
             foreach (var m in ForearmMoments)
             {
                 Combine(Path.Combine(tmp, m + "-off-p.png"), Path.Combine(tmp, m + "-on-p.png"), Path.Combine(dir, m + "-p.png"), true);
+                Combine(Path.Combine(tmp, m + "-off-p16.png"), Path.Combine(tmp, m + "-on-p16.png"), Path.Combine(dir, m + "-p16.png"), true);
                 Combine(Path.Combine(tmp, m + "-off-l.png"), Path.Combine(tmp, m + "-on-l.png"), Path.Combine(dir, m + "-l.png"), false);
             }
-            ForearmSheet(tmp, Path.Combine(dir, "sheet.png"));
+            ForearmSheet(tmp, Path.Combine(dir, "sheet.png"), Path.Combine(dir, "sheet-l.png"));
             ForearmLog = log.ToString();
             Debug.Log(ForearmLog);
         }
@@ -101,6 +106,9 @@ namespace VoxGame.Editor
                 return;
             }
             Pair(d, cam, ui, tmp, moment + "-" + tag);
+            d.SetViewSize(P16W, P16H);
+            Shot(cam, ui, P16W, P16H, Path.Combine(tmp, moment + "-" + tag + "-p16.png"));
+            d.SetViewSize(PortW, PortH);
             var sb = new StringBuilder("FOREARM_AREA " + tag + " " + moment);
             foreach (var v in new[] { (PortW, PortH, "9:19.5"), (P16W, P16H, "9:16"), (LandW, LandH, "land") })
             {
@@ -152,28 +160,49 @@ namespace VoxGame.Editor
             return px;
         }
 
-        // Сводный лист: сверху портреты «без | с» по моментам, снизу ландшафты «без» над «с»; всё в половину размера.
-        static void ForearmSheet(string tmp, string outPath)
+        // Сводные листы в половину размера: портреты (ряд 9:19,5 и ряд 9:16, «было | стало» по моментам) и ландшафт
+        // (по моментам «было» над «стало»).
+        static void ForearmSheet(string tmp, string outP, string outL)
         {
             const int gap = 10, half = 2;
-            int pw = PortW / half, ph = PortH / half, lw = LandW / half, lh = LandH / half;
             int n = ForearmMoments.Length;
-            int w1 = n * (2 * pw + gap) - gap, w2 = n * (lw + gap) - gap;
-            int W = Mathf.Max(w1, w2), H = ph + gap + 2 * lh + gap;
-            var o = new Texture2D(W, H, TextureFormat.RGB24, false);
-            var fill = new Color32[W * H];
-            for (int i = 0; i < fill.Length; i++) fill[i] = new Color32(230, 230, 230, 255);
-            o.SetPixels32(fill);
+            int pw = PortW / half, ph = PortH / half, qh = P16H / half, lw = LandW / half, lh = LandH / half;
+            int W = n * (2 * pw + gap) - gap, H = ph + gap + qh;
+            var o = Sheet(W, H);
             for (int m = 0; m < n; m++)
             {
                 string mm = ForearmMoments[m];
-                Blit(o, Path.Combine(tmp, mm + "-off-p.png"), m * (2 * pw + gap), H - ph, pw, ph);
-                Blit(o, Path.Combine(tmp, mm + "-on-p.png"), m * (2 * pw + gap) + pw, H - ph, pw, ph);
-                Blit(o, Path.Combine(tmp, mm + "-off-l.png"), m * (lw + gap), lh, lw, lh);
+                int x = m * (2 * pw + gap);
+                Blit(o, Path.Combine(tmp, mm + "-off-p.png"), x, H - ph, pw, ph);
+                Blit(o, Path.Combine(tmp, mm + "-on-p.png"), x + pw, H - ph, pw, ph);
+                Blit(o, Path.Combine(tmp, mm + "-off-p16.png"), x, 0, pw, qh);
+                Blit(o, Path.Combine(tmp, mm + "-on-p16.png"), x + pw, 0, pw, qh);
+            }
+            Save(o, outP);
+            W = n * (lw + gap) - gap; H = 2 * lh + gap;
+            o = Sheet(W, H);
+            for (int m = 0; m < n; m++)
+            {
+                string mm = ForearmMoments[m];
+                Blit(o, Path.Combine(tmp, mm + "-off-l.png"), m * (lw + gap), lh + gap, lw, lh);
                 Blit(o, Path.Combine(tmp, mm + "-on-l.png"), m * (lw + gap), 0, lw, lh);
             }
+            Save(o, outL);
+        }
+
+        static Texture2D Sheet(int w, int h)
+        {
+            var o = new Texture2D(w, h, TextureFormat.RGB24, false);
+            var fill = new Color32[w * h];
+            for (int i = 0; i < fill.Length; i++) fill[i] = new Color32(230, 230, 230, 255);
+            o.SetPixels32(fill);
+            return o;
+        }
+
+        static void Save(Texture2D o, string path)
+        {
             o.Apply();
-            File.WriteAllBytes(outPath, o.EncodeToPNG());
+            File.WriteAllBytes(path, o.EncodeToPNG());
             Object.DestroyImmediate(o);
         }
 

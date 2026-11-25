@@ -60,6 +60,18 @@ namespace VoxGame
         public static bool  ViewFix = true;        // false — как до правки (сверка «без | с»)
         public static float ArmTanHMin = 0.50f;    // tan половины горизонтального поля рук (≈ 53° на весь кадр; в портрете k ≈ 0,59)
         float _k = 1f;                             // масштаб рук на экране (1 — как камера)
+        // ---- Поза руки в портрете (PoseFix) ----
+        // С полем рук перчатка в ударе стоит в центре кадра, а рука от неё шла прямой палкой до нижнего края (полэкрана).
+        // В портрете ближе всего боковой край: в ударе локоть уводится за него — предплечье от запястья наружу (SideFore…),
+        // плечо от локтя вниз-назад за край (SideUpper…), оси кадра рук, x — наружу. Длины звеньев прежние, перчатка на месте.
+        public static bool PoseFix = true;         // false — вид fd78630 (только поле рук)
+        public static Vector3 SideForeJab = new Vector3(1f, -0.60f, -0.40f), SideForeHook = new Vector3(1f, 0.05f, -0.35f),
+                              SideForeUpper = new Vector3(1f, -0.55f, -0.25f), SideUpper = new Vector3(0.4f, -1f, -0.4f);
+        // Перчатка в портрете: доля прежнего размера на экране (поле рук делает её мельче в k раз)
+        public static float GloveScreenK = 0.68f;
+        public static float SideFollow = 0.2f;     // ось перчатки в такой позе меньше следует за предплечьем: костяшки к цели
+        float _gs = 1f;                            // масштаб перчатки поверх Scale
+        bool  _pose;                               // PoseFix и поле рук действует (портрет)
         readonly Transform _rig;
 
         readonly Transform _cam;
@@ -184,6 +196,10 @@ namespace VoxGame
             // поле рук: дальше всё в виртуальном кадре (_tanH, _tanV шире настоящих в 1/k раз)
             _k = ViewFix ? Mathf.Min(1f, _tanH / ArmTanHMin) : 1f;
             _tanV /= _k; _tanH /= _k;
+            _pose = PoseFix && _k < 0.999f;
+            _gs = _pose ? Mathf.Max(1f, GloveScreenK / _k) : 1f;
+            if (!FoeSpring.Enabled)
+                for (int s = 0; s < 2; s++) if (_glove[s] != null) _glove[s].localScale = Vector3.one * (Scale * _gs);
             var rs = new Vector3(_k, _k, 1f);
             if (_rig.localScale != rs) _rig.localScale = rs;
             _nLen = Mathf.Sqrt(1f + _tanV * _tanV);
@@ -400,7 +416,7 @@ namespace VoxGame
 
                 float reachW = Mathf.Max(e, lockW);
                 Vector3 kp = _kind[s] == PunchType.Hook ? PoleHook : _kind[s] == PunchType.Upper ? PoleUpper : PoleJab;
-                Place(s, pos, kn, back, au, az, lockW, Mathf.Lerp(RestFollow, ForeFollow, reachW), reachW, e, kp);
+                Place(s, pos, kn, back, au, az, lockW, Mathf.Lerp(RestFollow, ForeFollow, reachW), reachW, e, kp, _kind[s]);
                 if (FoeSpring.Enabled) SquashApply(s);
             }
         }
@@ -424,9 +440,9 @@ namespace VoxGame
         // follow — насколько ось перчатки следует за предплечьем; reachW — вес вытянутой руки (удар, поднятая рука):
         // сустав уезжает вглубь по нижнему краю кадра к ближайшей к запястью точке, чтобы плечо не тянулось жердью.
         void Place(int s, Vector3 pos, Vector3 kn, Vector3 back, float au, float az, float lockW, float follow, float reachW,
-                   float ext = 0f, Vector3 kindPole = default)
+                   float ext = 0f, Vector3 kindPole = default, PunchType kind = PunchType.Jab)
         {
-            float go = BoxerParts.GloveOff * Scale;
+            float go = BoxerParts.GloveOff * Scale * _gs;
             Vector3 k = kn.sqrMagnitude > 1e-8f ? kn.normalized : Vector3.forward;
             Vector3 pole = new Vector3(Sign(s) * PoleOut, -1f, 0f);
             bool sp = FoeSpring.Enabled;
@@ -442,7 +458,11 @@ namespace VoxGame
                 Vector3 vp = sp ? new Vector3(Sign(s) * PoleVictory.x, PoleVictory.y, PoleVictory.z) : new Vector3(Sign(s), -0.9f, -0.2f);
                 pole = Vector3.Lerp(pole, vp, lockW);   // локоть вниз-наружу, к углу кадра
             }
-            Vector3 el = Elbow(w, ArmShoulder(s, au, az, w, reachW, lockW, ext), pole, maxDeg);
+            Vector3 sh0 = ArmShoulder(s, au, az, w, reachW, lockW, ext);
+            Vector3 el = Elbow(w, sh0, pole, maxDeg);
+            float pw = _pose ? reachW * (1f - lockW) : 0f;   // только удар, не поднятая рука
+            if (pw > 0f) SideArm(s, w, ref el, ref sh0, pw, kind);
+            if (pw > 0f) follow = Mathf.Lerp(follow, SideFollow, pw);
             Vector3 ga = Dir(Dir(w - el, k) * follow + k * (1f - follow), k);
             w = pos - ga * go;
             if (lockW > 0f) { w = Vector3.Lerp(w, _vicWrist, lockW); pos = w + ga * go; }
@@ -453,6 +473,7 @@ namespace VoxGame
             Vector3 ws = sh - w;
             if (ws.sqrMagnitude > reach * reach) sh = w + ws.normalized * reach;
             el = Elbow(w, sh, pole, maxDeg);
+            if (pw > 0f) SideArm(s, w, ref el, ref sh, pw, kind);
             Vector3 fa = Dir(w - el, ga), ua = Dir(el - sh, fa);
 
             _glove[s].localPosition = pos;
@@ -465,6 +486,18 @@ namespace VoxGame
             _upper[s].localPosition = el;
             _upper[s].localRotation = Quaternion.LookRotation(Perp(back, ua), ua);
             SetLenScale(_upper[s], ((el - sh).magnitude + UpperOver) / (GloveLooks.UpperLenCm * 0.01f));
+        }
+
+        // Локоть за боковым краем (PoseFix): направления звеньев поворачиваются к SideFore…/SideUpper с весом pw, длины те же.
+        void SideArm(int s, Vector3 w, ref Vector3 el, ref Vector3 sh, float pw, PunchType kind)
+        {
+            float sg = Sign(s);
+            Vector3 f = kind == PunchType.Hook ? SideForeHook : kind == PunchType.Upper ? SideForeUpper : SideForeJab;
+            Vector3 d1 = new Vector3(sg * f.x, f.y, f.z).normalized, d2 = new Vector3(sg * SideUpper.x, SideUpper.y, SideUpper.z).normalized;
+            float lf = (el - w).magnitude, lu = (sh - el).magnitude;
+            Vector3 u0 = Dir(sh - el, d2);
+            el = w + Vector3.Slerp(Dir(el - w, d1), d1, pw) * lf;
+            sh = el + Vector3.Slerp(u0, d2, pw) * lu;
         }
 
         // Длина звена по Y; растянутое звено толще (как ближе к камере), чтобы не читалось жердью.
@@ -542,7 +575,8 @@ namespace VoxGame
         void SquashApply(int s)
         {
             float q = Mathf.Abs(_sq[s]) > 0.002f ? _sq[s] : 0f;
-            var sc = new Vector3(Scale * (1f + q * 0.45f), Scale * (1f + q * 0.45f), Scale * (1f - q));
+            float gs = Scale * _gs;
+            var sc = new Vector3(gs * (1f + q * 0.45f), gs * (1f + q * 0.45f), gs * (1f - q));
             if ((_glove[s].localScale - sc).sqrMagnitude > 1e-10f) _glove[s].localScale = sc;
         }
 
