@@ -196,6 +196,7 @@ namespace VoxGame
             var ringCenter = corner + new Vector3(Mathf.Sin(diag), 0f, Mathf.Cos(diag)) * cornerR;
             _ring = new RingBuilder();
             _ring.Build(_sceneRoot, ringCenter, 45f + CornerDiag, LightForward);
+            _foeBody.SetArena(ringCenter, 45f + CornerDiag, RingBuilder.RopeHalf);   // падение не выходит за канаты
             _crowd = new CrowdView();
             _crowd.Build(_sceneRoot, CrowdStands.Default(ringCenter, 45f + CornerDiag));
 
@@ -203,6 +204,11 @@ namespace VoxGame
             AnatSkin.on = true;
             AnatSkin.Reset();
             _v = new AnatView(_sceneRoot, _foeBody.headMount.position, _anatMat, FighterGen.AnatLookOf(foe));   // тон кожи и причёска бойца
+            // оторванные куски живут в рамке ринга: падают на настил, упираются в канаты, не следуют за головой
+            var anatWorld = new GameObject("anatWorld").transform;
+            anatWorld.SetParent(_sceneRoot, false);
+            anatWorld.SetPositionAndRotation(new Vector3(ringCenter.x, _foeBody.root.position.y, ringCenter.z), Quaternion.Euler(0f, 45f + CornerDiag, 0f));
+            _v.pieces.space = anatWorld; _v.pieces.spaceHalf = RingBuilder.RopeHalf * 100f - 4f;
             _face = new FoeFace(foe);   // мимика: характер бойца, события боя → выражения
 
             // Руки игрока
@@ -251,6 +257,7 @@ namespace VoxGame
             // Эффекты поверх экранов (последний ребёнок холста) и звук; слушатель — на камере боя
             _fx = new FxDirector();
             _fx.Build(_sceneRoot, _uiRoot.transform, cam);
+            _fx.ArmGhost = (int g, int part, out Matrix4x4 m) => { m = default; return _playerGloves != null && _playerGloves.RecoilGhost(g, part, out m); };   // плашка обходит руку и в отдаче
             _sound = new SoundPlayer();
             _sound.Init(transform);
             _sound.Mute(!profile.soundEnabled);
@@ -808,7 +815,7 @@ namespace VoxGame
             float power = dmgBase / 15f;
             _fx.OnFoeHit(power, blocked);
             _face.OnFoeLanded(blocked, broken);
-            if (blocked) _sound.Play(SoundId.Block);
+            if (blocked) { _sound.Play(SoundId.Block); _foeBody.StrikeBlocked(_strikeCmd.side); }   // перчатка отскакивает от блока
             else
             {
                 if (broken) _sound.Play(SoundId.GuardBreak);
@@ -983,6 +990,7 @@ namespace VoxGame
             _face = new FoeFace(_foeDef);
             _foeBody.ResetGear();
             _foeBody.spring.Reset();
+            _foeBody.ResetFall();
             // «Заново» — тот же бой с нуля: мега-шкала не переносится
             var prms = _sim.State.fightParams;
             _sim = new FightSim(_foeDef.level, _foeDef.seed + (uint)(_restartCount + 1), prms);
