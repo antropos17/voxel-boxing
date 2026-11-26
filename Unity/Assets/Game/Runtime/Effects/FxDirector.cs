@@ -508,7 +508,9 @@ namespace VoxGame
         // Руки игрока для места плашки (доработка 4): перчатки с манжетой и предплечья. Плашка выбирает место один раз и
         // стоит всё время показа, поэтому обходит не только руки сейчас, но и их позы за ArmHistN кадров: рука после удара
         // возвращается тем же путём, которым шла к удару.
-        public const int ArmHistN = 9, ArmHistStep = 4, ArmHistStride = 4;   // кадров истории (0,15 с); брать каждую 4-ю позу и каждую 4-ю точку
+        // Обратно рука идёт не всегда тем же путём: у джеба в портрете она приходит сбоку, а уходит вниз, в стойку.
+        // Поэтому ещё и путь возврата: позы между нынешней и позой ArmHistN−1 кадров назад (до удара, рука в стойке), ArmSweepN шагов.
+        public const int ArmHistN = 21, ArmHistRecent = 9, ArmHistStep = 4, ArmHistStride = 4, ArmSweepN = 6;   // история 0,35 с; недавние 0,15 с — каждая 4-я поза, каждая 4-я точка
         static readonly string[] ArmRigNames = { "playerArms/playerGlove0", "playerArms/playerGlove1", "playerArms/playerForeArm0", "playerArms/playerForeArm1" };
         readonly MeshFilter[] _armMf = new MeshFilter[4];
         readonly Matrix4x4[] _armHist = new Matrix4x4[ArmHistN * 4];   // поза части в осях камеры; [кадр·4 + часть]
@@ -541,29 +543,41 @@ namespace VoxGame
         {
             Pops.BeginMask();
             float tv = Mathf.Tan(_cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
-            for (int ago = 0; ago < ArmHistN; ago += ArmHistStep)
+            for (int ago = 0; ago < ArmHistRecent; ago += ArmHistStep)
             {
                 int f = (_armHead - ago + ArmHistN) % ArmHistN;
-                int stride = ago == 0 ? 1 : ArmHistStride;
-                float pad = FxPops.MaskPad * (ago == 0 ? 1f : ArmHistPad);
                 for (int s = 0; s < 4; s++)
+                    if (_armHistOn[f * 4 + s]) ArmSplat(s, _armHist[f * 4 + s], ago == 0 ? 1 : ArmHistStride, ago / ArmHistStep, ago == 0 ? 1f : ArmHistPad, tv);
+            }
+            int fo = (_armHead + 1) % ArmHistN;   // самая старая поза
+            for (int s = 0; s < 4; s++)
+            {
+                if (!_armHistOn[_armHead * 4 + s] || !_armHistOn[fo * 4 + s]) continue;
+                Matrix4x4 a = _armHist[_armHead * 4 + s], b = _armHist[fo * 4 + s];
+                Vector3 pa = a.GetColumn(3), pb = b.GetColumn(3);
+                Quaternion ra = a.rotation, rb = b.rotation; Vector3 sc = a.lossyScale;
+                for (int k = 1; k <= ArmSweepN; k++)
                 {
-                    if (!_armHistOn[f * 4 + s]) continue;
-                    var mf = _armMf[s];
-                    var pts = mf != null ? GloveLooks.Silhouette(mf.sharedMesh) : null;
-                    if (pts == null) continue;
-                    Matrix4x4 m = _armHist[f * 4 + s];
-                    float hw = pad * GloveLooks.SilStepCm * 0.01f * mf.transform.lossyScale.x;   // полшага с запасом, м
-                    for (int i = (ago / ArmHistStep) % stride; i < pts.Length; i += stride)
-                    {
-                        Vector3 v = m.MultiplyPoint3x4(pts[i]);
-                        if (v.z <= 0.01f) continue;
-                        float fy = 0.5f / (v.z * tv), fx = fy / _aspect;
-                        Pops.MaskSplat(0.5f + v.x * fx, 0.5f + v.y * fy, hw * fx, hw * fy);
-                    }
+                    float t = k / (float)ArmSweepN;
+                    ArmSplat(s, Matrix4x4.TRS(Vector3.Lerp(pa, pb, t), Quaternion.Slerp(ra, rb, t), sc), ArmHistStride, k, ArmHistPad, tv);
                 }
             }
             Pops.EndMask();
+        }
+
+        void ArmSplat(int s, Matrix4x4 m, int stride, int phase, float padK, float tv)
+        {
+            var mf = _armMf[s];
+            var pts = mf != null ? GloveLooks.Silhouette(mf.sharedMesh) : null;
+            if (pts == null) return;
+            float hw = FxPops.MaskPad * padK * GloveLooks.SilStepCm * 0.01f * mf.transform.lossyScale.x;   // полшага с запасом, м
+            for (int i = phase % stride; i < pts.Length; i += stride)
+            {
+                Vector3 v = m.MultiplyPoint3x4(pts[i]);
+                if (v.z <= 0.01f) continue;
+                float fy = 0.5f / (v.z * tv), fx = fy / _aspect;
+                Pops.MaskSplat(0.5f + v.x * fx, 0.5f + v.y * fy, hw * fx, hw * fy);
+            }
         }
 
         static readonly string[] GloveNames = { "playerGlove0", "playerGlove1" };
