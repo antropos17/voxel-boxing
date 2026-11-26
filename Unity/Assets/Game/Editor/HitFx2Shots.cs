@@ -25,7 +25,9 @@ namespace VoxGame.Editor
             public float in15Frac, in33Frac;                // то же через 0,15 и 0,33 с
             public int after05Alive; public float after05HighFrac, after05BehindFrac;   // через 0,5 с: выше точки на 0,25·H
             public bool plateSeen; public float hudBottom, plateGloveFrac, plateContrastMin, plateHudFrac, plateComboFrac;
-            public float sizeMax, sizeMed, streakMax; public int sizeN;   // доработка 3: толщина частиц на 0,15 с, доли ширины
+            public float sizeMax, sizeMed, streakMax; public int sizeN;
+            public int dropN, dropSep; public float dropFrac;   // доработка 4: капли (стороны на экране ≤1,6:1), видимые отдельно от полос
+            public float plateOvMax, plateOv15, plateJumpMax; public int plateFrames, plateOvMaxF;   // плашка по всем кадрам видимости: перекрытие руками, скачок (доля ширины)   // доработка 3: толщина частиц на 0,15 с, доли ширины
             public Color bloodCol, gloveCol; public float bloodLum, bloodGloveContrast;   // средние цвета пикселей (sRGB) и яркость, контраст
             public Vector2 hitN; public float bloodPx15, plateDist, ringOverText, plateGlovePx; public Rect glovePxN; public bool plateInSafe; public Rect plateN, safeN, gloveN0, gloveN1;
         }
@@ -92,7 +94,8 @@ namespace VoxGame.Editor
                 string tmpPeak = Path.Combine(Path.GetTempPath(), "vox-hitfx2-peak.png");
                 int maxVis = -1;
                 bool plateDone = false;
-                for (int f = 0; f <= 30; f++)
+                Vector2 prevC = new Vector2(-1f, -1f);
+                for (int f = 0; f <= 56; f++)
                 {
                     if (f > 0) run.Tick();
                     BloodStats(cam, fx, born, hp, buf, out int alive, out int vis, out int inside, out int high, out int behind);
@@ -114,6 +117,8 @@ namespace VoxGame.Editor
                         res.after05BehindFrac = alive > 0 ? (float)behind / alive : 0f;
                         if (dir != null && !land && t == PunchType.Jab) HF2Shot(cam, ui, w, h, Path.Combine(dir, tag + "-after05.png"));
                     }
+                    if (f > 0 && fx.Pops.LastPopRect != null && fx.Pops.LastPopShown && fx.Pops.LastPopAge < FxPops.PopLife)
+                        PlateFrame(d, cam, ui, w, h, f, ref res, ref prevC);
                     // плашка: первый кадр полной видимости (появление закончилось)
                     if (!plateDone && fx.Pops.LastPopRect != null && fx.Pops.LastPopAge >= FxPops.PopIn * FxPops.PopLife)
                     {
@@ -326,13 +331,45 @@ namespace VoxGame.Editor
 
         static bool Differs(Color p, Color q) => Mathf.Abs(p.r - q.r) > 0.06f || Mathf.Abs(p.g - q.g) > 0.06f || Mathf.Abs(p.b - q.b) > 0.06f;
 
+        // Руки игрока: перчатки (с манжетой) и предплечья
+        static readonly string[] ArmNames = { "playerArms/playerGlove0", "playerArms/playerGlove1", "playerArms/playerForeArm0", "playerArms/playerForeArm1" };
+
+        // Кадр видимости плашки: доля её пикселей, где видны перчатка, манжета или предплечье (кадр с руками и без, плашка спрятана);
+        // смещение центра плашки от прошлого кадра в долях ширины.
+        static void PlateFrame(FightDirector d, Camera cam, UIRoot ui, int w, int h, int f, ref HitFx2Res res, ref Vector2 prevC)
+        {
+            var pop = d.Fx.Pops.LastPopRect;
+            HF2Begin(cam, ui, w, h);
+            Rect pr = UiRectN(cam, pop);
+            pop.gameObject.SetActive(false);
+            var on = HF2Render(cam, w, h);
+            var arms = new Transform[ArmNames.Length];
+            for (int i = 0; i < arms.Length; i++) { arms[i] = cam.transform.Find(ArmNames[i]); if (arms[i] != null) arms[i].gameObject.SetActive(false); }
+            var off = HF2Render(cam, w, h);
+            foreach (var a in arms) if (a != null) a.gameObject.SetActive(true);
+            pop.gameObject.SetActive(true);
+            ui.RestoreAfterShot();
+            float ov = DiffFrac(on, off, w, h, pr);
+            if (ov > res.plateOvMax) { res.plateOvMax = ov; res.plateOvMaxF = f; }
+            if (f == PeakAt) res.plateOv15 = ov;
+            res.plateFrames++;
+            Vector2 c = new Vector2(pr.center.x * w, pr.center.y * h);
+            if (prevC.x >= 0f) res.plateJumpMax = Mathf.Max(res.plateJumpMax, (c - prevC).magnitude / w);
+            prevC = c;
+        }
+
         // Экранная толщина частиц крови этого удара (наибольшая сторона куба, у штриха — поперёк движения), доли ширины кадра.
         static void SizeStats(Camera cam, FxDirector fx, uint born, int w, ref HitFx2Res res)
         {
             int m = FxParticles.MaxParticles;
             var pos = new Vector3[m]; var th = new float[m]; var st = new bool[m];
-            int n = fx.Particles.CopyBloodDims(born, pos, th, st);
+            var ax = new Vector3[m];
+            int n = fx.Particles.CopyBloodDims(born, pos, th, st, ax);
             var l = new List<float>(n);
+            var drops = new List<Vector2>(); var strk = new List<Vector2>();
+            float asp0 = cam.aspect;
+            Vector3 hv = cam.WorldToViewportPoint(fx.LastHitPoint);
+            Vector2 hpx = new Vector2(hv.x * w, hv.y * w / asp0);
             float tv = 2f * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad), asp = cam.aspect;
             res.streakMax = 0f;
             for (int i = 0; i < n; i++)
@@ -342,11 +379,60 @@ namespace VoxGame.Editor
                 float f = th[i] / (v.z * tv * asp);   // доля ширины
                 l.Add(f);
                 if (st[i]) res.streakMax = Mathf.Max(res.streakMax, f);
+                // соотношение сторон на экране: длина штриха (концы оси) к толщине
+                float tp = f * w, lp = 0f;
+                if (st[i])
+                {
+                    Vector3 a = cam.WorldToViewportPoint(pos[i] - ax[i] * 0.5f), b = cam.WorldToViewportPoint(pos[i] + ax[i] * 0.5f);
+                    lp = new Vector2((b.x - a.x) * w, (b.y - a.y) * w / asp0).magnitude;
+                }
+                Vector2 sp = new Vector2(v.x * w, v.y * w / asp0);
+                if (Mathf.Max(lp, tp) <= 1.6f * tp) drops.Add(sp); else strk.Add(sp);
             }
             l.Sort();
             res.sizeN = l.Count;
             res.sizeMax = l.Count > 0 ? l[l.Count - 1] : 0f;
             res.sizeMed = l.Count > 0 ? l[l.Count / 2] : 0f;
+            res.dropN = drops.Count;
+            res.dropFrac = l.Count > 0 ? (float)drops.Count / l.Count : 0f;
+            // отдельно видны: вне выпуклой оболочки полос или дальше от точки удара, чем 80-й перцентиль полос
+            var ds = new List<float>(strk.Count);
+            foreach (var q in strk) ds.Add((q - hpx).magnitude);
+            ds.Sort();
+            float p80 = ds.Count > 0 ? ds[Mathf.Min(ds.Count - 1, (int)(ds.Count * 0.8f))] : 0f;
+            var hull = Hull(strk);
+            res.dropSep = 0;
+            foreach (var q in drops) if ((q - hpx).magnitude > p80 || !InHull(hull, q)) res.dropSep++;
+        }
+
+        // Выпуклая оболочка (монотонная цепь), против часовой
+        static List<Vector2> Hull(List<Vector2> pts)
+        {
+            var p = new List<Vector2>(pts);
+            p.Sort((a, b) => a.x != b.x ? a.x.CompareTo(b.x) : a.y.CompareTo(b.y));
+            if (p.Count < 3) return p;
+            var hl = new List<Vector2>();
+            for (int pass = 0; pass < 2; pass++)
+            {
+                int start = hl.Count;
+                for (int k = 0; k < p.Count; k++)
+                {
+                    var q = pass == 0 ? p[k] : p[p.Count - 1 - k];
+                    while (hl.Count >= start + 2 && Cross(hl[hl.Count - 2], hl[hl.Count - 1], q) <= 0f) hl.RemoveAt(hl.Count - 1);
+                    hl.Add(q);
+                }
+                hl.RemoveAt(hl.Count - 1);
+            }
+            return hl;
+        }
+
+        static float Cross(Vector2 o, Vector2 a, Vector2 b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+
+        static bool InHull(List<Vector2> h, Vector2 q)
+        {
+            if (h.Count < 3) return false;
+            for (int i = 0; i < h.Count; i++) if (Cross(h[i], h[(i + 1) % h.Count], q) < 0f) return false;
+            return true;
         }
 
         static Rect DiffBox(Color[] a, Color[] b, int w, int h)

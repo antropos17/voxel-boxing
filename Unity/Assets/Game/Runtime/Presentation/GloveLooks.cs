@@ -106,28 +106,28 @@ namespace VoxGame
                 default, look.main, look.cuff, Color.Lerp(look.main, Color.black, 0.3f), look.trim, extra, BoxerParts.HeadSkin,
             };
             var mesh = m.BuildMesh("glove_" + look.id, pal, mn * 0.01f, BoxerParts.GloveCell * 0.01f);
-            Sil.Add(mesh, SilPoints(sh, th, mn, mx));
+            Sil.Add(mesh, SilPoints((x, y, z) => Sdf(sh, th, x, y, z), mn, mx));
             return mesh;
         }
 
-        // Силуэт перчатки для места плашки удара (FxDirector): точки внутри SDF с шагом SilStepCm в координатах сетки (м).
+        // Силуэт перчатки и предплечья для места плашки удара (FxDirector): точки у поверхности SDF с шагом SilStepCm в координатах сетки (м).
         // Сетка на ЦП не читается, поэтому точки берутся из той же SDF при постройке.
         public const float SilStepCm = 1.5f;
         static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Mesh, Vector3[]> Sil =
             new System.Runtime.CompilerServices.ConditionalWeakTable<Mesh, Vector3[]>();
         public static Vector3[] Silhouette(Mesh m) => m != null && Sil.TryGetValue(m, out var p) ? p : null;
 
-        static Vector3[] SilPoints(GloveShape sh, int th, Vector3 mn, Vector3 mx)
+        static Vector3[] SilPoints(VoxModel.Sdf sdf, Vector3 mn, Vector3 mx)
         {
             var l = new System.Collections.Generic.List<Vector3>(2048);
             for (float x = mn.x + SilStepCm * 0.5f; x < mx.x; x += SilStepCm)
             for (float y = mn.y + SilStepCm * 0.5f; y < mx.y; y += SilStepCm)
             for (float z = mn.z + SilStepCm * 0.5f; z < mx.z; z += SilStepCm)
             {
-                if (Sdf(sh, th, x, y, z) >= 0f) continue;
+                if (sdf(x, y, z) >= 0f) continue;
                 float h = SilStepCm;   // только точки у поверхности: силуэт тот же, точек в разы меньше
-                if (Sdf(sh, th, x + h, y, z) < 0f && Sdf(sh, th, x - h, y, z) < 0f && Sdf(sh, th, x, y + h, z) < 0f
-                    && Sdf(sh, th, x, y - h, z) < 0f && Sdf(sh, th, x, y, z + h) < 0f && Sdf(sh, th, x, y, z - h) < 0f) continue;
+                if (sdf(x + h, y, z) < 0f && sdf(x - h, y, z) < 0f && sdf(x, y + h, z) < 0f
+                    && sdf(x, y - h, z) < 0f && sdf(x, y, z + h) < 0f && sdf(x, y, z - h) < 0f) continue;
                 l.Add(new Vector3(x, y, z) * 0.01f);
             }
             return l.ToArray();
@@ -140,13 +140,13 @@ namespace VoxGame
             bool wraps = look.shape == GloveShape.Wraps;
             var mn = new Vector3(-6f, -ForeLenCm - 5.6f, -6f);
             var mx = new Vector3(6f, 3.6f, 6f);
-            var m = VoxModel.FromSdf(mn, mx, BoxerParts.ArmCell,
-                (x, y, z) =>
-                {
-                    float d = VoxModel.Cap(x, y, z, 0, 0, 0, 0, -ForeLenCm, 0, 2.9f, 4.3f);
-                    d = VoxModel.Smin(d, VoxModel.Ell(x - 0.6f, y + ForeLenCm * 0.7f, z - 0.6f, 3.9f, 7f, 3.5f), 2f);
-                    return wraps && y > -12f ? d - 0.35f : d;
-                },
+            VoxModel.Sdf sdf = (x, y, z) =>
+            {
+                float d = VoxModel.Cap(x, y, z, 0, 0, 0, 0, -ForeLenCm, 0, 2.9f, 4.3f);
+                d = VoxModel.Smin(d, VoxModel.Ell(x - 0.6f, y + ForeLenCm * 0.7f, z - 0.6f, 3.9f, 7f, 3.5f), 2f);
+                return wraps && y > -12f ? d - 0.35f : d;
+            };
+            var m = VoxModel.FromSdf(mn, mx, BoxerParts.ArmCell, sdf,
                 (x, y, z) =>
                 {
                     if (!wraps || y < -12f) return 1;
@@ -155,7 +155,9 @@ namespace VoxGame
                     return Mathf.Repeat(y * 0.55f + a, 1f) < 0.55f ? (byte)2 : (byte)3;
                 });
             var pal = new Color32[] { default, BoxerParts.HeadSkin, look.main, look.cuff, look.trim };
-            return m.BuildMesh("playerForeArm", pal, mn * 0.01f, BoxerParts.ArmCell * 0.01f);
+            var mesh = m.BuildMesh("playerForeArm", pal, mn * 0.01f, BoxerParts.ArmCell * 0.01f);
+            Sil.Add(mesh, SilPoints(sdf, mn, mx));
+            return mesh;
         }
 
         // Плечо игрока: локоть в начале координат, плечевой сустав на −UpperLenCm по Y. Одно на все виды перчаток.

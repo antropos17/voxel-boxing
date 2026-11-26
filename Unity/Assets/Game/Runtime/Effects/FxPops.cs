@@ -92,7 +92,9 @@ namespace VoxGame
             public Color color, fill, frame;
             public Outline outline;
             public Vector2 off;          // сдвиг от точки удара (доли кадра), выбран при появлении
-            public int chosen;           // номер тика, в котором выбрано место (раз за кадр)
+            public int chosen;           // номер тика, в котором выбрано место (−1 — ещё нет)
+            public Vector2 p0;           // экранная точка удара на момент выбора места: плашка не трясётся вместе с камерой
+            public int born;             // номер тика появления: в кадре удара плашка прозрачна, место выбирается в следующем
             public float riseK;          // доля подъёма: у верхней границы области плашка всплывает меньше
             public Rect g0, g1;          // перчатки, по которым выбрано место
             public uint seq;
@@ -145,6 +147,7 @@ namespace VoxGame
                 return best?.rt;
             }
         }
+        public bool LastPopShown { get { Pop b = null; for (int i = 0; i < MaxPops; i++) if (_pops[i].alive && (b == null || _pops[i].seq > b.seq)) b = _pops[i]; return b != null && b.chosen >= 0; } }
         public float LastPopAge
         {
             get
@@ -250,7 +253,7 @@ namespace VoxGame
             }
             // на экране одна плашка удара: прежняя гаснет сразу, иначе серия ляжет стопкой на грудь
             for (int i = 0; i < MaxPops; i++) if (_pops[i].alive) { _pops[i].alive = false; _pops[i].rt.gameObject.SetActive(false); }
-            s.alive = true; s.age = 0f; s.seq = ++_seq; s.world = at; s.chosen = -1;
+            s.alive = true; s.age = 0f; s.seq = ++_seq; s.world = at; s.chosen = -1; s.born = _tick;
             if (!ReferenceEquals(s.text.text, text)) s.text.text = text;
             s.text.fontSize = gold ? PopFontPower : PopFontJab;
             s.color = gold ? TextPower : TextJab;
@@ -281,12 +284,16 @@ namespace VoxGame
 
         // Маска силуэта перчаток (MaskN×MaskN клеток на кадр) и её суммы по прямоугольникам; пока маски нет — короба SetAvoid.
         public const int MaskN = 96;
-        public const float MaskFree = 0.04f, MaskW = 10f, MaskPad = 0.9f;   // бесплатная доля перекрытия маски, вес перекрытия, пятно точки (доля шага)
+        public const float MaskFree = 0.08f, MaskW = 10f, MaskPad = 0.9f;   // бесплатная доля перекрытия маски, вес перекрытия, пятно точки (доля шага)
         readonly bool[] _mask = new bool[MaskN * MaskN];
         readonly int[] _sat = new int[(MaskN + 1) * (MaskN + 1)];
         bool _maskOn;
         int _tick, _maskTick = -1;   // маска и место — не чаще раза за кадр (ShowPop и Tick в одном кадре)
-        public bool NeedAvoid { get { if (_maskTick == _tick) return false; for (int i = 0; i < MaxPops; i++) if (_pops[i].alive && _pops[i].age < PopIn * PopLife) return true; return false; } }
+        public bool NeedAvoid { get { if (_maskTick == _tick) return false; for (int i = 0; i < MaxPops; i++) if (_pops[i].alive && _pops[i].chosen < 0 && ChooseNow(_pops[i])) return true; return false; } }
+        // место выбирается через ChooseDelay после удара (4 кадра): рука к этому времени прошла по инерции дальше точки удара,
+        // её путь — в истории поз (FxDirector.ArmMask); до выбора плашка прозрачна, её жизнь идёт от выбора
+        public const float ChooseDelay = 0.067f;
+        bool ChooseNow(Pop s) => s.born != _tick && s.age >= ChooseDelay;
         public bool MaskStale => _maskTick != _tick;
         public void BeginMask() { System.Array.Clear(_mask, 0, _mask.Length); _maskOn = false; _maskTick = _tick; }
         public void MaskSplat(float x, float y, float hx, float hy)
@@ -384,18 +391,23 @@ namespace VoxGame
             Vector2 root = RootSize();
             Vector2 half = new Vector2((s.rt.sizeDelta.x + 2f * FramePx) * 0.5f / root.x, (s.rt.sizeDelta.y + 2f * FramePx) * 0.5f / root.y);
             float riseN = PopRise / root.y;
-            // место выбирается, пока плашка проявляется (0,1 с): перчатка в это время у лица; после — место не меняется
-            if (k < PopIn && s.chosen != _tick)
+            // место выбирается один раз, в первом кадре проявления (в кадре удара плашка прозрачна), и больше не меняется:
+            // плашка не прыгает; руки обходятся с запасом на путь возврата (маска с историей поз, FxDirector.ArmMask)
+            if (s.chosen < 0 && ChooseNow(s) && _maskTick == _tick)   // маска рук построена в этом же кадре
             {
                 s.chosen = _tick;
                 s.g0 = _avoid[0]; s.g1 = _avoid[1];
                 s.off = Choose(p, half, riseN, s.g0, s.g1, out s.riseK);
+                s.p0 = p;
+                s.age = 0f; k = 0f; a = 0f;   // жизнь плашки идёт от выбора места: появление как обычно
             }
+            if (s.chosen >= 0) p = s.p0;
             p = Fit(p + s.off, half, riseN * s.riseK);
             s.rt.anchorMin = s.rt.anchorMax = p;
             // всплывает от +8 px (появление) до −46 css-px, как margin-top в @keyframes pop
             float rise = k < PopIn ? -11f * (1f - k / PopIn) : PopRise * s.riseK * Mathf.Clamp01((k - PopIn) / (1f - PopIn));
             s.rt.anchoredPosition = new Vector2(0f, rise);
+            if (s.chosen < 0) a = 0f;   // пока место не выбрано (кадр удара), плашка прозрачна
             var c = s.color; c.a = a; s.text.color = c;
             var pc = s.fill; pc.a *= a; s.plate.color = pc;
             s.outline.effectColor = s.frame;

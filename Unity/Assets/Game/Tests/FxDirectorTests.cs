@@ -213,10 +213,10 @@ namespace VoxGame.Tests
                 p.EmitStars(new Vector3(0f, 1.6f, 0f), 1f);
                 p.Tick(Dt);
                 Assert.Greater(p.AliveCount, 0);
-                Assert.AreEqual(FxParticles.MaxParticles * 24, p.Mesh.vertexCount);
+                Assert.AreEqual(FxParticles.MaxParticles * FxParticles.VertsPer, p.Mesh.vertexCount);
                 for (int i = 0; i < 300; i++) p.Tick(Dt);
                 Assert.AreEqual(0, p.AliveCount);
-                Assert.AreEqual(FxParticles.MaxParticles * 24, p.Mesh.vertexCount);
+                Assert.AreEqual(FxParticles.MaxParticles * FxParticles.VertsPer, p.Mesh.vertexCount);
             }
             finally
             {
@@ -386,7 +386,7 @@ namespace VoxGame.Tests
                 fx.Tick(Dt);
                 Assert.AreEqual("КОМБО ×3", fx.Pops.ComboShown);
                 int upBlood = fx.Particles.Count(FxKind.Blood) + fx.Particles.Count(FxKind.Mist);
-                Assert.Greater(upBlood, jabBlood * 2);
+                Assert.Greater(upBlood, jabBlood);   // доработка 4: у джеба крови много (≥110 видимых), силовой — больше, но не вдвое
                 fx.Reset();
 
                 var mega = Hit(PunchType.Mega, mega: true, power: 1.3f); mega.punch = PunchType.Hook; mega.damage = 30f;
@@ -528,7 +528,11 @@ namespace VoxGame.Tests
                 Assert.LessOrEqual(r.after05HighFrac + r.after05BehindFrac, 0.1f, w + ": через 0,5 с выше точки или за камерой");
                 Assert.IsTrue(r.plateSeen, w + ": плашка видна");
                 Assert.LessOrEqual(r.plateGlovePx, 0.05f, w + ": плашка под перчаткой (по пикселям перчаток)");
-                Assert.LessOrEqual(r.plateDist, 0.22f, w + ": плашка дальше 0,22 меньшей стороны от точки удара");
+                // доработка 4: плашка обходит руки (перчатка, манжета, предплечье) всё время показа и не прыгает; расстояние —
+                // наименьшее достижимое (джеб 0,242, хук 0,237 в портрете, см. HIT-FX-2.md), порог 0,22 с этим несовместим
+                Assert.LessOrEqual(r.plateDist, 0.25f, w + ": плашка далеко от точки удара");
+                Assert.LessOrEqual(r.plateOvMax, 0.05f, w + ": плашка на руках игрока (наибольшее за показ)");
+                Assert.LessOrEqual(r.plateJumpMax, 0.02f, w + ": плашка прыгает между кадрами");
                 Assert.AreEqual(0f, r.ringOverText, 1e-4f, w + ": кольцо поверх текста плашки");
                 // доработка 3: мелкие тёмные капли и полосы, много (портрет 1080×2400, 0,15 с)
                 if (!r.land)
@@ -536,14 +540,14 @@ namespace VoxGame.Tests
                     Assert.LessOrEqual(r.sizeMax, 0.025f, w + ": наибольшая частица");
                     Assert.LessOrEqual(r.sizeMed, 0.012f, w + ": медианная частица");
                     Assert.LessOrEqual(r.streakMax, 0.012f, w + ": толщина полосы");
-                    Assert.GreaterOrEqual(r.peakVis, r.punch == PunchType.Jab ? 50 : 120, w + ": видимых частиц");
-                    if (r.punch == PunchType.Jab) Assert.GreaterOrEqual(r.bloodPx15, 8000f, w + ": пикселей крови");
-                    if (r.punch == PunchType.Hook)
-                    {
-                        Assert.GreaterOrEqual(r.bloodPx15, 12000f, w + ": пикселей крови");
-                        Assert.LessOrEqual(r.bloodLum, 0.10f, w + ": яркость крови");
-                        Assert.GreaterOrEqual(r.bloodGloveContrast, 2.0f, w + ": контраст крови к перчатке");
-                    }
+                    Assert.GreaterOrEqual(r.peakVis, r.punch == PunchType.Jab ? 110 : r.punch == PunchType.Hook ? 130 : 120, w + ": видимых частиц");
+                    if (r.punch == PunchType.Jab) Assert.GreaterOrEqual(r.bloodPx15, 22000f, w + ": пикселей крови");
+                    if (r.punch == PunchType.Hook) Assert.GreaterOrEqual(r.bloodPx15, 18000f, w + ": пикселей крови");
+                    Assert.LessOrEqual(r.bloodLum, 0.10f, w + ": яркость крови");
+                    Assert.GreaterOrEqual(r.bloodGloveContrast, 2.0f, w + ": контраст крови к перчатке");
+                    // доработка 4: смесь полос и капель, капли видны отдельно
+                    Assert.That(r.dropFrac, Is.InRange(0.3f, 0.55f), w + ": доля капель");
+                    if (r.punch == PunchType.Hook) { Assert.GreaterOrEqual(r.dropN, 45, w + ": капель"); Assert.GreaterOrEqual(r.dropSep, 25, w + ": капель отдельно"); }
                 }
                 Assert.GreaterOrEqual(r.plateContrastMin, 4.5f, w + ": контраст плашки");
                 Assert.IsTrue(r.plateInSafe, w + ": плашка в safe-area");

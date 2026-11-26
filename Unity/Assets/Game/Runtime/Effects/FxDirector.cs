@@ -69,7 +69,7 @@ namespace VoxGame
         public const float WebFaceDist = 0.7f;      // м: лицо соперника от камеры веба; масштаб вида = расстояние / это
         public const float ViewKMin = 1f, ViewKMax = 2.5f;
         public const float WhiteFlash = 0.15f;      // ×FlashMax 0,7 ≈ 0,1: в линейном цвете Unity это та же яркость, что 0,36 #white веба
-        public const int BloodJab = 56, BloodPower = 130, BloodPowerPerPw = 10, BloodMega = 280, BloodFracture = 30;
+        public const int BloodJab = 120, BloodPower = 130, BloodPowerPerPw = 10, BloodMega = 280, BloodFracture = 30;
         public const int BloodHeadBurst = 100, BloodCounter = 8, ChunksPower = 3, ChunksMega = 10, ChunksFracture = 6;
         public const int FireMega = 40, SweatJab = 4;
         public const float SpdJab = 0.9f, SpdPower = 1.2f, SpdMega = 1.5f;
@@ -222,7 +222,7 @@ namespace VoxGame
             }
             Rings?.Tick(dt, realDt, _cam != null ? _cam.transform : null);
             Banners?.Tick(realDt);
-            if (Pops != null) { SyncAvoid(); Pops.Tick(realDt, realDt * TimeScale); }
+            if (Pops != null) { RecordArms(); SyncAvoid(); Pops.Tick(realDt, realDt * TimeScale); }
             Overlay?.Tick(realDt);
             return TimeScale;
         }
@@ -342,7 +342,6 @@ namespace VoxGame
             }
             else if (Pops != null)
             {
-                SyncAvoid(true);
                 Pops.ShowPop(FxPops.PopText((int)h.punch, h.counter, dmg), h.point, power || h.counter);
             }
             if (h.fracture && !h.mega) Banners?.ShowCenter(FxBanners.Fracture, BannerStyle.Power);
@@ -499,33 +498,69 @@ namespace VoxGame
 
         // Перчатки игрока (PlayerGloves: камера/playerArms/playerGlove0..1) → экранные прямоугольники для места плашки удара.
         readonly MeshFilter[] _gloveMf = new MeshFilter[2];
-        void SyncAvoid(bool force = false)
+        void SyncAvoid()
         {
-            if (_cam == null) { Pops.SetAvoid(Rect.zero, Rect.zero); return; }
+            if (_cam == null) { Pops.SetAvoid(Rect.zero, Rect.zero); if (Pops.NeedAvoid) { Pops.BeginMask(); Pops.EndMask(); } return; }
             Pops.SetAvoid(GloveRect(0), GloveRect(1));
-            if (force ? Pops.MaskStale : Pops.NeedAvoid) GloveMask();
+            if (Pops.NeedAvoid) ArmMask();
         }
 
-        // Маска силуэта перчаток в кадре (точки SDF перчатки, каждая — квадрат на шаг точек); нужна, пока плашка выбирает место.
-        void GloveMask()
+        // Руки игрока для места плашки (доработка 4): перчатки с манжетой и предплечья. Плашка выбирает место один раз и
+        // стоит всё время показа, поэтому обходит не только руки сейчас, но и их позы за ArmHistN кадров: рука после удара
+        // возвращается тем же путём, которым шла к удару.
+        public const int ArmHistN = 9, ArmHistStep = 4, ArmHistStride = 4;   // кадров истории (0,15 с); брать каждую 4-ю позу и каждую 4-ю точку
+        static readonly string[] ArmRigNames = { "playerArms/playerGlove0", "playerArms/playerGlove1", "playerArms/playerForeArm0", "playerArms/playerForeArm1" };
+        readonly MeshFilter[] _armMf = new MeshFilter[4];
+        readonly Matrix4x4[] _armHist = new Matrix4x4[ArmHistN * 4];   // поза части в осях камеры; [кадр·4 + часть]
+        readonly bool[] _armHistOn = new bool[ArmHistN * 4];
+        int _armHead;
+
+        void RecordArms()
+        {
+            if (_cam == null) return;
+            _armHead = (_armHead + 1) % ArmHistN;
+            Matrix4x4 c = _cam.transform.worldToLocalMatrix;
+            for (int s = 0; s < 4; s++)
+            {
+                if (_armMf[s] == null)
+                {
+                    var t = _cam.transform.Find(ArmRigNames[s]) ?? (s < 2 ? _cam.transform.Find(GloveNames[s]) : null);
+                    if (t != null) _armMf[s] = t.GetComponent<MeshFilter>();
+                }
+                var mf = _armMf[s];
+                bool on = mf != null && mf.gameObject.activeInHierarchy && mf.sharedMesh != null;
+                _armHistOn[_armHead * 4 + s] = on;
+                if (on) _armHist[_armHead * 4 + s] = c * mf.transform.localToWorldMatrix;
+            }
+        }
+
+        // Маска рук в кадре: сейчас — все точки силуэта; в прошлых позах (каждая ArmHistStep-я) — каждая ArmHistStride-я
+        // точка с пятном шире в ArmHistPad раз.
+        public const float ArmHistPad = 1.3f;
+        void ArmMask()
         {
             Pops.BeginMask();
-            Transform ct = _cam.transform;
             float tv = Mathf.Tan(_cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
-            for (int s = 0; s < 2; s++)
+            for (int ago = 0; ago < ArmHistN; ago += ArmHistStep)
             {
-                var mf = _gloveMf[s];
-                if (mf == null || !mf.gameObject.activeInHierarchy) continue;
-                var pts = GloveLooks.Silhouette(mf.sharedMesh);
-                if (pts == null) continue;
-                Matrix4x4 m = ct.worldToLocalMatrix * mf.transform.localToWorldMatrix;
-                float hw = FxPops.MaskPad * GloveLooks.SilStepCm * 0.01f * mf.transform.lossyScale.x;   // полшага с запасом, м
-                for (int i = 0; i < pts.Length; i++)
+                int f = (_armHead - ago + ArmHistN) % ArmHistN;
+                int stride = ago == 0 ? 1 : ArmHistStride;
+                float pad = FxPops.MaskPad * (ago == 0 ? 1f : ArmHistPad);
+                for (int s = 0; s < 4; s++)
                 {
-                    Vector3 v = m.MultiplyPoint3x4(pts[i]);
-                    if (v.z <= 0.01f) continue;
-                    float fy = 0.5f / (v.z * tv), fx = fy / _aspect;
-                    Pops.MaskSplat(0.5f + v.x * fx, 0.5f + v.y * fy, hw * fx, hw * fy);
+                    if (!_armHistOn[f * 4 + s]) continue;
+                    var mf = _armMf[s];
+                    var pts = mf != null ? GloveLooks.Silhouette(mf.sharedMesh) : null;
+                    if (pts == null) continue;
+                    Matrix4x4 m = _armHist[f * 4 + s];
+                    float hw = pad * GloveLooks.SilStepCm * 0.01f * mf.transform.lossyScale.x;   // полшага с запасом, м
+                    for (int i = (ago / ArmHistStep) % stride; i < pts.Length; i += stride)
+                    {
+                        Vector3 v = m.MultiplyPoint3x4(pts[i]);
+                        if (v.z <= 0.01f) continue;
+                        float fy = 0.5f / (v.z * tv), fx = fy / _aspect;
+                        Pops.MaskSplat(0.5f + v.x * fx, 0.5f + v.y * fy, hw * fx, hw * fy);
+                    }
                 }
             }
             Pops.EndMask();

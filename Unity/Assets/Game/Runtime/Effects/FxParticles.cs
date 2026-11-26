@@ -28,10 +28,11 @@ namespace VoxGame
         public const float DropMin = 0.0022f, DropMax = 0.0055f, MistMin = 0.0015f, MistMax = 0.0035f;
         public const float StreakMax = 6f, StreakScreen = 0.04f, StreakK = 0.016f;
         public const float StreakThick = 0.006f;   // толщина штриха ≤ доли расстояния до камеры (≈1,15 % ширины кадра в портрете)
-        public const float DropLifeMin = 1.6f, DropLifeMax = 2.4f, StainLife = 2.0f;
+        public const float DropLifeMin = 0.8f, DropLifeMax = 1.2f, StainLife = 0.6f;   // доработка 4: капель больше, живут меньше — пул и время кадра
         public const float Near0 = 0.2f, Near1 = 0.6f;   // у объектива капля сжимается до нуля: не закрывает бой
 
-        const int VertsPer = 24, IdxPer = 36;
+        // три грани на частицу: кубик непрозрачный и без теней, с камеры видны только три его грани (доработка 4: вдвое меньше вершин)
+        public const int VertsPer = 12, IdxPer = 18;
 
         [StructLayout(LayoutKind.Sequential)]
         struct Vtx { public Vector3 p; public Vector3 n; public Color32 c; }
@@ -62,6 +63,8 @@ namespace VoxGame
         readonly Color32[] _col = new Color32[MaxParticles];
         readonly float[]   _dThick = new float[MaxParticles];     // замер: толщина нарисованного куба (м; 0 — не нарисован)
         readonly bool[]    _dStreak = new bool[MaxParticles];     // замер: нарисован штрихом
+        readonly Vector3[] _dAxis = new Vector3[MaxParticles];
+        readonly bool[]    _round = new bool[MaxParticles];       // круглая капля-брызга: не вытягивается вдоль движения    // замер: ось штриха во всю длину (м), у куба — ноль
         readonly uint[]    _seq = new uint[MaxParticles];         // порядковый номер рождения
         int  _next;
         uint _born;
@@ -91,7 +94,7 @@ namespace VoxGame
 
             var idx = new ushort[MaxParticles * IdxPer];
             for (int p = 0; p < MaxParticles; p++)
-            for (int f = 0; f < 6; f++)
+            for (int f = 0; f < 3; f++)
             {
                 int b = p * VertsPer + f * 4, t = p * IdxPer + f * 6;
                 idx[t] = (ushort)b; idx[t + 1] = (ushort)(b + 1); idx[t + 2] = (ushort)(b + 2);
@@ -140,6 +143,7 @@ namespace VoxGame
             _spin[i] = Rand01() * 6.2832f; _spinV[i] = (Rand01() * 2f - 1f) * 14f;
             _orbit[i] = pos;
             _seq[i] = _born++;
+            _round[i] = false;
         }
 
         // Кровь (правка HIT-FX-2): из точки попадания на голове; основная масса летит в сторону удара — хук вбок по удару,
@@ -169,10 +173,26 @@ namespace VoxGame
             for (int i = 0; i < n; i++)
             {
                 var col = BloodCol[RandIdx(4)];
-                bool mist = i % 3 == 2;
-                float m = (i % 3 == 0) ? R(0.8f, 1.7f) : R(0.3f, 0.8f);   // треть быстрых, остальные — облако у точки
+                // доработка 4: 40 % — круглые капли-брызги (разлёт шире веера полос), остальные — полосы
+                bool round = i % 5 == 1 || i % 5 == 3;
+                float m = round ? R(0.5f, 1.3f) : (i % 3 == 0) ? R(0.8f, 1.7f) : R(0.3f, 0.8f);   // у полос треть быстрых
                 Vector3 v;
-                switch (kind)
+                if (round) switch (kind)
+                {
+                    case BurstHook:
+                        v = side * R(-0.2f, 1f) * m + Vector3.up * R(-0.9f, 0.9f) * m + cf * R(0f, 0.5f) * m;
+                        break;
+                    case BurstUpper:
+                        v = Vector3.up * (0.1f + R(0.2f, 1f) * m) + rx * R(-0.9f, 0.9f) * m + cf * R(0f, 0.5f) * m;
+                        break;
+                    case BurstJab:
+                        v = (cf * R(0.2f, 0.7f) + rx * R(-1.4f, 1.4f) + Vector3.up * R(-0.6f, 0.6f)) * m;
+                        break;
+                    default:
+                        v = RandSphere() * (1.2f * m) + Vector3.up * 0.2f * m;
+                        break;
+                }
+                else switch (kind)
                 {
                     case BurstHook:
                         v = side * m + rx * R(-0.15f, 0.15f) + Vector3.up * R(-0.55f, 0.6f) * m + cf * R(-0.1f, 0.35f) * m;   // веер шире перчатки по вертикали
@@ -196,7 +216,11 @@ namespace VoxGame
                 if (v.y > UpMax) v.y = UpMax;
                 // размеры вразброс (доработка 2): каждая шестая капля крупная, морось тоже крупнее — всплеск читается на телефоне
                 float big = i % 8 == 0 ? BigDrop : 1f, q = Rand01();
-                if (mist) Spawn(FxKind.Mist, from, v, R(MistMin, MistMax) * k * DropK, R(0.25f, 0.6f), col);
+                if (round)
+                {
+                    Spawn(FxKind.Blood, from + RandSphere() * 0.01f, v, Mathf.Lerp(DropMin, DropMax, q) * k * DropK * 0.8f, R(DropLifeMin, DropLifeMax), col);
+                    _round[(_next + MaxParticles - 1) % MaxParticles] = true;
+                }
                 else Spawn(FxKind.Blood, from + RandSphere() * 0.01f, v, Mathf.Lerp(DropMin, DropMax, q * q) * k * DropK * big, R(DropLifeMin, DropLifeMax), col);
             }
         }
@@ -382,13 +406,13 @@ namespace VoxGame
         public void SetDrawn(bool on) { if (_go != null) _go.SetActive(on); }
 
         // Замер: нарисованные капли, морось и кубики мяса этого удара — положение, толщина (м), штрих ли.
-        public int CopyBloodDims(uint fromSeq, Vector3[] pos, float[] thick, bool[] streak)
+        public int CopyBloodDims(uint fromSeq, Vector3[] pos, float[] thick, bool[] streak, Vector3[] axis = null)
         {
             int n = 0;
             for (int i = 0; i < MaxParticles && n < pos.Length; i++)
                 if (_life[i] > 0f && _seq[i] >= fromSeq && _dThick[i] > 0f
                     && (_kind[i] == FxKind.Blood || _kind[i] == FxKind.Mist || _kind[i] == FxKind.Chunk))
-                { pos[n] = _pos[i]; thick[n] = _dThick[i]; streak[n] = _dStreak[i]; n++; }
+                { pos[n] = _pos[i]; thick[n] = _dThick[i]; streak[n] = _dStreak[i]; if (axis != null) axis[n] = _dAxis[i]; n++; }
             return n;
         }
 
@@ -425,6 +449,8 @@ namespace VoxGame
             if (_alive == 0 && _drawn == 0) return;
             // частицы живут в мире, меш — в осях своего объекта
             Matrix4x4 w2l = _go.transform.worldToLocalMatrix;
+            bool id = w2l.isIdentity;   // объект частиц обычно в начале координат: переводить оси не нужно
+            Vector3 camL = w2l.MultiplyPoint3x4(_hasCam ? _camPos : _go.transform.position + Vector3.back * 10f);
             int j = 0;
             for (int i = 0; i < MaxParticles; i++)
             {
@@ -450,7 +476,7 @@ namespace VoxGame
                 float su = s, sv = s, sw = s;
                 Vector3 vel = _vel[i];
                 float sp = vel.magnitude;
-                if ((kind == FxKind.Blood || kind == FxKind.Spark) && sp > 0.3f)
+                if ((kind == FxKind.Blood && !_round[i] || kind == FxKind.Spark) && sp > 0.3f)
                 {
                     w = vel / sp;
                     Vector3 a = Mathf.Abs(w.y) < 0.9f ? Vector3.up : Vector3.right;
@@ -476,8 +502,10 @@ namespace VoxGame
                 }
                 _dThick[i] = Mathf.Max(su, sv); _dStreak[i] = sw > Mathf.Max(su, sv) * 1.5f;
                 if (!_dStreak[i]) _dThick[i] = Mathf.Max(_dThick[i], sw);
-                WriteCube(j * VertsPer, w2l.MultiplyPoint3x4(_pos[i]), w2l.MultiplyVector(u * (su * 0.5f)),
-                          w2l.MultiplyVector(v * (sv * 0.5f)), w2l.MultiplyVector(w * (sw * 0.5f)), _col[i]);
+                _dAxis[i] = _dStreak[i] ? w * sw : Vector3.zero;
+                if (id) WriteCube(j * VertsPer, _pos[i], u * (su * 0.5f), v * (sv * 0.5f), w * (sw * 0.5f), _col[i], camL);
+                else WriteCube(j * VertsPer, w2l.MultiplyPoint3x4(_pos[i]), w2l.MultiplyVector(u * (su * 0.5f)),
+                               w2l.MultiplyVector(v * (sv * 0.5f)), w2l.MultiplyVector(w * (sw * 0.5f)), _col[i], camL);
                 j++;
             }
 
@@ -487,17 +515,17 @@ namespace VoxGame
         }
 
         // Шесть граней по полуосям hu, hv, hw; обход по часовой снаружи (как у VoxModel).
-        void WriteCube(int b, Vector3 c, Vector3 hu, Vector3 hv, Vector3 hw, Color32 col)
+        void WriteCube(int b, Vector3 c, Vector3 hu, Vector3 hv, Vector3 hw, Color32 col, Vector3 cam)
         {
-            // у всех шести граней ориентация обхода одна (смешанное произведение hu, hv, hw): проверка и нормали — раз на куб
+            // у всех граней ориентация обхода одна (смешанное произведение hu, hv, hw), у противоположной — обратная;
+            // пишутся три грани, обращённые к камере
             bool sw = Vector3.Dot(Vector3.Cross(hv, hw), hu) > 0f;
+            Vector3 tc = cam - c;
             Vector3 nu = hu.normalized, nv = hv.normalized, nw = hw.normalized;
-            Face(b,      c + hu, nu,  hv, hw, sw, col);   // +u
-            Face(b + 4,  c - hu, -nu, hw, hv, sw, col);   // -u
-            Face(b + 8,  c + hv, nv,  hw, hu, sw, col);   // +v
-            Face(b + 12, c - hv, -nv, hu, hw, sw, col);   // -v
-            Face(b + 16, c + hw, nw,  hu, hv, sw, col);   // +w
-            Face(b + 20, c - hw, -nw, hv, hu, sw, col);   // -w
+            bool fu = Vector3.Dot(nu, tc) >= 0f, fv = Vector3.Dot(nv, tc) >= 0f, fw = Vector3.Dot(nw, tc) >= 0f;
+            Face(b,     fu ? c + hu : c - hu, fu ? nu : -nu, hv, hw, sw != !fu, col);
+            Face(b + 4, fv ? c + hv : c - hv, fv ? nv : -nv, hw, hu, sw != !fv, col);
+            Face(b + 8, fw ? c + hw : c - hw, fw ? nw : -nw, hu, hv, sw != !fw, col);
         }
 
         // Грань с центром o, нормалью nn и сторонами a, b; лицевая сторона Unity: cross(v1−v0, v2−v0) = −4·cross(a, b)
