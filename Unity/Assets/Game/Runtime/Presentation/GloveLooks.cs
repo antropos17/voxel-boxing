@@ -87,7 +87,7 @@ namespace VoxGame
 
         // ---- Сетки ------------------------------------------------------------------------------
 
-        const byte CMain = 1, CCuff = 2, CPalm = 3, CTrim = 4, CExtra = 5, CSkin = 6;
+        const byte CMain = 1, CCuff = 2, CPalm = 3, CTrim = 4, CExtra = 5, CSkin = 6, CEdge = 7, CSeam = 8, CFold = 9;
 
         public static Mesh BuildGloveMesh(GloveLook look, int thumb)
         {
@@ -97,13 +97,15 @@ namespace VoxGame
             int th = thumb < 0 ? -1 : 1;
             var m = VoxModel.FromSdf(mn, mx, BoxerParts.GloveCell,
                 (x, y, z) => Sdf(sh, th, x, y, z),
-                (x, y, z) => PaintAt(sh, th, x, y, z));
+                (x, y, z) => PaintAt(sh, th, x, y, z), true);
             Color extra = sh == GloveShape.Armored ? new Color(0.12f, 0.12f, 0.14f)
                         : sh == GloveShape.Spiked  ? look.trim
                         : Color.Lerp(look.trim, Color.black, 0.35f);
             var pal = new Color32[]
             {
                 default, look.main, look.cuff, Color.Lerp(look.main, Color.black, 0.3f), look.trim, extra, BoxerParts.HeadSkin,
+                Color.Lerp(look.cuff, new Color(0.08f, 0.07f, 0.07f), 0.7f), Color.Lerp(look.main, Color.black, 0.4f),
+                Color.Lerp(look.cuff, Color.black, 0.24f),
             };
             var mesh = m.BuildMesh("glove_" + look.id, pal, mn * 0.01f, BoxerParts.GloveCell * 0.01f);
             Sil.Add(mesh, SilPoints((x, y, z) => Sdf(sh, th, x, y, z), mn, mx));
@@ -133,8 +135,13 @@ namespace VoxGame
             return l.ToArray();
         }
 
-        // Предплечье игрока: запястье в начале координат, локоть на −ForeLenCm по Y (с округлым локтевым суставом).
+        // Предплечье игрока: запястье в начале координат, локоть на −ForeLenCm по Y. Форма — предплечье соперника
+        // (BoxerParts.ForeArm: сужение к запястью, разгибатели и сгибатели, локтевой отросток и сгиб), по длине до ForeLenCm,
+        // по толщине ×ForeK (габариты как до правки рук). +Z — тыльная сторона. Тон вокселями: свет и тень.
         // У бинтов предплечье замотано от запястья.
+        const float ForeK = 1.0f;
+        static float ForeY(float y) => BoxerParts.ForeLen * 100f + y * (BoxerParts.ForeLen * 100f / ForeLenCm);
+
         public static Mesh BuildForeArmMesh(GloveLook look)
         {
             bool wraps = look.shape == GloveShape.Wraps;
@@ -142,37 +149,40 @@ namespace VoxGame
             var mx = new Vector3(6f, 3.6f, 6f);
             VoxModel.Sdf sdf = (x, y, z) =>
             {
-                float d = VoxModel.Cap(x, y, z, 0, 0, 0, 0, -ForeLenCm, 0, 2.9f, 4.3f);
-                d = VoxModel.Smin(d, VoxModel.Ell(x - 0.6f, y + ForeLenCm * 0.7f, z - 0.6f, 3.9f, 7f, 3.5f), 2f);
+                float d = BoxerParts.ForeArm(x / ForeK, ForeY(y), z / ForeK) * ForeK;
                 return wraps && y > -12f ? d - 0.35f : d;
             };
             var m = VoxModel.FromSdf(mn, mx, BoxerParts.ArmCell, sdf,
                 (x, y, z) =>
                 {
-                    if (!wraps || y < -12f) return 1;
-                    if (y < -10.8f) return 4;   // лента по краю бинта
+                    if (!wraps || y < -12f) return BoxerParts.ForeArmPaint(x / ForeK, ForeY(y), z / ForeK);
+                    if (y < -10.8f) return 6;   // лента по краю бинта
                     float a = Mathf.Atan2(z, x) / Mathf.PI;
                     return Mathf.Repeat(y * 0.55f + a, 1f) < 0.55f ? (byte)2 : (byte)3;
-                });
-            var pal = new Color32[] { default, BoxerParts.HeadSkin, look.main, look.cuff, look.trim };
+                }, true);
+            var skin = BoxerParts.HeadSkin;
+            var pal = new Color32[] { default, skin, look.main, look.cuff,
+                                      BoxerParts.Tone(skin, BoxerParts.ShadeK), BoxerParts.Tone(skin, BoxerParts.LightK), look.trim };
             var mesh = m.BuildMesh("playerForeArm", pal, mn * 0.01f, BoxerParts.ArmCell * 0.01f);
             Sil.Add(mesh, SilPoints(sdf, mn, mx));
             return mesh;
         }
 
         // Плечо игрока: локоть в начале координат, плечевой сустав на −UpperLenCm по Y. Одно на все виды перчаток.
+        // Форма — плечо соперника (дельта, бицепс, трицепс, локоть), по длине до UpperLenCm, по толщине ×UpperK (габариты как до правки рук).
+        const float UpperK = 1.0f;
+        static float UpperY(float y) => BoxerParts.UpperLen * 100f + y * (BoxerParts.UpperLen * 100f / UpperLenCm);
+
         public static Mesh BuildUpperArmMesh()
         {
             var mn = new Vector3(-6.4f, -UpperLenCm - 6f, -6.4f);
             var mx = new Vector3(6.4f, 5.2f, 6.4f);
             var m = VoxModel.FromSdf(mn, mx, BoxerParts.ArmCell,
-                (x, y, z) =>
-                {
-                    float d = VoxModel.Cap(x, y, z, 0, 0, 0, 0, -UpperLenCm, 0, 4.4f, 4.9f);
-                    return VoxModel.Smin(d, VoxModel.Ell(x, y + UpperLenCm * 0.5f, z - 1.3f, 4.3f, 8.5f, 4.5f), 2f);
-                },
-                (x, y, z) => 1);
-            var pal = new Color32[] { default, BoxerParts.HeadSkin };
+                (x, y, z) => BoxerParts.UpperArm(x / UpperK, UpperY(y), z / UpperK) * UpperK,
+                (x, y, z) => BoxerParts.UpperArmPaint(x / UpperK, UpperY(y), z / UpperK, false), true);
+            var skin = BoxerParts.HeadSkin;
+            var pal = new Color32[] { default, skin, default, default,
+                                      BoxerParts.Tone(skin, BoxerParts.ShadeK), BoxerParts.Tone(skin, BoxerParts.LightK) };
             return m.BuildMesh("playerUpperArm", pal, mn * 0.01f, BoxerParts.ArmCell * 0.01f);
         }
 
@@ -241,7 +251,28 @@ namespace VoxGame
             }
         }
 
+        // Конец манжеты по форме (как в Sdf); у бинтов манжеты нет.
+        static float CuffEnd(GloveShape sh) =>
+            sh == GloveShape.Heavy ? -13.5f : sh == GloveShape.Speed ? -10f : sh == GloveShape.Charged || sh == GloveShape.Champion ? -13f : -12.5f;
+
+        static float CuffR1(GloveShape sh) =>
+            sh == GloveShape.Heavy ? 6.1f : sh == GloveShape.Speed ? 3.7f : sh == GloveShape.Charged ? 6.9f
+          : sh == GloveShape.Armored ? 5.2f : sh == GloveShape.Champion ? 5.0f : 4.8f;
+
+        // Цвет: основа формы, затем общая отделка — манжета (кант и подкладка, складка, полоса, шнуровка), швы, складка ладони.
         static byte PaintAt(GloveShape sh, int th, float x, float y, float z)
+        {
+            byte c = PaintBase(sh, th, x, y, z);
+            if (sh == GloveShape.Wraps) return c;
+            c = BoxerParts.CuffDetail(c, CCuff, x, y, z, CuffEnd(sh), CuffR1(sh), CEdge, CFold, CMain, CSeam);
+            if (c != CMain || z < -5f) return c;
+            if (Mathf.Abs(y + 0.7f) < 0.33f && Mathf.Abs(x) > 4.6f && z < 6.5f) return CSeam;            // боковой шов
+            if (Mathf.Abs(x - th * 3.0f) < 0.35f && y < -0.6f && z > -2.5f && z < 4.8f) return CSeam;     // шов у большого пальца
+            if (y < -2.1f && z > 3.0f && z < 4.2f) return CPalm;                                         // складка пальцы|ладонь
+            return c;
+        }
+
+        static byte PaintBase(GloveShape sh, int th, float x, float y, float z)
         {
             switch (sh)
             {
@@ -302,15 +333,12 @@ namespace VoxGame
         static float Mitt(float x, float y, float z, int th, float k, float kx, float ky, float kz)
         {
             float X = x / (k * kx), Y = y / (k * ky), Z = z / (k * kz);
-            float d = VoxModel.Ell(X, Y, Z - 1.0f, 6.4f, 5.6f, 7.6f);
-            d = VoxModel.Smin(d, VoxModel.Ell(X, Y - 0.6f, Z - 5.4f, 6.2f, 4.9f, 4.0f), 2.5f);
-            d = VoxModel.Smin(d, VoxModel.Cap(X, Y, Z, th * 5.2f, -1.5f, -2.8f, th * 4.6f, -2.0f, 4.4f, 2.4f), 1.6f);
-            return d * k * Mathf.Min(kx, Mathf.Min(ky, kz));
+            return BoxerParts.Fist(X, Y, Z, th) * k * Mathf.Min(kx, Mathf.Min(ky, kz));
         }
 
         // Манжета от кисти (z = −4.5) назад до zEnd с плоским срезом; r0 у кисти, r1 у среза.
-        static float Cuff(float x, float y, float z, float zEnd, float r0, float r1) =>
-            Mathf.Max(VoxModel.Cap(x, y, z, 0, -0.4f, -4.5f, 0, -0.4f, zEnd, r0, r1), zEnd - z);
+        // Кант, складка и открытый конец — BoxerParts.CuffShape.
+        static float Cuff(float x, float y, float z, float zEnd, float r0, float r1) => BoxerParts.CuffShape(x, y, z, zEnd, r0, r1);
 
         // Броня: три изогнутые пластины поперёк тыльной стороны и щиток на костяшках (оболочка над основой).
         static readonly float[] PlateZ = { -3.4f, -0.1f, 3.2f };

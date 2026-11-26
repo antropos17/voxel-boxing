@@ -23,11 +23,23 @@ namespace VoxGame
         }
 
         // Модель по рамке в сантиметрах: mn..mx, шаг cell. Ячейка (i,j,k) имеет центр mn + (i+0.5, j+0.5, k+0.5)·cell.
-        public static VoxModel FromSdf(Vector3 mn, Vector3 mx, float cell, Sdf sdf, Paint paint)
+        // parallel — слои по z заполняются в пуле потоков (функции sdf и paint обязаны быть чистыми: без Unity API и общего
+        // изменяемого состояния); результат тот же, что последовательно. На WebGL — всегда последовательно.
+        // Время сборки (мс, накопительно): заполнение по функции расстояния и построение сеток — замеры ARMS-BODY.md.
+        public static double FillMs, MeshMs;
+        static readonly System.Diagnostics.Stopwatch _sw = new System.Diagnostics.Stopwatch();
+
+        public static VoxModel FromSdf(Vector3 mn, Vector3 mx, float cell, Sdf sdf, Paint paint, bool parallel = false)
         {
+            long t0 = _sw.ElapsedTicks; _sw.Start();
             var m = new VoxModel(Mathf.CeilToInt((mx.x - mn.x) / cell), Mathf.CeilToInt((mx.y - mn.y) / cell),
                                  Mathf.CeilToInt((mx.z - mn.z) / cell));
-            m.Fill(mn, cell, sdf, paint);
+#if UNITY_WEBGL && !UNITY_EDITOR
+            parallel = false;
+#endif
+            if (parallel) System.Threading.Tasks.Parallel.For(0, m.SZ, z => m.FillSlice(z, mn, cell, sdf, paint));
+            else m.Fill(mn, cell, sdf, paint);
+            FillMs += (_sw.ElapsedTicks - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             return m;
         }
 
@@ -35,8 +47,12 @@ namespace VoxGame
         // (функции расстояния здесь приближённые, поэтому шаг пропуска берётся с запасом).
         void Fill(Vector3 mn, float cell, Sdf sdf, Paint paint)
         {
+            for (int z = 0; z < SZ; z++) FillSlice(z, mn, cell, sdf, paint);
+        }
+
+        void FillSlice(int z, Vector3 mn, float cell, Sdf sdf, Paint paint)
+        {
             float inv = 0.55f / cell;
-            for (int z = 0; z < SZ; z++)
             for (int y = 0; y < SY; y++)
             {
                 float py = mn.y + (y + 0.5f) * cell, pz = mn.z + (z + 0.5f) * cell;
@@ -84,6 +100,7 @@ namespace VoxGame
         public Mesh BuildMesh(string name, Color32[] palette, Vector3 org, float cellM, float faceBlend = 0.3f,
                               float[] aoScale = null)
         {
+            long t0 = _sw.ElapsedTicks; _sw.Start();
             var vs = new List<Vector3>(8192);
             var ns = new List<Vector3>(8192);
             var cs = new List<Color32>(8192);
@@ -143,6 +160,7 @@ namespace VoxGame
             mesh.SetTriangles(ts, 0);
             mesh.RecalculateBounds();
             mesh.UploadMeshData(true);
+            MeshMs += (_sw.ElapsedTicks - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             return mesh;
         }
 
