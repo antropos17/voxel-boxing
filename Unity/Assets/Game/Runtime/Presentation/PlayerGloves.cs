@@ -123,6 +123,26 @@ namespace VoxGame
         const float SqK = 620f, SqC = 24f, SqMin = -0.18f, SqMax = 0.34f, SqH = 1f / 240f;
         static readonly float[] SqKick = { 5.5f, 9f, 13f };   // джеб, силовой, мега
         readonly float[] _sq = new float[2], _sqv = new float[2];
+        // Отдача перчатки после попадания (PHYSICS.md): пружина вдоль пути удара назад к плечу, тот же шаг SqH.
+        // Пик ~3 кадра, назад за ~8 кадров; время между ударами не меняется (перезарядка в FightDirector).
+        public static bool Recoil = true;
+        public const float RcK = 1200f, RcC = 55f, RcMax = 0.07f;
+        static readonly float[] RcKick = { 4.0f, 4.6f, 5.4f };   // м/с: джеб, силовой, мега
+        readonly float[] _rc = new float[2], _rcv = new float[2];
+        readonly Vector3[] _rcDir = new Vector3[2];
+
+        // Поза руки в отдаче (для обхода плашкой удара, FxDirector.ArmMask): та же рука, решённая с перчаткой, сдвинутой к
+        // плечу на 0, половину и всю наибольшую отдачу (g = 0, 1, 2), перчатка сплющена до предела (шире на 15 %).
+        // Предплечье при этом поворачивается вокруг локтя ближе к камере — простой сдвиг руки этого не покрывает.
+        // part: 0, 1 — перчатки, 2, 3 — предплечья. Мир.
+        public const int GhostN = 3;
+        readonly Matrix4x4[] _ghost = new Matrix4x4[GhostN * 4];
+        readonly bool[] _ghostOn = new bool[2];
+        public bool RecoilGhost(int g, int part, out Matrix4x4 world)
+        {
+            world = _ghost[g * 4 + part];
+            return _ghostOn[part & 1];
+        }
         readonly bool[] _landed = new bool[2];
         float _sqAcc;
         Vector3 _shP = ShoulderP;
@@ -352,7 +372,11 @@ namespace VoxGame
                     _ext[s] = Mathf.Min(1f, _ext[s] + dt / _outT[s]);
                     // касание: перчатка сплющивается и пружинит
                     if (FoeSpring.Enabled && _landed[s] && e0 < 1f && _ext[s] >= 1f)
-                        _sqv[s] += SqKick[_kind[s] == PunchType.Mega ? 2 : _kind[s] == PunchType.Jab ? 0 : 1];
+                    {
+                        int ki = _kind[s] == PunchType.Mega ? 2 : _kind[s] == PunchType.Jab ? 0 : 1;
+                        _sqv[s] += SqKick[ki];
+                        if (Recoil) _rcv[s] += RcKick[ki];
+                    }
                 }
                 else if (_ext[s] > 0f) _ext[s] = Mathf.Max(0f, _ext[s] - dt / ReturnT);
 
@@ -391,6 +415,9 @@ namespace VoxGame
                     }
                     if (FoeSpring.Enabled) bow *= 0.5f;   // плечо уже ведёт дугу: прибавка по дуге меньше
                     pos  = Vector3.Lerp(pos, _goal[s], e) + bow * arc;
+                    // отдача после попадания: назад по линии удара к плечу
+                    _rcDir[s] = (RealShoulder(s, 1f) - _goal[s]).normalized;
+                    if (_rc[s] != 0f) pos += _rcDir[s] * _rc[s];
                     kn   = Vector3.Lerp(kn, pk, e);
                     back = Vector3.Lerp(back, pb, e);
                     au   = Mathf.Lerp(au, sg * pu, e);
@@ -417,6 +444,22 @@ namespace VoxGame
                 float reachW = Mathf.Max(e, lockW);
                 Vector3 kp = _kind[s] == PunchType.Hook ? PoleHook : _kind[s] == PunchType.Upper ? PoleUpper : PoleJab;
                 Place(s, pos, kn, back, au, az, lockW, Mathf.Lerp(RestFollow, ForeFollow, reachW), reachW, e, kp, _kind[s]);
+                _ghostOn[s] = Recoil && FoeSpring.Enabled && e > 0f && _landed[s] && lockW <= 0f;
+                if (_ghostOn[s])
+                {
+                    var tr = new[] { _glove[s], _fore[s], _upper[s] };
+                    var lp = new Vector3[3]; var lr = new Quaternion[3]; var ls = new Vector3[3];
+                    for (int i = 0; i < 3; i++) { lp[i] = tr[i].localPosition; lr[i] = tr[i].localRotation; ls[i] = tr[i].localScale; }
+                    Vector3 p0 = pos - _rcDir[s] * _rc[s];
+                    float gsq = Scale * _gs;
+                    for (int g = 0; g < GhostN; g++)
+                    {
+                        Place(s, p0 + _rcDir[s] * (RcMax * g * 0.5f), kn, back, au, az, lockW, Mathf.Lerp(RestFollow, ForeFollow, reachW), reachW, e, kp, _kind[s]);
+                        _glove[s].localScale = new Vector3(gsq * (1f + SqMax * 0.45f), gsq * (1f + SqMax * 0.45f), gsq * (1f - SqMax));
+                        _ghost[g * 4 + s] = _glove[s].localToWorldMatrix; _ghost[g * 4 + 2 + s] = _fore[s].localToWorldMatrix;
+                    }
+                    for (int i = 0; i < 3; i++) { tr[i].localPosition = lp[i]; tr[i].localRotation = lr[i]; tr[i].localScale = ls[i]; }
+                }
                 if (FoeSpring.Enabled) SquashApply(s);
             }
         }
@@ -567,6 +610,8 @@ namespace VoxGame
                 {
                     _sqv[s] += (-SqK * _sq[s] - SqC * _sqv[s]) * SqH;
                     _sq[s] = Mathf.Clamp(_sq[s] + _sqv[s] * SqH, SqMin, SqMax);
+                    _rcv[s] += (-RcK * _rc[s] - RcC * _rcv[s]) * SqH;
+                    _rc[s] = Mathf.Clamp(_rc[s] + _rcv[s] * SqH, -RcMax * 0.3f, RcMax);
                 }
             }
         }
