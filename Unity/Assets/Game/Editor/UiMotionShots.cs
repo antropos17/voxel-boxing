@@ -93,13 +93,14 @@ namespace VoxGame.Editor
         public static void LayoutAudit()
         {
             _log = new StringBuilder();
-            LayoutProblems = 0;
+            LayoutProblems = 0; WorstContrast = 99f; WorstContrastAt = "";
             try
             {
                 Tour(name => { foreach (var s in Sizes) Audit(name, s.x, s.y); });
             }
             finally { Close(); }
             _log.AppendLine("UI_LAYOUT problems=" + LayoutProblems);
+            _log.AppendLine("UI_CONTRAST worst=" + WorstContrast.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " at " + WorstContrastAt);
             LastLog = _log.ToString().TrimEnd();
         }
 
@@ -157,6 +158,12 @@ namespace VoxGame.Editor
                 var vis = new Rect(x0, y0, pw, ph);
                 if (t.GetComponentInParent<RectMask2D>() is RectMask2D tm && !vis.Overlaps(PxRect(root, tm.rectTransform, c, w, h))) continue;
                 if (!Inside(vis, safe, 2f)) sb.Append(" unsafeT[" + Short(t.text) + "]");
+                float cr = Contrast(t);
+                if (cr > 0f)
+                {
+                    if (cr < WorstContrast) { WorstContrast = cr; WorstContrastAt = screen + " «" + Short(t.text) + "»"; }
+                    if (cr < 4.5f) sb.Append(" lowC[" + Short(t.text) + " " + cr.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + "]");
+                }
             }
             if (screen == "fight" && _app.Fight != null) AuditHud(sb, root, c, w, h);
             string issues = sb.ToString();
@@ -165,6 +172,37 @@ namespace VoxGame.Editor
             _headInfo = "";
             ui.RestoreAfterShot();
         }
+
+        // Контраст надписи на кнопке или панели (WCAG): подложки-предки складываются по альфе поверх тёмного фона UIKit.BgDark.
+        // Считается, только если ближайшая подложка плотная (альфа ≥ 0,5); надписи прямо над сценой боя — нет (у них обводка).
+        public static float WorstContrast = 99f;
+        public static string WorstContrastAt = "";
+        static float Contrast(Text t)
+        {
+            var chain = new System.Collections.Generic.List<Image>();
+            Image near = null;
+            for (var p = t.transform.parent; p != null; p = p.parent)
+            {
+                var im = p.GetComponent<Image>();
+                if (im == null || !im.enabled || im.color.a <= 0.01f) continue;
+                if (near == null) near = im;
+                chain.Add(im);
+            }
+            if (near == null || near.color.a < 0.5f) return -1f;
+            Color bg = UIKit.BgDark;
+            for (int i = chain.Count - 1; i >= 0; i--)
+            {
+                var c = chain[i].color;
+                if (chain[i].rectTransform.rect.width > 3000f) continue;   // фон экрана шире safe-area учтён как BgDark
+                bg = Color.Lerp(bg, new Color(c.r, c.g, c.b, 1f), c.a);
+            }
+            var tc = Color.Lerp(bg, new Color(t.color.r, t.color.g, t.color.b, 1f), t.color.a);
+            float l1 = Lum(tc), l2 = Lum(bg);
+            return (Mathf.Max(l1, l2) + 0.05f) / (Mathf.Min(l1, l2) + 0.05f);
+        }
+
+        static float Lum(Color c) => 0.2126f * Lin(c.r) + 0.7152f * Lin(c.g) + 0.0722f * Lin(c.b);
+        static float Lin(float v) => v <= 0.03928f ? v / 12.92f : Mathf.Pow((v + 0.055f) / 1.055f, 2.4f);
 
         // Шкалы боя: не на голове соперника и выше полосы плашки удара (FxPops.PopTop*).
         static void AuditHud(StringBuilder sb, RectTransform root, Vector3[] c, int w, int h)

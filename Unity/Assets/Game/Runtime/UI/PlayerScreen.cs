@@ -35,7 +35,7 @@ namespace VoxGame {
 
             _header = UIKit.Label(transform, "Header", UIKit.FontXl, UIKit.Accent, semiBold: true, TextAnchor.MiddleLeft);
             _header.text = "БОЕЦ";
-            _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
+            _line = MenuKit.Rule(transform);
 
             _name = UIKit.Label(transform, "Name", UIKit.FontXl, UIKit.TextMain, semiBold: true, TextAnchor.MiddleLeft);
             _level = UIKit.Label(transform, "Level", UIKit.FontMd, UIKit.Accent, semiBold: true, TextAnchor.MiddleLeft);

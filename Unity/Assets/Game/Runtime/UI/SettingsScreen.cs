@@ -70,7 +70,7 @@ namespace VoxGame {
 
             _header = UIKit.Label(transform, "Header", UIKit.FontXl, UIKit.Accent, semiBold: true, TextAnchor.MiddleLeft);
             _header.text = "НАСТРОЙКИ";
-            _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
+            _line = MenuKit.Rule(transform);
 
             _soundRow = MakeToggleRow("Sound", "Звук", PressSound);
             _vol[(int)VolumeKind.Master] = MakeStepRow("Master", "Громкость", VolumeKind.Master);
@@ -100,9 +100,7 @@ namespace VoxGame {
             var card = UIKit.Panel(_confirm, "Card", new Color32(30, 23, 36, 255));
             UIKit.SetAnchors(card, 0f, 0f, 1f, 1f);
             card.offsetMin = card.offsetMax = Vector2.zero;
-            var cardFrame = card.gameObject.AddComponent<Outline>();
-            cardFrame.effectColor = UIKit.Accent;
-            cardFrame.effectDistance = new Vector2(2f, -2f);
+            UIKit.Frame(card, UIKit.Accent, 2f);
             _confirmText = UIKit.Label(_confirm, "Text", UIKit.FontMd, UIKit.TextMain, semiBold: true);
             _confirmText.text = "Сбросить весь прогресс?\nМонеты, перчатки, улучшения и лестница пропадут навсегда.";
             _yesBtn = UIKit.Btn(_confirm, "BtnYes", "ДА, СБРОСИТЬ", UIKit.FontMd, UIKit.HpRed, UIKit.TextMain);

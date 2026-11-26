@@ -33,9 +33,7 @@ namespace VoxGame {
 
             // Полоса под именем — акцент как у заголовков лестницы
             _band = UIKit.Panel(transform, "Band", UIKit.BgPanel);
-            var frame = _band.gameObject.AddComponent<Outline>();
-            frame.effectColor = new Color(UIKit.Accent.r, UIKit.Accent.g, UIKit.Accent.b, 0.7f);
-            frame.effectDistance = new Vector2(2f, -2f);
+            _band.GetComponent<UIBorder>().Color = new Color(UIKit.Accent.r, UIKit.Accent.g, UIKit.Accent.b, 0.7f);
             _name = UIKit.Label(_band, "Name", 60, UIKit.Accent, semiBold: true);
             var sh = _name.gameObject.AddComponent<Shadow>();
             sh.effectColor = new Color(0f, 0f, 0f, 0.8f);

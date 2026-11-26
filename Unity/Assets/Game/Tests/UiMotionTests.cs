@@ -210,6 +210,45 @@ namespace VoxGame.Tests
             Assert.AreEqual(Vector2.zero, ((RectTransform)plr).anchoredPosition);
         }
 
+        // Трещины: на 75, 50 и 25 % — по одной; при восстановлении уходят.
+        [Test]
+        public void Cracks_AppearAtThresholds()
+        {
+            var hud = NewHud(out var d);
+            float[] hp = { 0.8f, 0.74f, 0.49f, 0.24f };
+            int[] want = { 0, 1, 2, 3 };
+            for (int i = 0; i < hp.Length; i++)
+            {
+                d.foeHp = d.foeHpMax * hp[i]; Run(hud, ref d, 0.3f);
+                Assert.AreEqual(want[i], hud.CracksShown(true), "здоровье " + hp[i]);
+            }
+            Assert.AreEqual(0, hud.CracksShown(false), "у игрока целая");
+            d.foeHp = d.foeHpMax; Run(hud, ref d, 0.1f);
+            Assert.AreEqual(0, hud.CracksShown(true), "восстановилась — трещин нет");
+        }
+
+        // Нокаут: шкала разлетается осколками (не больше MaxShards), они гаснут; «заново» — шкала целая.
+        [Test]
+        public void Shatter_OnKnockout_CappedAndReset()
+        {
+            var hud = NewHud(out var d);
+            d.foeHp = 0f; d.foePhase = FightPhase.KO;
+            hud.Refresh(d); hud.Tick(DT, DT);
+            Assert.IsTrue(hud.Shattered(true));
+            Assert.Greater(hud.LiveShards, 0);
+            Assert.LessOrEqual(hud.LiveShards, FightHUD.MaxShards);
+            Run(hud, ref d, FightHUD.ShardLife * 1.3f + 0.1f);
+            Assert.AreEqual(0, hud.LiveShards, "осколки догорели");
+            hud.ResetTransient();
+            Assert.IsFalse(hud.Shattered(true));
+            Assert.IsTrue(FindDeep(hud.transform, "FoeHp").gameObject.activeSelf, "шкала снова целая");
+            // «меньше движения»: без разлёта
+            UIMotion.Reduced = true;
+            d.foePhase = FightPhase.Idle; d.foeHp = d.foeHpMax; Run(hud, ref d, 1f);
+            d.foeHp = 0f; d.foePhase = FightPhase.KO; hud.Refresh(d); hud.Tick(DT, DT);
+            Assert.AreEqual(0, hud.LiveShards);
+        }
+
         static Transform FindDeep(Transform t, string name)
         {
             if (t.name == name) return t;

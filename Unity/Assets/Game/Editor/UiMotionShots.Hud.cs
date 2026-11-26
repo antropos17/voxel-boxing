@@ -91,6 +91,50 @@ namespace VoxGame.Editor
             }
         }
 
+        // Трещины на 75/50/25 % и разлёт шкалы соперника на нокауте (живой бой, движение включено).
+        public static void CrackSeries()
+        {
+            _log = new System.Text.StringBuilder();
+            _dir = Dir();
+            UIMotion.ForceAnimate = true;
+            try
+            {
+                ToFight();
+                var hud = _app.Fight.Hud; var st = _app.Fight.State;
+                Ticks(50);
+                float[] at = { 0.74f, 0.49f, 0.24f };
+                string[] nm = { "hud-20-crack-75", "hud-21-crack-50", "hud-22-crack-25" };
+                for (int i = 0; i < 3; i++)
+                {
+                    st.hp = st.hpMax * at[i]; Ticks(3);
+                    S(nm[i]); if (i == 2) S(nm[i], true);
+                    _log.AppendLine("UI_HUD crack hp=" + F(at[i]) + " cracks=" + hud.CracksShown(true));
+                    Ticks(20);
+                }
+                // добить: здоровье на донышке, сильный удар — нокаут
+                int n = 0;
+                for (int i = 0; i < 12 && !hud.Shattered(true); i++)
+                {
+                    TicksUntil(() => st.phase == FightPhase.Idle || st.phase == FightPhase.Guard || st.phase == FightPhase.Open || st.phase == FightPhase.Stagger || st.phase == FightPhase.Down, 200);
+                    st.hp = Mathf.Min(st.hp, 2f);
+                    Hit(PunchType.Hook, -1, 1.6f);
+                    n = TicksUntil(() => hud.Shattered(true), 60);
+                }
+                _log.AppendLine("UI_HUD ko shattered=" + hud.Shattered(true) + " phase=" + st.phase + " shards=" + hud.LiveShards);
+                _app.Tick(DT); S("hud-23-shatter-a");
+                Ticks(5); S("hud-24-shatter-b"); S("hud-24-shatter-b", true);
+                Ticks(12); S("hud-25-shatter-c");
+                Ticks(30); S("hud-26-shatter-d");
+                _log.AppendLine("UI_HUD ko +0.8s shards=" + hud.LiveShards);
+            }
+            finally
+            {
+                UIMotion.ForceAnimate = false;
+                Close();
+                LastLog = _log.ToString().TrimEnd();
+            }
+        }
+
         static void S(string name, bool land = false)
         {
             if (land) Snap(2400, 1080, name + "-l"); else Snap(1080, 2400, name + "-p");
@@ -117,6 +161,7 @@ namespace VoxGame.Editor
                 root.ShowScreen(ScreenId.Fight);
                 _log.AppendLine(Measure("new", frames, d => hud.Refresh(d), () => hud.Tick(DT, DT)));
                 _log.AppendLine("UI_HUD_PERF new floaters=" + hud.LiveFloaters + " sparks=" + hud.LiveSparks);
+                _log.AppendLine(MeasureKo(hud));
                 if (ExtraPerf != null) _log.AppendLine(ExtraPerf(root, frames));
             }
             finally
@@ -153,6 +198,39 @@ namespace VoxGame.Editor
             return "UI_HUD_PERF " + tag + " frames=" + frames + " avgMs=" + (total / frames).ToString("0.0000") + " medianMs=" + all[frames / 2].ToString("0.0000")
                    + " p95Ms=" + all[frames * 95 / 100].ToString("0.0000") + " worstMs=" + worst.ToString("0.000")
                    + " allocBytes=" + alloc + " (время включает перестройку холста Canvas.ForceUpdateCanvases)";
+        }
+
+        // Нокаут: шкала с тремя трещинами разлетается. Первый нокаут — прогрев (путь кода, пулы), затем «заново»;
+        // замер — второй нокаут: 90 кадров с кадра разлёта, пик кадра и выделения.
+        static string MeasureKo(FightHUD hud)
+        {
+            var d = new HudData { playerHpMax = 100f, foeHpMax = 200f, foeName = "Кирпич", playerName = "Игрок", staminaHitCost = 12f,
+                                  playerHp = 60f, foeHp = 30f, playerStamina = 50f };
+            var sw = new Stopwatch();
+            double total = 0, worst = 0, first = 0; long alloc = 0; int cracks = 0, shards = 0;
+            for (int pass = 0; pass < 2; pass++)
+            {
+                hud.ResetTransient(); d.foeHp = 30f; d.foePhase = FightPhase.Idle;
+                for (int i = 0; i < 120; i++) { hud.Refresh(d); hud.Tick(DT, DT); UIMotion.Tick(DT); }
+                cracks = hud.CracksShown(true);
+                d.foeHp = 0f; d.foePhase = FightPhase.KO;
+                for (int i = 0; i < 90; i++)
+                {
+                    long a0 = GC.GetAllocatedBytesForCurrentThread();
+                    sw.Restart();
+                    hud.Refresh(d); hud.Tick(DT, DT); UIMotion.Tick(DT);
+                    Canvas.ForceUpdateCanvases();
+                    sw.Stop();
+                    long da = GC.GetAllocatedBytesForCurrentThread() - a0;
+                    if (pass == 0) continue;
+                    alloc += da;
+                    double ms = sw.Elapsed.TotalMilliseconds;
+                    if (i == 0) { first = ms; shards = hud.LiveShards; }
+                    total += ms; if (ms > worst) worst = ms;
+                }
+            }
+            return "UI_HUD_PERF ko cracks=" + cracks + " shards=" + shards + " frames=90 avgMs=" + (total / 90).ToString("0.0000")
+                   + " shatterFrameMs=" + first.ToString("0.000") + " peakMs=" + worst.ToString("0.000") + " allocBytes=" + alloc;
         }
 
         // Кадр HUD с синтетическими данными: урон каждые 20 кадров, выносливость тратится и копится, мега растёт.

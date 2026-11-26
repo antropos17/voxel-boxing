@@ -29,9 +29,7 @@ namespace VoxGame {
             bg.GetComponent<Image>().raycastTarget = true;
 
             _panel = UIKit.Panel(transform, "Panel", UIKit.BgPanel);
-            var frame = _panel.gameObject.AddComponent<Outline>();
-            frame.effectColor = new Color(UIKit.Accent.r, UIKit.Accent.g, UIKit.Accent.b, 0.6f);
-            frame.effectDistance = new Vector2(2f, -2f);
+            _panel.GetComponent<UIBorder>().Color = new Color(UIKit.Accent.r, UIKit.Accent.g, UIKit.Accent.b, 0.6f);
 
             _title = UIKit.Label(_panel, "Title", UIKit.FontXl + 10, UIKit.Accent, semiBold: true);
             _title.text = "ПАУЗА";

@@ -11,7 +11,7 @@ using UnityEngine.UI;
 
 namespace VoxGame {
 
-    public class FightHUD : MonoBehaviour, ILayoutHandler {
+    public partial class FightHUD : MonoBehaviour, ILayoutHandler {
 
         // ------------------------------------------------------------------ Пределы и тайминги
 
@@ -55,6 +55,7 @@ namespace VoxGame {
             public float value = 1f, shown = -1f, trailV = 1f, trailShown = -1f, hold, flashT = 9f, sinceHit = 9f;
             public float joltT = 9f, joltAmp, joltSign = 1f;
             public int numCache = -1;
+            public RectTransform[] cracks; public float[] crackT; public bool shattered;   // FightHUD.Cracks.cs
         }
 
         HpBar _plr, _foe;
@@ -218,7 +219,14 @@ namespace VoxGame {
             _dodgeL.onClick.AddListener(() => OnDodgeLeft?.Invoke());
             _dodgeR = ControlBtn("BtnDgR", "►", 44, UIKit.TextMain);
             _dodgeR.onClick.AddListener(() => OnDodgeRight?.Invoke());
-            _pauseBtn = UIKit.Btn(transform, "BtnPause", "II", UIKit.FontSm, new Color32(22, 24, 44, 150), UIKit.TextMain);
+            // пауза — своя плашка: чернила, рамка кости, знак из двух брусков (видна на любом фоне ринга)
+            _pauseBtn = UIKit.Btn(transform, "BtnPause", "", UIKit.FontSm, new Color(0.03f, 0.02f, 0.05f, 0.86f), UIKit.TextMain);
+            _pauseBtn.GetComponent<UIBorder>().Color = new Color(Bone.r, Bone.g, Bone.b, 0.8f);
+            for (int i = 0; i < 2; i++) {
+                var bar = UIKit.Plain(_pauseBtn.transform, "Bar" + i, Bone);
+                UIKit.SetAnchors(bar, 0.5f, 0.28f, 0.5f, 0.72f);
+                bar.sizeDelta = new Vector2(9f, 0f); bar.anchoredPosition = new Vector2(i == 0 ? -9f : 9f, 0f);
+            }
             _pauseBtn.onClick.AddListener(() => OnPause?.Invoke());
 
             // Слой искр и цифр урона: поверх шкал, лучи не ловит
@@ -232,6 +240,7 @@ namespace VoxGame {
                 s.gameObject.SetActive(false);
                 _sp[i].rt = s; _sp[i].img = s.GetComponent<Image>();
             }
+            BuildShards();
             for (int i = 0; i < MaxFloaters; i++) {
                 var t = UIKit.Label(_fx, "F" + i, 30, Bone, semiBold: true);
                 var o = t.GetComponent<Outline>();
@@ -289,14 +298,13 @@ namespace VoxGame {
             b.flash = UIKit.Panel(well, "Flash", new Color(1f, 1f, 1f, 0f));
             b.trailImg = b.trail.GetComponent<Image>(); b.fillImg = b.fill.GetComponent<Image>(); b.flashImg = b.flash.GetComponent<Image>();
             SetSpan(b.fill, 1f, right); SetSpan(b.trail, 1f, right); SetSpan(b.flash, 1f, right);
+            BuildCracks(b);
             return b;
         }
 
         Button ControlBtn(string name, string caption, int fontSize, Color textColor) {
             var b = UIKit.Btn(transform, name, caption, fontSize, new Color32(16, 14, 22, 235), textColor);
-            var frame = b.gameObject.AddComponent<Outline>();          // рамка по краю подложки
-            frame.effectColor    = new Color(1f, 1f, 1f, 0.42f);
-            frame.effectDistance = new Vector2(2f, -2f);
+            b.GetComponent<UIBorder>().Color = new Color(1f, 1f, 1f, 0.42f);   // светлая рамка по краю подложки
             var lbl = b.GetComponentInChildren<Text>();
             var o = lbl.GetComponent<Outline>();
             o.effectColor    = new Color(0f, 0f, 0f, 0.9f);
@@ -358,6 +366,7 @@ namespace VoxGame {
             var hg = GetComponent<CanvasGroup>();
             if (_needIntro && isActiveAndEnabled && (hg == null || hg.blocksRaycasts)) {
                 _needIntro = false; _outro = false;
+                ResetCracks();
                 _foe.value = _foe.trailV = foeK; _plr.value = _plr.trailV = plrK;
                 _cacheKd = d.foeKnockdowns; ApplyKd(d.foeKnockdowns);
                 _cacheMegaRdy = d.megaReady && _megaOn; _megaReadyLbl.gameObject.SetActive(_cacheMegaRdy);
@@ -437,7 +446,11 @@ namespace VoxGame {
 
             // Конец боя: нокаут или игрок на полу — шкалы уезжают
             bool over = d.foePhase == FightPhase.KO || d.playerHp <= 0f;
-            if (over && !_outro) { _outro = true; _outroT = -OutroDelay; }
+            if (over && !_outro) {
+                _outro = true; _outroT = -OutroDelay;
+                if (d.foePhase == FightPhase.KO) Shatter(_foe);
+                if (d.playerHp <= 0f) Shatter(_plr);
+            }
         }
 
         // Значение шкалы и реакция на урон: след, вспышка, толчок по силе удара, цифра.
@@ -488,6 +501,7 @@ namespace VoxGame {
 
             StepBar(_plr, udt, calm, introK);
             StepBar(_foe, udt, calm, fk);
+            StepCracks(_plr, udt); StepCracks(_foe, udt);
 
             // мега-шкала: накал (цвет к белому золоту) и угли, растущие с зарядом
             float megaV = _mega * introK;
@@ -564,6 +578,7 @@ namespace VoxGame {
 
             StepFloaters(udt);
             StepSparks(udt);
+            StepShards(udt);
 
             // счёт рефери: цифра падает крупной и гаснет; последние счёты — алые
             if (_countTimer > 0f) {
@@ -825,6 +840,7 @@ namespace VoxGame {
             for (int i = 0; i < MaxSparks; i++) { _sp[i].alive = false; _sp[i].rt.gameObject.SetActive(false); }
             _plr.joltT = _foe.joltT = 9f; _plr.hold = _foe.hold = 0f;
             _needIntro = true; _outro = false;
+            ResetCracks();
         }
 
         // Показать крупный счёт рефери на CountLife с (для нокдаун-отсчёта).

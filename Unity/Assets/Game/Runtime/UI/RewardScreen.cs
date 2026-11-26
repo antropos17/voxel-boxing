@@ -14,7 +14,7 @@ namespace VoxGame {
         public Action OnNext, OnShop, OnRematch, OnMenu;
 
         Text _header, _total, _xp, _levelUp, _extra, _next;
-        RectTransform _line, _xpBg, _xpFill, _linesBox;
+        RectTransform _line, _xpBg, _xpFill, _linesBox, _totalPlate;
         readonly Text[] _lineL = new Text[MaxLines], _lineR = new Text[MaxLines];
         Button _mainBtn, _shopBtn, _menuBtn;
         bool _won = true, _land;
@@ -38,8 +38,12 @@ namespace VoxGame {
             MenuKit.Backdrop(transform, UIKit.BgDark);
 
             _header = UIKit.Label(transform, "Header", UIKit.FontXl, UIKit.Accent, semiBold: true, TextAnchor.MiddleLeft);
-            _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
-            _total = UIKit.Label(transform, "Total", 58, UIKit.MegaGold, semiBold: true);
+            _line = MenuKit.Rule(transform);
+            // сумма — главное число экрана: печать на чернильной плашке в золотой рамке
+            _totalPlate = UIKit.Plain(transform, "TotalPlate", UIKit.Ink);
+            UIKit.Frame(_totalPlate, UIKit.Accent, 3f);
+            UIKit.Strip(_totalPlate, "Hi", new Color(1f, 1f, 1f, 0.08f), 0f, 1f, 8f);
+            _total = UIKit.Label(transform, "Total", 64, UIKit.Accent, semiBold: true);
             var sh = _total.gameObject.AddComponent<Shadow>();
             sh.effectColor = new Color(0f, 0f, 0f, 0.8f);
             sh.effectDistance = new Vector2(3f, -3f);
@@ -192,6 +196,9 @@ namespace VoxGame {
                 MenuKit.Place(shop, 0.05f, 0.012f, 0.49f, 0.128f);
                 MenuKit.Place(menu, 0.51f, 0.012f, 0.95f, 0.128f);
             }
+            var tr = _total.rectTransform;
+            _totalPlate.anchorMin = tr.anchorMin; _totalPlate.anchorMax = tr.anchorMax;
+            _totalPlate.offsetMin = tr.offsetMin; _totalPlate.offsetMax = tr.offsetMax;
         }
 
         // Пульс надписи нового уровня.

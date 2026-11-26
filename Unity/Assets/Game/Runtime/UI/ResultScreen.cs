@@ -10,9 +10,11 @@ namespace VoxGame {
 
         // ------------------------------------------------------------------ Элементы
 
+        // Иерархия: исход боя (печать на плашке) → цифры (три плитки) → награда (золотая полоса) → действие.
         Text _headerLbl;
-        RectTransform _line;
+        RectTransform _line, _plate, _rewardBar;
         Text _timeLbl, _kdLbl, _accLbl, _rewardLbl;
+        readonly RectTransform[] _tiles = new RectTransform[3];
 
         Button _nextBtn, _rematchBtn, _menuBtn;
 
@@ -36,28 +38,32 @@ namespace VoxGame {
             UIKit.SetAnchors(selfRt, 0f, 0f, 1f, 1f);
             selfRt.offsetMin = selfRt.offsetMax = Vector2.zero;
 
-            // Тёмный фон-панель
-            var bg = UIKit.Panel(transform, "Bg", UIKit.BgDark);
-            UIKit.SetAnchors(bg, 0f, 0f, 1f, 1f);
-            // фон шире safe-area: закрывает экран до краёв, под вырезом и полосой жестов
-            bg.offsetMin = new Vector2(-400f, -400f);
-            bg.offsetMax = new Vector2(400f, 400f);
-            bg.gameObject.AddComponent<NoCascade>();
+            // Тёмный фон с фактурой, шире safe-area
+            MenuKit.Backdrop(transform, UIKit.BgDark);
 
             // Декоративная горизонтальная линия под заголовком
-            _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
+            _line = MenuKit.Rule(transform);
 
-            // Заголовок «ПОБЕДА!» / «ПОРАЖЕНИЕ»
-            _headerLbl = UIKit.Label(transform, "Header", UIKit.FontLg + 20,
+            // Заголовок «ПОБЕДА!» / «ПОРАЖЕНИЕ» — печать на плашке, чуть наискось
+            _plate = UIKit.Plain(transform, "Plate", UIKit.Ink);
+            UIKit.Frame(_plate, UIKit.Accent, 4f);
+            UIKit.Strip(_plate, "Hi", new Color(1f, 1f, 1f, 0.10f), 0f, 1f, 8f);
+            _plate.localRotation = Quaternion.Euler(0f, 0f, 2.5f);
+            _headerLbl = UIKit.Label(_plate, "Header", UIKit.FontLg + 34,
                                      UIKit.Accent, semiBold: true);
-            UIKit.SetAnchors(_headerLbl.rectTransform, 0.05f, 0.71f, 0.95f, 0.92f);
+            MenuKit.Place(_headerLbl.rectTransform, 0f, 0f, 1f, 1f);
             _headerLbl.text = "ПОБЕДА!";
 
-            // Строки статистики — равномерно между 0.36 и 0.69
-            _timeLbl   = StatLine("StatTime",   "Время: —",       0.605f, 0.675f);
-            _kdLbl     = StatLine("StatKD",     "Нокдауны: 0",    0.525f, 0.600f);
-            _accLbl    = StatLine("StatAcc",    "Точность: 0%",   0.445f, 0.520f);
-            _rewardLbl = StatLine("StatRew",    "Награда: 0",     0.365f, 0.440f);
+            // Цифры боя — плитки: крупное значение, подпись под ним
+            _timeLbl = Tile(0, "ВРЕМЯ", "—");
+            _kdLbl   = Tile(1, "НОКДАУНЫ", "0");
+            _accLbl  = Tile(2, "ТОЧНОСТЬ", "0%");
+            // награда — золотая полоса
+            _rewardBar = UIKit.Plain(transform, "RewardBar", new Color(UIKit.Accent.r, UIKit.Accent.g, UIKit.Accent.b, 0.16f));
+            UIKit.Frame(_rewardBar, new Color(UIKit.Accent.r, UIKit.Accent.g, UIKit.Accent.b, 0.6f), 2f);
+            _rewardLbl = UIKit.Label(_rewardBar, "StatRew", UIKit.FontMd, UIKit.Accent, semiBold: true);
+            MenuKit.Place(_rewardLbl.rectTransform, 0.03f, 0f, 0.97f, 1f);
+            _rewardLbl.text = "Награда: 0";
 
             // --- Кнопки ---
 
@@ -86,12 +92,16 @@ namespace VoxGame {
             OnLayout(false);
         }
 
-        Text StatLine(string name, string defaultText, float yMin, float yMax) {
-            var lbl = UIKit.Label(transform, name, UIKit.FontMd, UIKit.TextMain,
-                                  semiBold: false, TextAnchor.MiddleCenter);
-            UIKit.SetAnchors(lbl.rectTransform, 0.05f, yMin, 0.95f, yMax);
-            lbl.text = defaultText;
-            return lbl;
+        Text Tile(int i, string caption, string value) {
+            var t = UIKit.Panel(transform, "Tile" + i, UIKit.BgPanel);
+            _tiles[i] = t;
+            var v = UIKit.Label(t, "Value", 60, UIKit.TextMain, semiBold: true);
+            MenuKit.Place(v.rectTransform, 0f, 0.34f, 1f, 0.92f);
+            v.text = value;
+            var c = UIKit.Label(t, "Cap", UIKit.FontSm, UIKit.TextSub, semiBold: false);
+            MenuKit.Place(c.rectTransform, 0f, 0.06f, 1f, 0.36f);
+            c.text = caption;
+            return v;
         }
 
         // ------------------------------------------------------------------ Показ результата
@@ -103,16 +113,19 @@ namespace VoxGame {
         // reward    — монеты
         public void Show(bool victory, float time, int knockdowns, float accuracy, int reward) {
             _headerLbl.text  = victory ? "ПОБЕДА!" : "ПОРАЖЕНИЕ";
-            _headerLbl.color = victory ? UIKit.Accent : UIKit.HpRed;
+            // победа — золото на чернилах в золотой рамке; поражение — кость на крови
+            _headerLbl.color = victory ? UIKit.Accent : UIKit.TextMain;
+            _plate.GetComponent<Image>().color = victory ? UIKit.Ink : UIKit.Blood;
+            _plate.GetComponent<UIBorder>().Color = victory ? UIKit.Accent : UIKit.Ink;
 
             int tMin = (int)(time / 60f);
             int tSec = (int)(time % 60f);
-            _timeLbl.text   = "Время: " + tMin + ":" + (tSec < 10 ? "0" : "") + tSec;
+            _timeLbl.text   = tMin + ":" + (tSec < 10 ? "0" : "") + tSec;
             // цифры итогов набегают от нуля (UIMotion.Count; без анимации — сразу конечная строка)
-            UIMotion.Count(_kdLbl, 0, knockdowns, "Нокдауны: ", "", UIMotion.CountUp, 0.10f);
-            UIMotion.Count(_accLbl, 0, Mathf.RoundToInt(accuracy * 100f), "Точность: ", "%", UIMotion.CountUp, 0.16f);
-            UIMotion.Count(_rewardLbl, 0, reward, "Награда: ", " монет", UIMotion.CountUp, 0.22f);
-            UIMotion.Stamp(_headerLbl.rectTransform, 0.04f);
+            UIMotion.Count(_kdLbl, 0, knockdowns, "", "", UIMotion.CountUp, 0.10f);
+            UIMotion.Count(_accLbl, 0, Mathf.RoundToInt(accuracy * 100f), "", "%", UIMotion.CountUp, 0.16f);
+            UIMotion.Count(_rewardLbl, 0, reward, "Награда: ", " " + MenuKit.Plural(reward, "монета", "монеты", "монет"), UIMotion.CountUp, 0.22f);
+            UIMotion.Stamp(_plate, 0.04f);
 
             // Кнопка «ДАЛЕЕ» доступна только при победе
             _nextBtn.gameObject.SetActive(victory);
@@ -124,8 +137,7 @@ namespace VoxGame {
             rl.color = victory ? UIKit.TextMain : UIKit.BgDark;
             rl.fontSize = victory ? UIKit.FontMd : UIKit.FontLg;
             rl.GetComponent<Outline>().enabled = victory;
-            // рамка обычной кнопки на оранжевой главной не нужна
-            foreach (var o in _rematchBtn.GetComponents<Outline>()) o.enabled = victory;
+            MenuKit.SetSecondaryLook(_rematchBtn, victory);
         }
 
         // Строка награды по начислению GameFlow (утешительный приз и опыт).
@@ -145,22 +157,22 @@ namespace VoxGame {
         public void OnLayout(bool landscape) {
             if (landscape) {
                 // Ландшафт: заголовок сверху, статистика слева, кнопки справа (каждая не ниже ~96 px)
-                Place(_headerLbl.rectTransform, 0.05f, 0.745f, 0.95f, 0.965f);
-                Place(_line,                    0.05f, 0.725f, 0.95f, 0.735f);
-                Place(_timeLbl.rectTransform,   0.05f, 0.560f, 0.52f, 0.690f);
-                Place(_kdLbl.rectTransform,     0.05f, 0.420f, 0.52f, 0.550f);
-                Place(_accLbl.rectTransform,    0.05f, 0.280f, 0.52f, 0.410f);
-                Place(_rewardLbl.rectTransform, 0.05f, 0.140f, 0.52f, 0.270f);
+                Place(_plate,                   0.10f, 0.760f, 0.90f, 0.960f);
+                Place(_line,                    0.05f, 0.715f, 0.95f, 0.722f);
+                Place(_tiles[0],                0.03f, 0.330f, 0.18f, 0.660f);
+                Place(_tiles[1],                0.195f, 0.330f, 0.345f, 0.660f);
+                Place(_tiles[2],                0.36f, 0.330f, 0.51f, 0.660f);
+                Place(_rewardBar,               0.03f, 0.120f, 0.51f, 0.280f);
                 Place(_nextBtn.GetComponent<RectTransform>(),    0.56f, 0.490f, 0.94f, 0.690f);
                 Place(_rematchBtn.GetComponent<RectTransform>(), 0.56f, 0.275f, 0.94f, 0.465f);
                 Place(_menuBtn.GetComponent<RectTransform>(),    0.56f, 0.070f, 0.94f, 0.250f);
             } else {
-                Place(_headerLbl.rectTransform, 0.05f, 0.710f, 0.95f, 0.920f);
-                Place(_line,                    0.05f, 0.690f, 0.95f, 0.695f);
-                Place(_timeLbl.rectTransform,   0.05f, 0.605f, 0.95f, 0.675f);
-                Place(_kdLbl.rectTransform,     0.05f, 0.525f, 0.95f, 0.600f);
-                Place(_accLbl.rectTransform,    0.05f, 0.445f, 0.95f, 0.520f);
-                Place(_rewardLbl.rectTransform, 0.05f, 0.365f, 0.95f, 0.440f);
+                Place(_plate,                   0.06f, 0.770f, 0.94f, 0.900f);
+                Place(_line,                    0.05f, 0.718f, 0.95f, 0.721f);
+                Place(_tiles[0],                0.04f, 0.520f, 0.33f, 0.680f);
+                Place(_tiles[1],                0.355f, 0.520f, 0.645f, 0.680f);
+                Place(_tiles[2],                0.67f, 0.520f, 0.96f, 0.680f);
+                Place(_rewardBar,               0.04f, 0.380f, 0.96f, 0.480f);
                 Place(_nextBtn.GetComponent<RectTransform>(),    0.05f, 0.225f, 0.95f, 0.330f);
                 Place(_rematchBtn.GetComponent<RectTransform>(), 0.05f, 0.115f, 0.95f, 0.215f);
                 Place(_menuBtn.GetComponent<RectTransform>(),    0.05f, 0.012f, 0.95f, 0.105f);
