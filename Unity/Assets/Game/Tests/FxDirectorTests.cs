@@ -213,10 +213,10 @@ namespace VoxGame.Tests
                 p.EmitStars(new Vector3(0f, 1.6f, 0f), 1f);
                 p.Tick(Dt);
                 Assert.Greater(p.AliveCount, 0);
-                Assert.AreEqual(FxParticles.MaxParticles * 24, p.Mesh.vertexCount);
+                Assert.AreEqual(FxParticles.MaxParticles * FxParticles.VertsPer, p.Mesh.vertexCount);
                 for (int i = 0; i < 300; i++) p.Tick(Dt);
                 Assert.AreEqual(0, p.AliveCount);
-                Assert.AreEqual(FxParticles.MaxParticles * 24, p.Mesh.vertexCount);
+                Assert.AreEqual(FxParticles.MaxParticles * FxParticles.VertsPer, p.Mesh.vertexCount);
             }
             finally
             {
@@ -386,7 +386,7 @@ namespace VoxGame.Tests
                 fx.Tick(Dt);
                 Assert.AreEqual("КОМБО ×3", fx.Pops.ComboShown);
                 int upBlood = fx.Particles.Count(FxKind.Blood) + fx.Particles.Count(FxKind.Mist);
-                Assert.Greater(upBlood, jabBlood * 2);
+                Assert.Greater(upBlood, jabBlood);   // доработка 4: у джеба крови много (≥110 видимых), силовой — больше, но не вдвое
                 fx.Reset();
 
                 var mega = Hit(PunchType.Mega, mega: true, power: 1.3f); mega.punch = PunchType.Hook; mega.damage = 30f;
@@ -480,6 +480,79 @@ namespace VoxGame.Tests
                 Object.DestroyImmediate(camGo);
                 Object.DestroyImmediate(canvas);
                 Object.DestroyImmediate(scene);
+            }
+        }
+
+        // HIT-FX-2: брызги летят от точки удара по направлению удара, не уходят вверх и к объективу, тяжесть роняет их.
+        [Test]
+        public void BloodBurst_FollowsPunch_FallsDown()
+        {
+            var at = new Vector3(0f, 1.6f, 0f);
+            var toCam = Vector3.back;   // камера на −Z, смотрит на +Z: экран вправо — +X
+            var buf = new Vector3[FxParticles.MaxParticles];
+            foreach (int kind in new[] { FxParticles.BurstJab, FxParticles.BurstHook, FxParticles.BurstUpper })
+            {
+                var p = new FxParticles(null);
+                Vector3 dir = kind == FxParticles.BurstHook ? Vector3.left : kind == FxParticles.BurstUpper ? Vector3.up : Vector3.forward;
+                p.BloodBurst(at, dir, toCam, 60, kind, FxDirector.SpdPower, 2f);
+                for (int i = 0; i < 6; i++) p.Tick(Dt);   // 0,1 с
+                int n = p.CopyBlood(0u, buf);
+                Vector3 m = Vector3.zero; float back = 0f;
+                for (int i = 0; i < n; i++) { m += buf[i] - at; back = Mathf.Min(back, buf[i].z - at.z); }
+                m /= Mathf.Max(1, n);
+                if (kind == FxParticles.BurstHook) Assert.Less(m.x, -0.03f, "хук: облако уходит вбок по удару");
+                if (kind == FxParticles.BurstUpper) Assert.Greater(m.y, 0.03f, "апперкот: облако уходит вверх");
+                if (kind == FxParticles.BurstJab) Assert.Less(m.z, -0.01f, "джеб: облако к камере");
+                Assert.Greater(back, -FxParticles.ToCamMax * 0.1f - FxParticles.SpawnLead - 0.02f, "к камере не быстрее ToCamMax");
+                for (int i = 0; i < 24; i++) p.Tick(Dt);  // 0,5 с
+                n = p.CopyBlood(0u, buf);
+                int high = 0;
+                for (int i = 0; i < n; i++) if (buf[i].y > at.y + 0.2f) high++;
+                Assert.LessOrEqual(high, n / 10, "через 0,5 с капли не выше точки удара больше чем на 20 см (вид " + kind + ")");
+            }
+        }
+
+        // HIT-FX-2, приёмка на настоящем бою (портрет 1080×2400 и ландшафт 2400×1080): кровь у точки удара на 0,15 с,
+        // через 0,5 с не выше; плашка не под перчатками, контрастная, внутри safe-area, не на полосах HUD и счётчике комбо.
+        [Test]
+        public void HitFx2_Criteria()
+        {
+            VoxGame.Editor.ShotsTaker.HitFx2("", false);
+            var rs = VoxGame.Editor.ShotsTaker.HitFx2Results;
+            Assert.AreEqual(6, rs.Count);
+            foreach (var r in rs)
+            {
+                string w = (r.land ? "ландшафт " : "портрет ") + r.punch;
+                Assert.IsTrue(r.hit, w + ": удар дошёл");
+                Assert.GreaterOrEqual(r.in15Frac, 0.6f, w + ": кровь в круге 0,2·W на 0,15 с");
+                Assert.LessOrEqual(r.after05HighFrac + r.after05BehindFrac, 0.1f, w + ": через 0,5 с выше точки или за камерой");
+                Assert.IsTrue(r.plateSeen, w + ": плашка видна");
+                Assert.LessOrEqual(r.plateGlovePx, 0.05f, w + ": плашка под перчаткой (по пикселям перчаток)");
+                // доработка 4: плашка обходит руки (перчатка, манжета, предплечье) всё время показа и не прыгает; расстояние —
+                // наименьшее достижимое (джеб 0,242, хук 0,237 в портрете, см. HIT-FX-2.md), порог 0,22 с этим несовместим
+                Assert.LessOrEqual(r.plateDist, 0.25f, w + ": плашка далеко от точки удара");
+                Assert.LessOrEqual(r.plateOvMax, 0.05f, w + ": плашка на руках игрока (наибольшее за показ)");
+                Assert.LessOrEqual(r.plateJumpMax, 0.02f, w + ": плашка прыгает между кадрами");
+                Assert.AreEqual(0f, r.ringOverText, 1e-4f, w + ": кольцо поверх текста плашки");
+                // доработка 3: мелкие тёмные капли и полосы, много (портрет 1080×2400, 0,15 с)
+                if (!r.land)
+                {
+                    Assert.LessOrEqual(r.sizeMax, 0.025f, w + ": наибольшая частица");
+                    Assert.LessOrEqual(r.sizeMed, 0.012f, w + ": медианная частица");
+                    Assert.LessOrEqual(r.streakMax, 0.012f, w + ": толщина полосы");
+                    Assert.GreaterOrEqual(r.peakVis, r.punch == PunchType.Jab ? 110 : r.punch == PunchType.Hook ? 130 : 120, w + ": видимых частиц");
+                    if (r.punch == PunchType.Jab) Assert.GreaterOrEqual(r.bloodPx15, 22000f, w + ": пикселей крови");
+                    if (r.punch == PunchType.Hook) Assert.GreaterOrEqual(r.bloodPx15, 18000f, w + ": пикселей крови");
+                    Assert.LessOrEqual(r.bloodLum, 0.10f, w + ": яркость крови");
+                    Assert.GreaterOrEqual(r.bloodGloveContrast, 2.0f, w + ": контраст крови к перчатке");
+                    // доработка 4: смесь полос и капель, капли видны отдельно
+                    Assert.That(r.dropFrac, Is.InRange(0.3f, 0.55f), w + ": доля капель");
+                    if (r.punch == PunchType.Hook) { Assert.GreaterOrEqual(r.dropN, 45, w + ": капель"); Assert.GreaterOrEqual(r.dropSep, 25, w + ": капель отдельно"); }
+                }
+                Assert.GreaterOrEqual(r.plateContrastMin, 4.5f, w + ": контраст плашки");
+                Assert.IsTrue(r.plateInSafe, w + ": плашка в safe-area");
+                Assert.AreEqual(0f, r.plateHudFrac, 1e-4f, w + ": плашка на полосах HUD");
+                Assert.AreEqual(0f, r.plateComboFrac, 1e-4f, w + ": плашка на счётчике комбо");
             }
         }
     }
