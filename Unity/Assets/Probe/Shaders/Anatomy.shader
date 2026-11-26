@@ -40,6 +40,11 @@ Shader "VoxProbe/Anatomy"
             // _SkinS: (YBot, YRef, z первой точки таблицы, последний индекс), _SkinT — граница жёсткой головы T(z) с шагом 1 см
             float4 _SkinJ[8], _SkinP[8], _SkinS, _SkinT[7];
             float _SkinOn;
+            // мимика (AnatFace): 24 канала, роль тела по номеру (0 мягкая голова, 1 челюсть и нижние зубы, 2/3 глаз +x/−x, 4 жёстко),
+            // рот: (раскрытие губ, см; видимая высота верхних и нижних зубов, см); зубы: (x шейки, ±1 верхний/нижний, ±0,5 — выбит) × 2
+            float4 _Face[6], _FaceMouth, _FaceTX[16];
+            float _FaceRole[48];
+            float _FaceOn;
             // часть 8: номер части ячейки (R8, точечная выборка); _BodyDim — размеры решётки тела в ячейках, w = 1 — текстура есть
             TEXTURE3D(_AnatPartTex); SAMPLER(sampler_AnatPartTex);
             float4 _BodyDim;
@@ -66,6 +71,7 @@ Shader "VoxProbe/Anatomy"
                 float4 t : TEXCOORD6;
                 float sw : TEXCOORD7;   // отёк в вершине, см (для рельефа и цвета)
                 float fw : TEXCOORD8;   // часть 9: вес отломка в вершине (трещина на кости по краю, синяк над отломком)
+                float3 fx : TEXCOORD9;  // мимика: шов губ (0 верх … 1 низ), маска рта, x покоя (см головы)
             };
 
             float3 Rod(float3 v, float3 k, float a) { float c = cos(a), s = sin(a); return v * c + cross(k, v) * s + k * dot(k, v) * (1.0 - c); }
@@ -88,6 +94,68 @@ Shader "VoxProbe/Anatomy"
                     float a = length(rv);
                     if (a > 1e-6) { float3 k = rv / a; float3 piv = float3(0, P.y, P.z); h = piv + Rod(h - piv, k, a); n = Rod(n, k, a); }
                 }
+            }
+
+            // мимика (AnatFace.Deform — та же функция на C#): точка покоя h (см головы) и нормаль
+            float FC(int i) { return _Face[i >> 2][i & 3]; }
+            float3 RotX(float3 v, float a) { float c = cos(a), s = sin(a); return float3(v.x, v.y * c - v.z * s, v.y * s + v.z * c); }
+            float3 RotY(float3 v, float a) { float c = cos(a), s = sin(a); return float3(v.x * c + v.z * s, v.y, -v.x * s + v.z * c); }
+            float SS(float e0, float e1, float x) { float t = saturate((x - e0) / (e1 - e0)); return t * t * (3.0 - 2.0 * t); }
+            void Face(inout float3 h, inout float3 n, int role, out float3 fx)
+            {
+                fx = float3(0, 0, h.x);
+                if (role == 4) return;
+                float jawA = saturate(FC(12)) * 0.3;
+                float3 JP = float3(0, -0.6, 0.25);
+                if (role == 1) { h = JP + RotX(h - JP, jawA) + float3(FC(13) * 0.35, 0, 0); n = RotX(n, jawA); return; }
+                if (role == 2 || role == 3)
+                {
+                    float sxe = role == 2 ? 1.0 : -1.0; float3 ce = float3(sxe * 3.2, 2.3, 6.2);
+                    float yaw = (FC(9) + sxe * FC(11) * 0.6) * 0.32, pitch = -FC(10) * 0.22;
+                    h = ce + RotX(RotY(h - ce, yaw), pitch); n = RotX(RotY(n, yaw), pitch); return;
+                }
+                if (h.z < 3.0) return;
+                float ax = abs(h.x), sx = h.x >= 0 ? 1.0 : -1.0; int sd = h.x >= 0 ? 0 : 1;
+                float3 q = h;
+                float3 ce2 = float3(sx * 3.2, 2.3, 6.2), v = h - ce2; float er = length(v);
+                if (er < 2.1 && v.z > -0.4)
+                {
+                    float u = (ax - 3.2) / 1.45, wal = pow(max(0.0, 1.0 - u * u), 0.7), mid = 0.085 * wal + 0.06 * u;
+                    float shell = SS(2.05, 1.6, er) * SS(-0.3, 0.3, v.z);
+                    float wU = shell * SS(-0.2, 0.15, v.y - mid), wL = shell * SS(0.2, -0.15, v.y - mid);
+                    float cu = FC(5 + sd) - FC(10) * 0.25;
+                    float aU = (cu > 0 ? cu * 0.62 : cu * 0.07) * wal, aL = -max(FC(7 + sd), 0.0) * 0.2 * wal;
+                    float a = aU * wU + aL * wL;
+                    q = ce2 + RotX(v, a) * (1.0 + 0.06 * max(cu, 0.0) * wU); n = RotX(n, a);
+                }
+                float3 d = 0;
+                float t = saturate((ax - 0.75) / 4.75), yb = 3.45 + 0.42 * sin(3.14159265 * min(1.0, t * 1.2)) - 0.15 * t, dyb = h.y - yb;
+                float wb = exp(-dyb * dyb / (dyb > 0 ? 2.6 : 0.55)) * (1.0 - SS(5.6, 6.8, ax)) * SS(4.5, 6.0, h.z);
+                float up = lerp(FC(0 + sd), FC(2 + sd), SS(1.0, 4.2, ax));
+                d.y += wb * up * (up > 0 ? 0.8 : 0.6);
+                float wk = wb * (1.0 - SS(1.2, 3.5, ax));
+                d.x -= sx * 0.25 * FC(4) * wk * SS(0.0, 0.6, ax); d.y -= 0.18 * FC(4) * wk;
+                float wc = exp(-((ax - 2.9) * (ax - 2.9) + h.y * h.y) / 1.1) * SS(5.5, 7.0, h.z);
+                float ck = FC(21 + sd); d.y += 0.32 * ck * wc; d.z += 0.1 * ck * wc;
+                float wn = exp(-((ax - 0.9) * (ax - 0.9) * 2.0 + (h.y + 2.3) * (h.y + 2.3)) / 0.6) * SS(7.0, 8.5, h.z);
+                d.y += 0.22 * FC(20) * wn;
+                float dyl = h.y + 5.25, fm = SS(6.0, 7.6, h.z), lipX = 1.0 - SS(1.7, 3.0, ax), lipC = 1.0 - SS(1.2, 2.6, ax);
+                float wul = SS(-0.13, 0.13, dyl) * (1.0 - SS(0.7, 1.9, dyl)) * fm * lipC;
+                float wll = SS(0.13, -0.13, dyl) * (1.0 - SS(-0.7, -1.9, dyl)) * fm * lipC;
+                d.y += 0.6 * max(FC(17), 0.0) * wul - 0.55 * max(FC(18), 0.0) * wll;
+                float cr = FC(14 + sd), wcor = exp(-((ax - 2.2) * (ax - 2.2) * 1.2 + dyl * dyl * 1.6) / 0.9) * SS(5.0, 7.0, h.z);
+                d.y += cr * (cr > 0 ? 0.65 : 0.55) * wcor; d.x += sx * 0.12 * max(cr, 0.0) * wcor; d.z -= 0.08 * max(cr, 0.0) * wcor;
+                float wd = FC(16), ww = exp(-((ax - 2.0) * (ax - 2.0) * 0.8 + dyl * dyl * 1.2) / 1.4) * fm * SS(0.0, 1.2, ax);
+                d.x += sx * 0.42 * wd * ww * (wd < 0 ? 0.7 : 1.0);
+                float lb = lipX * fm * exp(-dyl * dyl / 0.8);
+                d.z += 0.25 * max(-wd, 0.0) * lb - 0.15 * max(FC(19), 0.0) * lb;
+                q += d;
+                float sharp = 1.0 - SS(1.8, 3.4, ax), wdt = lerp(1.4, 0.13, sharp), yc = -5.25 - (1.0 - sharp) * 0.6;
+                float wJ = SS(yc + wdt, yc - wdt, h.y) * SS(-1.5, 2.5, h.z) * SS(-11.0, -8.8, h.y);
+                float aj = jawA * wJ;
+                q = JP + RotX(q - JP, aj) + float3(FC(13) * 0.35 * wJ, 0, 0); n = RotX(n, aj);
+                fx = float3(SS(0.13, -0.13, dyl), lipX * fm, h.x);
+                h = q;
             }
 
             static const float3 N6[6] = { float3(1,0,0), float3(-1,0,0), float3(0,1,0), float3(0,-1,0), float3(0,0,1), float3(0,0,-1) };
@@ -132,10 +200,14 @@ Shader "VoxProbe/Anatomy"
                 float3 p = i.p.xyz + normalize(i.n.xyz) * (swv / max(_BodyPar.x, 0.01)) + fd + _BodyShift.xyz;
                 float3 ws = TransformObjectToWorld(p);
                 float3 nw = TransformObjectToWorldNormal(pn);
-                if (_SkinOn > 0.5 && _ChunkOrg.w < 99.5)   // оторванные куски (тело ≥ 100) лежат в мире сами по себе
+                o.fx = 0;
+                // оторванные куски (тело ≥ 100) лежат в мире сами по себе; мимика — до изгиба шеи, от позы покоя
+                bool fon = _FaceOn > 0.5 && _ChunkOrg.w < 47.5;
+                if ((_SkinOn > 0.5 || fon) && _ChunkOrg.w < 99.5)
                 {
                     float3 h = mul(_AnatW2H, float4(ws, 1)).xyz, hn = mul((float3x3)_AnatW2H, nw);
-                    Skin(h, hn);
+                    if (fon) { float3 fx; Face(h, hn, (int)(_FaceRole[(int)(_ChunkOrg.w + 0.5)] + 0.5), fx); o.fx = fx; }
+                    if (_SkinOn > 0.5) Skin(h, hn);
                     ws = mul(_AnatH2W, float4(h, 1)).xyz; nw = normalize(mul((float3x3)_AnatH2W, hn));
                 }
                 o.pos = TransformWorldToHClip(ws);
@@ -342,6 +414,31 @@ Shader "VoxProbe/Anatomy"
                         float per = 1.0 - smoothstep(0.02, 0.06, abs(fm - 0.5));
                         col = lerp(col, float3(0.62, 0.42, 0.36), per * 0.6 * (1.0 - bcov));
                     }
+                }
+                // мимика: раскрытый рот — растянутые грани шва губ красятся полостью рта, сверху и снизу зубы (выбитый — тёмная щель)
+                if (_FaceOn > 0.5 && i.fx.y > 0.02 && _FaceMouth.x > 0.02 && i.fx.x > 0.03 && i.fx.x < 0.97)
+                {
+                    float sep = _FaceMouth.x * saturate(i.fx.y * 1.4);
+                    float pm = smoothstep(0.02, 0.1, sep) * smoothstep(0.03, 0.12, i.fx.x) * smoothstep(0.97, 0.88, i.fx.x);
+                    float g = saturate((i.fx.x - 0.06) / 0.88) * sep;
+                    float3 mc = lerp(float3(0.10, 0.025, 0.025), _AnatPal[5].rgb * 0.45, smoothstep(0.55, 1.0, g / max(sep, 1e-3)) * 0.6);
+                    float upT = _FaceMouth.y * i.fx.y, loT = _FaceMouth.z * i.fx.y;
+                    bool upper = g < upT, lower = sep - g < loT;
+                    if (upper || lower)
+                    {
+                        float want = upper ? 1.0 : -1.0, d1 = 9, d2 = 9, pr = 0;
+                        [loop] for (int k = 0; k < 32; k++)
+                        {
+                            float4 T = _FaceTX[k >> 1]; float tx = (k & 1) ? T.z : T.x, tp = (k & 1) ? T.w : T.y;
+                            if (tp * want < 0) continue;
+                            float dd = abs(i.fx.z - tx);
+                            if (dd < d1) { d2 = d1; d1 = dd; pr = step(0.75, abs(tp)); } else if (dd < d2) d2 = dd;
+                        }
+                        float edge = smoothstep(0.0, 0.06, d2 - d1);
+                        float rim = upper ? smoothstep(0.0, 0.07, upT - g) : smoothstep(0.0, 0.07, loT - (sep - g));
+                        mc = lerp(mc, _AnatPal[33].rgb * 0.92, pr * edge * rim);
+                    }
+                    col = lerp(col, mc, pm); wet = lerp(wet, 0.5, pm); skin *= 1.0 - pm;
                 }
                 // часть 9: перелом §5 — тёмная линия по краю отломка на открытой кости, синяк на коже над отломком (и в ANAT_LITE)
                 if (i.fw > 0.01)

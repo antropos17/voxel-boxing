@@ -158,5 +158,7 @@ namespace VoxProbe
         }
         /// Точка в зоне изгиба (с запасом): там грани не склеиваются в длинные прямоугольники (AnatMesher.StyleBend).
         public static bool InBend(float3 p) { float ye = YEff(p); return ye < YRef + 0.4f && ye > YBot - 0.4f; }
+        /// Лицо, которое двигает мимика (AnatFace.Deform): брови, веки, щёки, губы, подбородок.
+        public static bool InFace(float3 p) => p.z > 3.0f && p.y > -10.6f && p.y < 6.8f && math.abs(p.x) < 6.6f;
     }
 }

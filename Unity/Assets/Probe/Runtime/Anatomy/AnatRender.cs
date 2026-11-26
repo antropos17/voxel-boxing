@@ -47,6 +47,7 @@ namespace VoxProbe
         {
             this.g = g; isHead = g.name == "head"; this.spare = spare;
             if (isHead) style |= AnatMesher.StyleBend;   // голова гнётся в шее (AnatSkin); челюсть, глаза и зубы — жёстко
+            if (isHead && AnatFace.Enabled) style |= AnatMesher.StyleFace;   // мимика двигает вершины лица (AnatFace)
             bnd = new Bounds(new Vector3(16, 16, 16), Vector3.one * (40 + 2 * 15f / g.step));
             mpb ??= new MaterialPropertyBlock();
             root = spare != null && spare.roots.Count > 0 ? spare.roots.Pop() : new GameObject(g.name).transform;
