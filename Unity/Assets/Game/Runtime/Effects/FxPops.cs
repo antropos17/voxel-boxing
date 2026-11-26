@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.UI;
 
 namespace VoxGame
@@ -26,7 +27,14 @@ namespace VoxGame
         public static readonly Vector2 ChipsPort = new Vector2(0.97f, 0.785f), ChipsLand = new Vector2(0.04f, 0.86f);
         public const float ChipH = 30f, ChipGap = 5f;
 
-        static readonly Color Plate = new Color(14f / 255f, 8f / 255f, 12f / 255f, 0.72f);
+        // Плашка удара (правка HIT-FX-2): непрозрачная насыщенная заливка и рамка 3 px, рисуется поверх рук (ZTest Always).
+        // Силовой и встречный — жёлтый текст на алой плашке с чёрной рамкой; джеб — белый текст на чёрной плашке с алой рамкой.
+        static readonly Color PlatePower = new Color32(176, 18, 26, 255), PlateJab = new Color32(18, 12, 16, 255);
+        static readonly Color FramePower = new Color32(0, 0, 0, 255), FrameJab = new Color32(225, 30, 36, 255);
+        static readonly Color TextPower = new Color32(255, 232, 110, 255), TextJab = new Color32(255, 250, 240, 255);
+        public const float FramePx = 3f;
+        // Где плашка может стоять (доли кадра): ниже полос HUD, выше счётчика комбо и кнопок; в ландшафте — между кнопками.
+        public const float PopTopP = 0.80f, PopBotP = 0.20f, PopTopL = 0.83f, PopBotL = 0.12f, PopSideL = 0.17f, PopMargin = 0.01f;
         static readonly Color Bone  = new Color32(236, 226, 200, 255);
         static readonly Color Gold  = new Color32(255, 196, 64, 255);
         static readonly Color BloodRed = new Color32(200, 35, 28, 255);
@@ -81,7 +89,11 @@ namespace VoxGame
             public bool alive;
             public float age;
             public Vector3 world;
-            public Color color;
+            public Color color, fill, frame;
+            public Outline outline;
+            public Vector2 off;
+            public float riseK;          // доля подъёма: у верхней границы области плашка всплывает меньше          // сдвиг от точки под подбородком (доли кадра), выбран при появлении
+            public Rect g0, g1;          // перчатки, по которым выбрано место
             public uint seq;
         }
 
@@ -97,7 +109,9 @@ namespace VoxGame
         readonly Pop[] _pops = new Pop[MaxPops];
         readonly Chip[] _chips = new Chip[MaxChips];
         readonly Camera _cam;
-        RectTransform _root, _comboRt;
+        RectTransform _root, _comboRt, _safe;
+        Material _top;
+        readonly Rect[] _avoid = new Rect[2];   // экранные прямоугольники перчаток игрока (доли кадра), задаёт FxDirector
         Text _combo;
         float _aspect = 0.4615f;
         uint _seq;
@@ -120,6 +134,27 @@ namespace VoxGame
             }
         }
 
+        // Самая поздняя живая плашка (замер: прямоугольник, цвет плашки и текста); null — нет.
+        public RectTransform LastPopRect
+        {
+            get
+            {
+                Pop best = null;
+                for (int i = 0; i < MaxPops; i++) if (_pops[i].alive && (best == null || _pops[i].seq > best.seq)) best = _pops[i];
+                return best?.rt;
+            }
+        }
+        public float LastPopAge
+        {
+            get
+            {
+                Pop best = null;
+                for (int i = 0; i < MaxPops; i++) if (_pops[i].alive && (best == null || _pops[i].seq > best.seq)) best = _pops[i];
+                return best != null ? best.age : -1f;
+            }
+        }
+        public RectTransform ComboRect => _comboRt;
+
         public FxPops(Transform parent, Camera cam)
         {
             _cam = cam;
@@ -128,18 +163,29 @@ namespace VoxGame
             _root = go.GetComponent<RectTransform>();
             UIKit.SetAnchors(_root, 0f, 0f, 1f, 1f);
             _root.offsetMin = _root.offsetMax = Vector2.zero;
+            _safe = parent != null && parent.parent != null ? parent.parent.Find("SafeArea") as RectTransform : null;
+            var ui = Shader.Find("UI/Default");
+            if (ui != null)
+            {
+                _top = new Material(ui) { name = "FxPopsTop" };
+                _top.SetInt("unity_GUIZTestMode", (int)CompareFunction.Always);   // поверх рук игрока при любой глубине
+            }
 
             for (int i = 0; i < MaxPops; i++)
             {
                 var rt = NewRect("Pop" + i, _root);
                 var plate = rt.gameObject.AddComponent<Image>();
-                plate.color = Plate; plate.raycastTarget = false;
+                plate.color = PlateJab; plate.raycastTarget = false;
+                if (_top != null) plate.material = _top;
+                var ol = plate.gameObject.AddComponent<Outline>();
+                ol.effectDistance = new Vector2(FramePx, -FramePx); ol.useGraphicAlpha = true;
                 var t = UIKit.Label(rt, "Text", PopFontPower, Gold, semiBold: true);
                 t.horizontalOverflow = HorizontalWrapMode.Overflow;
                 Hard(t, 2f);
+                if (_top != null) t.material = _top;
                 Stretch(t.rectTransform);
                 rt.gameObject.SetActive(false);
-                _pops[i] = new Pop { rt = rt, plate = plate, text = t };
+                _pops[i] = new Pop { rt = rt, plate = plate, text = t, outline = ol };
             }
 
             _combo = UIKit.Label(_root, "Combo", 40, UIKit.Accent, semiBold: true, align: TextAnchor.MiddleLeft);
@@ -206,7 +252,10 @@ namespace VoxGame
             s.alive = true; s.age = 0f; s.seq = ++_seq; s.world = at;
             if (!ReferenceEquals(s.text.text, text)) s.text.text = text;
             s.text.fontSize = gold ? PopFontPower : PopFontJab;
-            s.color = gold ? Gold : Bone;
+            s.color = gold ? TextPower : TextJab;
+            s.fill = gold ? PlatePower : PlateJab;
+            s.frame = gold ? FramePower : FrameJab;
+            s.off = Vector2.zero; s.g0 = s.g1 = Rect.zero;
             s.rt.sizeDelta = new Vector2(s.text.preferredWidth + PlatePadX * 2f, s.text.fontSize + PlatePadY * 2f);
             s.rt.gameObject.SetActive(true);
             s.rt.SetAsLastSibling();
@@ -225,6 +274,9 @@ namespace VoxGame
         }
 
         public void HideCombo() => _comboLeft = 0f;
+
+        // Перчатки игрока на экране (доли кадра, Rect.zero — нет); плашка выбирает место, которое они не закрывают.
+        public void SetAvoid(Rect glove0, Rect glove1) { _avoid[0] = glove0; _avoid[1] = glove1; }
 
         // Метка травмы с ключом key: тот же ключ обновляет метку, новый — добавляет (самая старая уходит).
         public void SetChip(int key, string text, bool bad)
@@ -290,15 +342,91 @@ namespace VoxGame
             float k = s.age / PopLife;
             float a = k < PopIn ? k / PopIn : k < PopHold ? 1f : 1f - (k - PopHold) / (1f - PopHold);
             Vector2 p = _cam != null ? FxBanners.ProjectView(_cam, _aspect, s.world, new Vector2(0.5f, 0.55f)) : new Vector2(0.5f, 0.55f);
-            p.x = Mathf.Clamp(p.x, Land ? PopXMinLand : PopXMin, Land ? PopXMaxLand : PopXMax);
-            p.y = Mathf.Clamp(p.y, 0.2f, 0.8f);
+            Vector2 root = RootSize();
+            Vector2 half = new Vector2((s.rt.sizeDelta.x + 2f * FramePx) * 0.5f / root.x, (s.rt.sizeDelta.y + 2f * FramePx) * 0.5f / root.y);
+            float riseN = PopRise / root.y;
+            // место выбирается, пока плашка проявляется (0,1 с): перчатка в это время у лица; после — место не меняется
+            if (k < PopIn)
+            {
+                s.g0 = _avoid[0]; s.g1 = _avoid[1];
+                s.off = Choose(p, half, riseN, s.g0, s.g1, out s.riseK);
+            }
+            p = Fit(p + s.off, half, riseN * s.riseK);
             s.rt.anchorMin = s.rt.anchorMax = p;
             // всплывает от +8 px (появление) до −46 css-px, как margin-top в @keyframes pop
-            float rise = k < PopIn ? -11f * (1f - k / PopIn) : PopRise * Mathf.Clamp01((k - PopIn) / (1f - PopIn));
+            float rise = k < PopIn ? -11f * (1f - k / PopIn) : PopRise * s.riseK * Mathf.Clamp01((k - PopIn) / (1f - PopIn));
             s.rt.anchoredPosition = new Vector2(0f, rise);
             var c = s.color; c.a = a; s.text.color = c;
-            var pc = Plate; pc.a *= a; s.plate.color = pc;
+            var pc = s.fill; pc.a *= a; s.plate.color = pc;
+            s.outline.effectColor = s.frame;
         }
+
+        // Размер холста в его единицах при пропорциях кадра _aspect, как его задаёт CanvasScaler UIRoot на телефоне
+        // (опорное 540×1170 или 1170×540, match 0,5): не зависит от окна редактора и снимков.
+        Vector2 RootSize()
+        {
+            float r = Land ? 1170f / 540f : 540f / 1170f, q = Mathf.Sqrt(_aspect / r);
+            return Land ? new Vector2(1170f * q, 540f / q) : new Vector2(540f * q, 1170f / q);
+        }
+
+        // Допустимая область центра плашки: safe-area, ниже полос HUD, выше комбо и кнопок; в ландшафте — между кнопками.
+        // Плашка всплывает на riseN, поэтому сверху запас на весь подъём, снизу — на опускание при появлении.
+        Vector2 Fit(Vector2 c, Vector2 half, float riseN)
+        {
+            Vector2 smin = _safe != null ? _safe.anchorMin : Vector2.zero, smax = _safe != null ? _safe.anchorMax : Vector2.one;
+            float x0 = Mathf.Max(smin.x, Land ? PopSideL : 0f) + PopMargin + half.x;
+            float x1 = Mathf.Min(smax.x, Land ? 1f - PopSideL : 1f) - PopMargin - half.x;
+            float y0 = Mathf.Max(smin.y, Land ? PopBotL : PopBotP) + PopMargin + half.y + riseN * (11f / PopRise);
+            float y1 = Mathf.Min(smax.y, Land ? PopTopL : PopTopP) - PopMargin - half.y - riseN;
+            if (x1 < x0) x0 = x1 = 0.5f * (x0 + x1);
+            if (y1 < y0) y0 = y1 = 0.5f * (y0 + y1);
+            return new Vector2(Mathf.Clamp(c.x, x0, x1), Mathf.Clamp(c.y, y0, y1));
+        }
+
+        static readonly float[] OffX = { 0f, -0.12f, 0.12f, -0.24f, 0.24f, -0.36f, 0.36f, -0.48f, 0.48f, -0.6f, 0.6f };
+        static readonly float[] OffY = { 0f, -0.06f, 0.06f, -0.12f, 0.12f, -0.18f, 0.18f, -0.24f, 0.24f, -0.32f, 0.32f };
+
+        // Сдвиг от точки под подбородком с наименьшей ценой: перекрытие перчатками и счётчиком комбо (доля площади ×10)
+        // плюс расстояние до исходного места. Перебор 121 места, без выделений памяти.
+        Vector2 Choose(Vector2 p, Vector2 half, float riseN, Rect g0, Rect g1, out float riseK)
+        {
+            Rect combo = ComboRectN();
+            g0 = Grow(g0); g1 = Grow(g1);   // запас: перчатка ещё движется после выбора места
+            float best = float.MaxValue; Vector2 bo = Vector2.zero;
+            float top = Fit(new Vector2(0.5f, 2f), half, 0f).y;   // верх области без запаса на подъём
+            riseK = 1f;
+            for (int iy = 0; iy < OffY.Length; iy++)
+            for (int ix = 0; ix < OffX.Length; ix++)
+            {
+                Vector2 c = Fit(p + new Vector2(OffX[ix], OffY[iy]), half, 0f);
+                float rk = Mathf.Clamp01((top - c.y) / riseN);
+                // плашка за время показа: от появления до конца удержания (всплывает примерно на 0,6 подъёма)
+                Rect r = Rect.MinMaxRect(c.x - half.x, c.y - half.y, c.x + half.x, c.y + half.y + riseN * rk * 0.6f);
+                float ov = Ov(r, g0) + Ov(r, g1) - Ov(r, Inter(g0, g1)) + Ov(r, combo);
+                float cost = 10f * ov / Mathf.Max(1e-6f, r.width * r.height) + (c - p).magnitude;
+                if (cost < best) { best = cost; bo = c - p; riseK = rk; }
+            }
+            return bo;
+        }
+
+        Rect ComboRectN()
+        {
+            Vector2 root = RootSize();
+            Vector2 a = Land ? ComboLand : ComboPort;
+            float w = _comboRt.sizeDelta.x / root.x, h = _comboRt.sizeDelta.y / root.y;
+            return Rect.MinMaxRect(a.x, a.y - h * 0.5f, a.x + w, a.y + h * 0.5f);
+        }
+
+        public const float AvoidPad = 0.05f;   // доли кадра вокруг перчатки
+        static Rect Grow(Rect r) => r.width > 0f ? Rect.MinMaxRect(r.xMin - AvoidPad, r.yMin - AvoidPad, r.xMax + AvoidPad, r.yMax + AvoidPad) : r;
+
+        static Rect Inter(Rect a, Rect b)
+        {
+            float x0 = Mathf.Max(a.xMin, b.xMin), y0 = Mathf.Max(a.yMin, b.yMin), x1 = Mathf.Min(a.xMax, b.xMax), y1 = Mathf.Min(a.yMax, b.yMax);
+            return x1 > x0 && y1 > y0 ? Rect.MinMaxRect(x0, y0, x1, y1) : Rect.zero;
+        }
+
+        static float Ov(Rect a, Rect b) { var r = Inter(a, b); return r.width * r.height; }
 
         void LayoutChips()
         {
@@ -332,7 +460,8 @@ namespace VoxGame
         public void Dispose()
         {
             if (_root != null) GameUtil.Destroy(_root.gameObject);
-            _root = null;
+            if (_top != null) GameUtil.Destroy(_top);
+            _root = null; _top = null;
         }
     }
 }

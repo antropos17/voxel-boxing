@@ -73,7 +73,6 @@ namespace VoxGame
         public const int BloodJab = 12, BloodPower = 30, BloodPowerPerPw = 10, BloodMega = 140, BloodFracture = 30;
         public const int BloodHeadBurst = 100, BloodCounter = 8, ChunksPower = 3, ChunksMega = 10, ChunksFracture = 6;
         public const int FireMega = 40, SweatJab = 4;
-        public const float UpUpper = 1.6f, UpHook = 0.2f, UpMega = 0.8f;
         public const float SpdJab = 0.9f, SpdPower = 1.2f, SpdMega = 1.5f;
 
         // Без эффектов: частицы, кольца, накладки и надписи не строятся; время (стоп-кадр, слоу-мо) и камера — как с ними.
@@ -98,6 +97,7 @@ namespace VoxGame
         public float SlowLeft   => _slow;
         public float ShakeAmp   => _shake;
         public float Clock      => _clock;
+        public Vector3 LastHitPoint { get; private set; }   // точка последнего удара игрока, мир (замеры)
 
         public FxParticles Particles { get; private set; }
         public FxBanners   Banners   { get; private set; }
@@ -223,7 +223,7 @@ namespace VoxGame
             }
             Rings?.Tick(dt, realDt, _cam != null ? _cam.transform : null);
             Banners?.Tick(realDt);
-            Pops?.Tick(realDt, realDt * TimeScale);
+            if (Pops != null) { SyncAvoid(); Pops.Tick(realDt, realDt * TimeScale); }
             Overlay?.Tick(realDt);
             return TimeScale;
         }
@@ -279,6 +279,7 @@ namespace VoxGame
         {
             bool power = h.kind == PunchType.Hook || h.kind == PunchType.Upper;
             float pw = Mathf.Max(1f, h.power);
+            LastHitPoint = h.point;
 
             // Время
             if (h.mega) HitStop(MegaFreeze, MegaSlow);
@@ -324,8 +325,9 @@ namespace VoxGame
                 if (h.fracture) blood += BloodFracture;
                 if (h.headBurst) blood += BloodHeadBurst;
                 if (h.counter) blood += BloodCounter;
-                float up = h.mega ? UpMega : h.punch == PunchType.Upper ? UpUpper : UpHook;
-                Particles.BloodBurst(h.point, h.dir, toCam, blood, up, h.mega ? SpdMega : power ? SpdPower : SpdJab, k);
+                int bk = h.mega || h.headBurst ? FxParticles.BurstAll : h.punch == PunchType.Upper ? FxParticles.BurstUpper
+                       : h.punch == PunchType.Hook ? FxParticles.BurstHook : FxParticles.BurstJab;
+                Particles.BloodBurst(h.point, h.dir, toCam, blood, bk, h.mega ? SpdMega : power ? SpdPower : SpdJab, k);
                 int chunks = (h.mega ? ChunksMega : power ? ChunksPower : 0) + (h.fracture ? ChunksFracture : 0);
                 if (chunks > 0) Particles.Chunks(h.point, h.dir, toCam, chunks, 1f, k);
                 if (h.mega) Particles.Fire(h.point, h.dir, toCam, FireMega, k);
@@ -342,6 +344,7 @@ namespace VoxGame
             else if (Pops != null)
             {
                 Vector3 at = new Vector3(h.point.x, _foeHead.y - PopBelow, h.point.z);
+                SyncAvoid();
                 Pops.ShowPop(FxPops.PopText((int)h.punch, h.counter, dmg), at, power || h.counter);
             }
             if (h.fracture && !h.mega) Banners?.ShowCenter(FxBanners.Fracture, BannerStyle.Power);
@@ -422,7 +425,7 @@ namespace VoxGame
             AddFov(PowerFovK);
             Banners?.ShowCenter(FxBanners.Knockdown, BannerStyle.Big);
             Overlay?.Cinema(KnockdownSlow + 0.4f, 0.5f);
-            Particles?.BloodBurst(_foeHead, Vector3.down, ToCam(_foeHead, Vector3.down), 30, 0.6f, SpdPower, ViewK(_foeHead));
+            Particles?.BloodBurst(_foeHead, Vector3.down, ToCam(_foeHead, Vector3.down), 30, FxParticles.BurstAll, SpdPower, ViewK(_foeHead));
             FinisherReady = false;
         }
 
@@ -436,7 +439,7 @@ namespace VoxGame
             Banners?.ShowCenter(FxBanners.Knockout, BannerStyle.Huge);
             Rings?.Impact(_foeHead, StrMega, 3, ViewK(_foeHead));
             Overlay?.Cinema(KnockoutSlow + 1.2f, 1f);
-            Particles?.BloodBurst(_foeHead, Vector3.down, ToCam(_foeHead, Vector3.down), 60, 0.8f, SpdMega, ViewK(_foeHead));
+            Particles?.BloodBurst(_foeHead, Vector3.down, ToCam(_foeHead, Vector3.down), 60, FxParticles.BurstAll, SpdMega, ViewK(_foeHead));
             FinisherReady = false;
         }
 
@@ -459,7 +462,7 @@ namespace VoxGame
             {
                 var c = ToCam(_foeHead, Vector3.down);
                 float k = ViewK(_foeHead);
-                Particles.BloodBurst(_foeHead, Vector3.down, c, 120, 0.8f, SpdMega, k);
+                Particles.BloodBurst(_foeHead, Vector3.down, c, 120, FxParticles.BurstAll, SpdMega, k);
                 Particles.Fire(_foeHead, Vector3.down, c, FireMega, k);
             }
             FinisherReady = false;
@@ -495,6 +498,42 @@ namespace VoxGame
         // ---- Вспомогательные -----------------------------------------------
 
         void AddShake(float s) { if (s > _shake) _shake = s; }
+
+        // Перчатки игрока (дети камеры playerGlove0/1, PlayerGloves) → экранные прямоугольники для места плашки удара.
+        readonly MeshFilter[] _gloveMf = new MeshFilter[2];
+        void SyncAvoid()
+        {
+            if (_cam == null) { Pops.SetAvoid(Rect.zero, Rect.zero); return; }
+            Pops.SetAvoid(GloveRect(0), GloveRect(1));
+        }
+
+        static readonly string[] GloveNames = { "playerGlove0", "playerGlove1" };
+        Rect GloveRect(int s)
+        {
+            if (_gloveMf[s] == null)
+            {
+                var t = _cam.transform.Find(GloveNames[s]);
+                if (t == null) return Rect.zero;
+                _gloveMf[s] = t.GetComponent<MeshFilter>();
+                if (_gloveMf[s] == null) return Rect.zero;
+            }
+            var mf = _gloveMf[s];
+            if (!mf.gameObject.activeInHierarchy || mf.sharedMesh == null) return Rect.zero;
+            // углы ориентированного короба сетки перчатки в кадре
+            Bounds b = mf.sharedMesh.bounds;
+            Transform tr = mf.transform;
+            float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 e = new Vector3((i & 1) == 0 ? -b.extents.x : b.extents.x, (i & 2) == 0 ? -b.extents.y : b.extents.y,
+                                        (i & 4) == 0 ? -b.extents.z : b.extents.z);
+                Vector3 w = tr.TransformPoint(b.center + e);
+                if (_cam.transform.InverseTransformPoint(w).z <= 0.01f) continue;
+                Vector2 v = FxBanners.ProjectView(_cam, _aspect, w, Vector2.zero);
+                x0 = Mathf.Min(x0, v.x); x1 = Mathf.Max(x1, v.x); y0 = Mathf.Min(y0, v.y); y1 = Mathf.Max(y1, v.y);
+            }
+            return x1 > x0 ? Rect.MinMaxRect(x0, y0, x1, y1) : Rect.zero;
+        }
         void AddFov(float k) { if (k > _fovK) _fovK = k; }
 
         float Rand01()

@@ -138,40 +138,63 @@ namespace VoxGame
             _seq[i] = _born++;
         }
 
-        // Кровь, как bloodBurst веба: из точки удара; вбок — по боковой части направления удара (side, ×1,6),
-        // вверх — up (апперкот 1,6, хук 0,2), назад к камере — toCam. Каждая третья — морось, остальные — капли.
-        // k — масштаб вида (размер и скорость), spd — сила.
-        public void BloodBurst(Vector3 at, Vector3 dir, Vector3 toCam, int n, float up, float spd, float k)
+        // Кровь (правка HIT-FX-2): из точки попадания на голове; основная масса летит в сторону удара — хук вбок по удару,
+        // апперкот вверх, джеб веером к камере и в стороны, мега и разрыв — во все стороны. Две трети капель медленные
+        // (облако у точки удара), треть — быстрые штрихи. Подъём ограничен, к камере — не быстрее ToCamMax: брызги не
+        // долетают до объектива и не уходят за верхний край, тяжесть роняет их вниз. k — масштаб вида, spd — сила.
+        public const int BurstJab = 0, BurstHook = 1, BurstUpper = 2, BurstAll = 3;
+        public const float BloodSpeed = 1.25f;   // м/с: основная скорость при spd = 1, k = 1
+        public const float ToCamMax = 0.9f;      // м/с: предел скорости к камере
+        public const float UpMax = 2.2f;         // м/с: предел подъёма (апперкот)
+
+        public void BloodBurst(Vector3 at, Vector3 dir, Vector3 toCam, int n, int kind, float spd, float k)
         {
             Vector3 d = dir.sqrMagnitude > 1e-6f ? dir.normalized : Vector3.forward;
             Vector3 c = toCam.sqrMagnitude > 1e-6f ? toCam.normalized : -d;
-            Vector3 side = d - Vector3.Dot(d, c) * c;              // боковая часть удара
             Vector3 rx = Vector3.Cross(Vector3.up, c);
             rx = rx.sqrMagnitude > 1e-6f ? rx.normalized : Vector3.right;
+            Vector3 cf = c - Vector3.Dot(c, Vector3.up) * Vector3.up;   // к камере по горизонтали
+            cf = cf.sqrMagnitude > 1e-6f ? cf.normalized : c;
+            float sx = Vector3.Dot(d, rx);
+            Vector3 side = rx * (Mathf.Abs(sx) > 0.05f ? Mathf.Sign(sx) : 1f);
             Vector3 from = at + c * SpawnLead;
-            float vk = spd * Mathf.Sqrt(k);
+            float vk = BloodSpeed * spd * Mathf.Sqrt(k);
             for (int i = 0; i < n; i++)
             {
                 var col = BloodCol[RandIdx(4)];
-                if (i % 3 == 2)
+                bool mist = i % 3 == 2;
+                float m = (i % 3 == 0) ? R(0.7f, 1.5f) : R(0.15f, 0.6f);   // треть быстрых, остальные — облако у точки
+                Vector3 v;
+                switch (kind)
                 {
-                    Vector3 v = side * (1.6f * R(0.5f, 2.6f)) + rx * R(-1.4f, 1.4f) + Vector3.up * (up * R(0.5f, 2f) + R(-0.2f, 2.2f))
-                              + c * R(0.5f, 3.2f);
-                    Spawn(FxKind.Mist, from, v * vk, R(MistMin, MistMax) * k * 1.6f, R(0.25f, 0.6f), col);
+                    case BurstHook:
+                        v = side * m + rx * R(-0.15f, 0.15f) + Vector3.up * R(-0.1f, 0.45f) * m + cf * R(-0.1f, 0.35f) * m;
+                        break;
+                    case BurstUpper:
+                        v = Vector3.up * (0.15f + m) + rx * R(-0.3f, 0.3f) * m + cf * R(-0.1f, 0.3f) * m;
+                        break;
+                    case BurstJab:
+                    {
+                        float a = R(-1f, 1f);
+                        v = (cf * 0.5f + rx * a + Vector3.up * R(-0.1f, 0.3f)) * (0.6f * m);
+                        break;
+                    }
+                    default:
+                        v = RandSphere() * (1.2f * m) + Vector3.up * 0.2f * m;
+                        break;
                 }
-                else
-                {
-                    Vector3 v = side * (1.6f * R(0.4f, 2.4f)) + rx * R(-0.9f, 0.9f) + Vector3.up * (up * R(0.3f, 1.8f) + R(0.2f, 2.4f))
-                              + c * R(0.3f, 2.8f);
-                    Spawn(FxKind.Blood, from + RandSphere() * 0.01f, v * vk, R(DropMin, DropMax) * k * 1.6f,
-                          R(DropLifeMin, DropLifeMax), col);
-                }
+                v *= vk;
+                float vc = Vector3.Dot(v, c);
+                if (vc > ToCamMax) v -= c * (vc - ToCamMax);
+                if (v.y > UpMax) v.y = UpMax;
+                if (mist) Spawn(FxKind.Mist, from, v, R(MistMin, MistMax) * k * 1.6f, R(0.25f, 0.6f), col);
+                else Spawn(FxKind.Blood, from + RandSphere() * 0.01f, v, R(DropMin, DropMax) * k * 1.6f, R(DropLifeMin, DropLifeMax), col);
             }
         }
 
         // Совместимость: кровь без камеры (тесты, нокаут): «к камере» — против удара.
         public void BloodBurst(Vector3 at, Vector3 dir, int n, float speed) =>
-            BloodBurst(at, dir, -dir, n, 0.3f, speed * 0.6f, 1.5f);
+            BloodBurst(at, dir, -dir, n, BurstAll, speed * 0.6f, 1.5f);
 
         // Кубики мяса и кожи: крупнее капель, кувыркаются, отскакивают от настила.
         public void Chunks(Vector3 at, Vector3 dir, Vector3 toCam, int n, float spd, float k)
@@ -341,6 +364,15 @@ namespace VoxGame
         {
             int n = 0;
             for (int i = 0; i < MaxParticles; i++) if (_life[i] > 0f && _kind[i] == kind) n++;
+            return n;
+        }
+
+        // Положения живых капель и мороси, рождённых не раньше fromSeq (замер разлёта крови); вернёт число записанных.
+        public int CopyBlood(uint fromSeq, Vector3[] dst)
+        {
+            int n = 0;
+            for (int i = 0; i < MaxParticles && n < dst.Length; i++)
+                if (_life[i] > 0f && _seq[i] >= fromSeq && (_kind[i] == FxKind.Blood || _kind[i] == FxKind.Mist)) dst[n++] = _pos[i];
             return n;
         }
 
