@@ -210,6 +210,21 @@ namespace VoxGame.Tests
             Assert.AreEqual(Vector2.zero, ((RectTransform)plr).anchoredPosition);
         }
 
+        // «Меньше движения» в эффектах боя: нокдаун не трясёт камеру, вспышка экрана не загорается.
+        [Test]
+        public void ReducedMotion_NoCameraShakeOrScreenFlash()
+        {
+            var fx = new FxDirector(); fx.OnKnockdown();
+            Assert.Greater(fx.ShakeAmp, 0f, "обычно нокдаун трясёт камеру");
+            var scr = new FxScreen(_rootGo.transform); scr.Flash(1f);
+            Assert.Greater(scr.FlashAlpha, 0f, "и вспышка есть");
+            UIMotion.Reduced = true;
+            var fx2 = new FxDirector(); fx2.OnKnockdown();
+            Assert.AreEqual(0f, fx2.ShakeAmp, 1e-6f, "без тряски");
+            var scr2 = new FxScreen(_rootGo.transform); scr2.Flash(1f);
+            Assert.AreEqual(0f, scr2.FlashAlpha, 1e-6f, "без вспышки");
+        }
+
         // Трещины: на 75, 50 и 25 % — по одной; при восстановлении уходят.
         [Test]
         public void Cracks_AppearAtThresholds()

@@ -96,7 +96,7 @@ namespace VoxGame
         // ---- События -------------------------------------------------------
 
         // Белая вспышка, strength 0..1.
-        public void Flash(float strength) => _flashA = Mathf.Max(_flashA, FlashMax * Mathf.Clamp01(strength));
+        public void Flash(float strength) { if (UIMotion.Reduced) return; _flashA = Mathf.Max(_flashA, FlashMax * Mathf.Clamp01(strength)); }   // «меньше движения»: без вспышек
 
         // Линии скорости из точки удара: vp — доли экрана, strength 0..1 (веб: только силовой удар и мега).
         public void Lines(Vector2 vp, float strength)
