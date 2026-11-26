@@ -356,6 +356,31 @@ namespace VoxGame
             return h;
         }
 
+        // Характер мимики по прозвищу (номер предустановки VoxProbe.AnatTemper.Presets): 0 хладнокровный, 1 задира, 2 злой, 3 шоумен,
+        // 4 нервный, 5 угрюмый, 6 зверь, 7 каменный. Порядок — как Nicknames.
+        static readonly int[] NickTemper =
+        {
+            1, 6, 7, 1, 6,
+            7, 5, 6, 2, 6,
+            4, 2, 3, 7, 0,
+            5, 2, 3, 1, 6,
+            3, 1, 3, 0, 4,
+            0, 2, 6, 5, 1,
+            3, 2,
+        };
+
+        /// Характер мимики бойца: предустановка по прозвищу (у прочих — по зерну), размах и частота моргания чуть разные у каждого.
+        public static VoxProbe.AnatTemper TemperOf(in FighterDef f)
+        {
+            int k = System.Array.IndexOf(Nicknames, f.nickname);
+            int pi = k >= 0 && k < NickTemper.Length ? NickTemper[k] : (int)(Hash(f.seed, 61) % (uint)VoxProbe.AnatTemper.Presets.Length);
+            var t = VoxProbe.AnatTemper.Presets[pi];
+            t.gain *= 0.92f + 0.16f * (Hash(f.seed, 62) % 101u) / 100f;
+            t.blink *= 0.8f + 0.4f * (Hash(f.seed, 63) % 101u) / 100f;
+            if ((Hash(f.seed, 64) & 1u) != 0) t.side = -t.side;
+            return t;
+        }
+
         /// Внешность анатомической головы бойца: тон кожи, воксельная причёска (хвост — короткая + накладка хвоста), цвет волос.
         public static VoxProbe.AnatLook AnatLookOf(in FighterDef f)
         {

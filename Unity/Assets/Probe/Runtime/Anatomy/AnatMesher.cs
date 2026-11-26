@@ -90,6 +90,8 @@ namespace VoxProbe
         /// В зоне изгиба шеи (AnatBend.InBend) грани не склеиваются: шейдер гнёт вершины нелинейно, длинное ребро осталось бы прямым,
         /// а вершины соседних граней на нём ушли бы по дуге — Т-стыки дают щели.
         public const int StyleBend = 16;
+        /// Мимика (AnatFace): на лице грани тоже не склеиваются — шейдер сдвигает вершины бровей, век, губ и челюсти по отдельности.
+        public const int StyleFace = 32;
         public const int StyleDefault = StyleNoAO | StyleFieldNormal | StyleStubble;   // вид поверхности по умолчанию (выбран по опытам этапа A2)
         static readonly float[] Gw = { 0.2494f, 0.8574f, 0.8574f, 0.2494f };   // exp(−t²/(2·0,9²)), t = ±1,5; ±0,5
         static readonly float[] Gd = { 0.4619f, 0.5293f, -0.5293f, -0.4619f };  // −t/σ²·w(t)
@@ -202,7 +204,7 @@ namespace VoxProbe
                 c.gw[k] = new int3(ox * wy * wz, oy * wx * wz, oz * wx * wy);
             }
             if ((c.style & StyleStubble) != 0) { c.stb = new NativeArray<short>(L * L * L, Allocator.Temp, NativeArrayOptions.UninitializedMemory); UnsafeUtility.MemSet(c.stb.GetUnsafePtr(), 0xFF, c.stb.Length * 2); }
-            if ((c.style & StyleBend) != 0) c.bend = new NativeArray<byte>(L * L * L, Allocator.Temp, NativeArrayOptions.ClearMemory);
+            if ((c.style & (StyleBend | StyleFace)) != 0) c.bend = new NativeArray<byte>(L * L * L, Allocator.Temp, NativeArrayOptions.ClearMemory);
             if ((c.style & StyleFieldNormal) != 0) { c.cvt = new NativeArray<AVert>(L * L * L, Allocator.Temp, NativeArrayOptions.UninitializedMemory); c.cok = new NativeArray<byte>(L * L * L, Allocator.Temp, NativeArrayOptions.ClearMemory); }
             bool noAo = (c.style & StyleNoAO) != 0;   // часть 7: затенение углов не нужно — вершина берёт тень щетины, ключ кэша без него
 
@@ -391,10 +393,14 @@ namespace VoxProbe
             if (!math.all(g * (1 - math.abs(n)) == 0)) return false;
             if (c.st) { CornerState(ref c, l, out uint2 col, out float3 disp); if (col.x != 0 || col.y != 0 || math.any(disp != 0)) return false; }
             if ((c.style & StyleFieldPos) != 0 && math.abs(Field(ref c, l).w - 0.5f) > 1e-4f) return false;
-            if ((c.style & StyleBend) != 0)
+            if ((c.style & (StyleBend | StyleFace)) != 0)
             {
                 int li = LI(l); byte bv = c.bend[li];
-                if (bv == 0) { bv = AnatBend.InBend(c.grid.xyz + (float3)(c.corg + l) * c.grid.w) ? (byte)2 : (byte)1; c.bend[li] = bv; }
+                if (bv == 0)
+                {
+                    float3 pp = c.grid.xyz + (float3)(c.corg + l) * c.grid.w;
+                    bv = ((c.style & StyleBend) != 0 && AnatBend.InBend(pp)) || ((c.style & StyleFace) != 0 && AnatBend.InFace(pp)) ? (byte)2 : (byte)1; c.bend[li] = bv;
+                }
                 if (bv == 2) return false;
             }
             return true;
