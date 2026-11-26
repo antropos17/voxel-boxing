@@ -118,15 +118,31 @@ namespace VoxGame {
         }
 
         // Показать один экран, остальные скрыть.
+        // Уходящий экран гаснет за UIMotion.ScreenOut и лучей уже не ловит; новый появляется поверх (UIMotion.ScreenEnter),
+        // его кнопки нажимаются сразу. Бой (HUD) появляется своим движением — шкалы выезжают в FightHUD.
         public void ShowScreen(ScreenId id) {
-            foreach (var kv in _screens)
-                kv.Value.SetActive(kv.Key == id);
+            foreach (var kv in _screens) {
+                var go = kv.Value;
+                if (kv.Key == id) {
+                    var g = go.GetComponent<CanvasGroup>();
+                    bool settled = go.activeSelf && (g == null || g.blocksRaycasts) && _active == id;
+                    if (settled) continue;   // тот же экран ещё раз — без повторного появления
+                    go.SetActive(true);
+                    go.transform.SetAsLastSibling();
+                    if (id == ScreenId.Fight) { var fg = UIMotion.Group(go); UIMotion.Complete(fg); fg.alpha = 1f; fg.blocksRaycasts = true; }
+                    else UIMotion.ScreenEnter(go);
+                } else if (go.activeSelf) UIMotion.ScreenExit(go);
+            }
             _active = id;
         }
 
         public void HideAll() {
-            foreach (var kv in _screens)
+            foreach (var kv in _screens) {
+                // осколки шкалы на нокауте долетают поверх чистого кадра развязки, затем экран боя выключается сам
+                if (kv.Key == ScreenId.Fight) { var hud = kv.Value.GetComponent<FightHUD>(); if (hud != null && hud.HoldForFinale()) continue; }
+                UIMotion.Complete(kv.Value.GetComponent<CanvasGroup>());
                 kv.Value.SetActive(false);
+            }
         }
 
         // ------------------------------------------------------------------ Tick
@@ -134,6 +150,7 @@ namespace VoxGame {
         // Вызывается из GameApp.Tick (в старых сценах снимков — из FightDirector.Tick).
         // dt — игровое время, udt — реальное.
         public void Tick(float dt, float udt) {
+            UIMotion.Tick(udt);
             // safe-area меняется и без смены ориентации: поворот на 180°, панель навигации, разделённый экран
             if (_viewW == 0 && !_inShotMode && ScreenChanged()) { RememberScreen(); _safeArea.Refresh(); }
             bool landscape = Landscape;
@@ -149,6 +166,7 @@ namespace VoxGame {
         void RememberScreen() { _lastSafe = Screen.safeArea; _lastW = Screen.width; _lastH = Screen.height; }
 
         void BroadcastLayout(bool landscape) {
+            UIMotion.CompleteAll();   // раскладка пишет якоря заново: движение доводится до конца, чтобы не спорить с ней
             foreach (var kv in _screens) {
                 var handlers = kv.Value.GetComponentsInChildren<ILayoutHandler>(true);
                 foreach (var h in handlers)

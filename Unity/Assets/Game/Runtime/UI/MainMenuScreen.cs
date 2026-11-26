@@ -10,9 +10,12 @@ namespace VoxGame {
 
         public Action OnPlay, OnPlayer, OnShop, OnSettings;
 
-        Text _title, _sub, _profile;
-        RectTransform _topShade, _bottomShade, _line;
+        Text _title, _sub, _profile, _stampLbl;
+        RectTransform _topShade, _bottomShade, _line, _stamp, _shine;
         Button _playBtn, _playerBtn, _shopBtn, _settingsBtn;
+        float _idle;
+        public const float PlayPulse = 0.025f;   // покой «ИГРАТЬ»: дыхание ±2,5 %, блик раз в 2,4 с
+        public const float ShinePeriod = 2.4f;
 
         public void Init(UIRoot root, Action onPlay, Action onPlayer, Action onShop, Action onSettings) {
             OnPlay = onPlay; OnPlayer = onPlayer; OnShop = onShop; OnSettings = onSettings;
@@ -26,27 +29,47 @@ namespace VoxGame {
             // Полупрозрачные затемнения сверху и снизу: ринг за ними виден, текст и кнопки читаются
             _topShade = UIKit.Panel(transform, "TopShade", new Color(UIKit.BgDark.r, UIKit.BgDark.g, UIKit.BgDark.b, 0.62f));
             _bottomShade = UIKit.Panel(transform, "BottomShade", new Color(UIKit.BgDark.r, UIKit.BgDark.g, UIKit.BgDark.b, 0.70f));
+            _topShade.gameObject.AddComponent<NoCascade>(); _bottomShade.gameObject.AddComponent<NoCascade>();
 
-            _title = UIKit.Label(transform, "Title", 64, UIKit.Accent, semiBold: true);
-            _title.text = "ВОКСЕЛЬ БОКС";
+            // заголовок в два яруса: «ВОКСЕЛЬ» костью, «БОКС» — печать на кровавой плашке, чуть наискось
+            _title = UIKit.Label(transform, "Title", 64, UIKit.Bone, semiBold: true);
+            _title.text = "ВОКСЕЛЬ";
             var sh = _title.gameObject.AddComponent<Shadow>();
-            sh.effectColor = new Color(0f, 0f, 0f, 0.8f);
-            sh.effectDistance = new Vector2(4f, -4f);
+            sh.effectColor = new Color(0f, 0f, 0f, 0.9f);
+            sh.effectDistance = new Vector2(5f, -6f);
+            _stamp = UIKit.Plain(transform, "Stamp", UIKit.Blood);
+            UIKit.Frame(_stamp, UIKit.Ink, 4f);
+            UIKit.Strip(_stamp, "Hi", new Color(1f, 1f, 1f, 0.16f), 0f, 1f, 6f);
+            _stampLbl = UIKit.Label(_stamp, "Lbl", 64, UIKit.TextMain, semiBold: true);
+            _stampLbl.text = "БОКС";
+            MenuKit.Place(_stampLbl.rectTransform, 0f, 0f, 1f, 1f);
+            _stamp.localRotation = Quaternion.Euler(0f, 0f, 4f);
 
             _sub = UIKit.Label(transform, "Sub", UIKit.FontSm, UIKit.TextSub, semiBold: false);
             _sub.text = "Бокс от первого лица";
-            _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
+            _line = MenuKit.Rule(transform);
 
             _profile = UIKit.Label(transform, "Profile", UIKit.FontMd, UIKit.TextMain, semiBold: true);
 
-            _playBtn = MenuKit.Primary(transform, "BtnPlay", "ИГРАТЬ", UIKit.FontXl + 6);
+            _playBtn = MenuKit.Primary(transform, "BtnPlay", "ИГРАТЬ", UIKit.FontXl + 10);
             _playBtn.onClick.AddListener(PressPlay);
-            _playerBtn = MenuKit.Secondary(transform, "BtnPlayer", "БОЕЦ", UIKit.FontMd);
+            // блик пробегает по кнопке (маска по её краям)
+            _playBtn.gameObject.AddComponent<RectMask2D>();
+            _shine = UIKit.Plain(_playBtn.transform, "Shine", new Color(1f, 1f, 1f, 0.30f));
+            UIKit.SetAnchors(_shine, 0f, -0.2f, 0f, 1.2f); _shine.sizeDelta = new Vector2(46f, 0f);
+            _shine.localRotation = Quaternion.Euler(0f, 0f, -18f);
+            _shine.SetSiblingIndex(1);
+            _playerBtn = MenuKit.Secondary(transform, "BtnPlayer", "БОЕЦ", UIKit.FontLg);
             _playerBtn.onClick.AddListener(PressPlayer);
-            _shopBtn = MenuKit.Secondary(transform, "BtnShop", "МАГАЗИН", UIKit.FontMd);
+            _shopBtn = MenuKit.Secondary(transform, "BtnShop", "МАГАЗИН", UIKit.FontLg);
             _shopBtn.onClick.AddListener(PressShop);
             _settingsBtn = MenuKit.Secondary(transform, "BtnSettings", "НАСТРОЙКИ", UIKit.FontMd);
             _settingsBtn.onClick.AddListener(PressSettings);
+            MenuKit.SetNotch(_playerBtn, UIKit.FoeBlue);
+            MenuKit.SetNotch(_settingsBtn, UIKit.Bone);
+            MenuKit.SubCaption(_playerBtn, "уровень и улучшения");
+            MenuKit.SubCaption(_shopBtn, "перчатки");
+            _settingsBtn.GetComponent<Image>().color = new Color(UIKit.BgPanel.r, UIKit.BgPanel.g, UIKit.BgPanel.b, 0.55f);
 
             Layout(false);
         }
@@ -71,12 +94,14 @@ namespace VoxGame {
         public void OnLayout(bool landscape) => Layout(landscape);
 
         public void Layout(bool landscape) {
-            _title.fontSize = landscape ? 64 : 56;
+            _title.fontSize = landscape ? 78 : 84;
+            _stampLbl.fontSize = landscape ? 64 : 70;
             if (landscape) {
                 // Слева название и профиль, справа столбец кнопок; ринг виден посередине
                 MenuKit.Bleed(_topShade, 0f, 0.62f, 1f, 1f, top: true);
                 MenuKit.Bleed(_bottomShade, 0.58f, 0f, 1f, 0.62f, top: false);
-                MenuKit.Place(_title.rectTransform,   0.02f, 0.80f, 0.56f, 0.99f);
+                MenuKit.Place(_title.rectTransform,   0.02f, 0.80f, 0.40f, 0.99f);
+                MenuKit.Place(_stamp,                 0.36f, 0.80f, 0.56f, 0.97f);
                 MenuKit.Place(_sub.rectTransform,     0.02f, 0.72f, 0.56f, 0.80f);
                 MenuKit.Place(_line,                  0.04f, 0.705f, 0.54f, 0.712f);
                 MenuKit.Place(_profile.rectTransform, 0.02f, 0.62f, 0.56f, 0.70f);
@@ -87,10 +112,11 @@ namespace VoxGame {
             } else {
                 MenuKit.Bleed(_topShade, 0f, 0.74f, 1f, 1f, top: true);
                 MenuKit.Bleed(_bottomShade, 0f, 0f, 1f, 0.45f, top: false);
-                MenuKit.Place(_title.rectTransform,   0.03f, 0.865f, 0.97f, 0.975f);
-                MenuKit.Place(_sub.rectTransform,     0.05f, 0.828f, 0.95f, 0.865f);
-                MenuKit.Place(_line,                  0.10f, 0.820f, 0.90f, 0.824f);
-                MenuKit.Place(_profile.rectTransform, 0.03f, 0.760f, 0.97f, 0.815f);
+                MenuKit.Place(_title.rectTransform,   0.03f, 0.905f, 0.97f, 0.985f);
+                MenuKit.Place(_stamp,                 0.25f, 0.840f, 0.75f, 0.905f);
+                MenuKit.Place(_sub.rectTransform,     0.05f, 0.800f, 0.95f, 0.835f);
+                MenuKit.Place(_line,                  0.10f, 0.792f, 0.90f, 0.795f);
+                MenuKit.Place(_profile.rectTransform, 0.03f, 0.735f, 0.97f, 0.788f);
                 MenuKit.Place(_playBtn.GetComponent<RectTransform>(),     0.06f, 0.300f, 0.94f, 0.425f);
                 MenuKit.Place(_playerBtn.GetComponent<RectTransform>(),   0.06f, 0.165f, 0.49f, 0.285f);
                 MenuKit.Place(_shopBtn.GetComponent<RectTransform>(),     0.51f, 0.165f, 0.94f, 0.285f);
@@ -98,7 +124,22 @@ namespace VoxGame {
             }
         }
 
-        public void Tick(float dt, float udt) { }
+        // Покой «ИГРАТЬ»: лёгкое дыхание и блик. «Меньше движения» — без них.
+        public void Tick(float dt, float udt) {
+            if (_playBtn == null || !_playBtn.gameObject.activeInHierarchy) return;
+            _idle += udt; if (_idle > 1000f) _idle -= 1000f;
+            var prt = (RectTransform)_playBtn.transform;
+            bool still = UIMotion.Reduced || !UIMotion.Animate || UIMotion.IsAnimating(prt);
+            float k = still ? 1f : 1f + PlayPulse * Mathf.Sin(_idle * 3.1f);
+            if (!UIMotion.IsAnimating(prt) && prt.localScale.x != k) prt.localScale = new Vector3(k, k, 1f);
+            float ph = UIMotion.Animate ? (_idle % ShinePeriod) / 0.6f : 0.3f;   // проход блика 0,6 с, затем пауза; без анимации — стоит
+            bool on = !UIMotion.Reduced && ph < 1f;
+            if (_shine.gameObject.activeSelf != on) _shine.gameObject.SetActive(on);
+            if (on) { float w = prt.rect.width; _shine.anchoredPosition = new Vector2(Mathf.Lerp(-60f, w + 60f, ph), 0f); }
+        }
+
+        public float PlayScale => _playBtn.transform.localScale.x;
+        public bool ShineVisible => _shine.gameObject.activeSelf;
     }
 
     // ====================================================================== Общие приёмы экранов меню
@@ -115,12 +156,53 @@ namespace VoxGame {
         }
 
         // Сплошной фон шире safe-area: закрывает экран до краёв, под вырезом и полосой жестов.
+        // Поверх — фактура: крупные воксельные клетки, тёплый свет ринга сверху, тёмные края.
         public static RectTransform Backdrop(Transform parent, Color color) {
             var bg = UIKit.Panel(parent, "Bg", color);
             UIKit.SetAnchors(bg, 0f, 0f, 1f, 1f);
             bg.offsetMin = new Vector2(-400f, -400f);
             bg.offsetMax = new Vector2(400f, 400f);
+            bg.gameObject.AddComponent<NoCascade>();   // фон стоит, пока содержимое всплывает
+            var tex = new GameObject("Tex", typeof(RectTransform), typeof(RawImage));
+            tex.transform.SetParent(bg, false);
+            var ri = tex.GetComponent<RawImage>(); ri.texture = BackTex; ri.raycastTarget = false;
+            ri.color = new Color(1f, 1f, 1f, color.a);
+            Place((RectTransform)tex.transform, 0f, 0f, 1f, 1f);
             return bg;
+        }
+
+        static Texture2D _backTex;
+        static Texture2D BackTex {
+            get {
+                if (_backTex != null) return _backTex;
+                const int W = 48, H = 96;
+                var t = new Texture2D(W, H, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear, name = "MenuBack" };
+                var px = new Color32[W * H];
+                for (int y = 0; y < H; y++)
+                    for (int x = 0; x < W; x++) {
+                        float u = (x + 0.5f) / W, v = (y + 0.5f) / H;
+                        // тёплый свет сверху (кровь с золотом), тёмные края, клетки 2×2 текселя — «воксели»
+                        float glow = Mathf.Clamp01(1f - Mathf.Sqrt((u - 0.5f) * (u - 0.5f) * 1.6f + (v - 1.02f) * (v - 1.02f) * 2.2f));
+                        float edge = Mathf.Clamp01((Mathf.Max(Mathf.Abs(u - 0.5f) * 2f, Mathf.Abs(v - 0.5f) * 2f) - 0.55f) / 0.45f);
+                        bool cell = ((x >> 1) + (y >> 1)) % 2 == 0;
+                        Color c = Color.Lerp(new Color(0.55f, 0.08f, 0.06f), new Color(0.95f, 0.62f, 0.15f), glow * 0.35f);
+                        float a = glow * 0.24f;
+                        c = Color.Lerp(c, Color.black, edge);
+                        a = Mathf.Max(a, edge * 0.55f);
+                        if (cell) { c = Color.Lerp(c, Color.white, 0.10f); a += 0.035f; }
+                        px[y * W + x] = new Color(c.r, c.g, c.b, Mathf.Clamp01(a));
+                    }
+                t.SetPixels32(px); t.Apply(false, true);
+                return _backTex = t;
+            }
+        }
+
+        // Черта под заголовком: короткая золотая, капля крови и длинная тусклая (подпись шкалы боя).
+        public static RectTransform Rule(Transform parent) {
+            var rt = UIKit.Plain(parent, "Line", new Color(UIKit.Accent.r, UIKit.Accent.g, UIKit.Accent.b, 0.25f));
+            var g = UIKit.Plain(rt, "Gold", UIKit.Accent); UIKit.SetAnchors(g, 0f, 0f, 0.22f, 1f); g.offsetMin = new Vector2(0f, -3f); g.offsetMax = new Vector2(0f, 3f);
+            var b = UIKit.Plain(rt, "Drop", UIKit.Blood); UIKit.SetAnchors(b, 0.225f, 0f, 0.245f, 1f); b.offsetMin = new Vector2(0f, -3f); b.offsetMax = new Vector2(0f, 3f);
+            return rt;
         }
 
         // Затемнение, выходящее за safe-area к ближнему краю экрана.
@@ -136,22 +218,24 @@ namespace VoxGame {
             rt.offsetMin = rt.offsetMax = Vector2.zero;
         }
 
-        // Главная кнопка: оранжевая, тёмная надпись без обводки.
+        // Главная кнопка: золотая, чернильная надпись без обводки, тёмная губа — как плитка шкалы.
         public static Button Primary(Transform parent, string name, string caption, int fontSize) {
-            var b = UIKit.Btn(parent, name, caption, fontSize, UIKit.Accent, UIKit.BgDark);
-            b.GetComponentInChildren<Outline>().enabled = false;
+            var b = UIKit.Btn(parent, name, caption, fontSize, UIKit.Accent, UIKit.Ink);
+            b.GetComponentInChildren<Text>().GetComponent<Outline>().enabled = false;
             var c = b.colors;
             c.disabledColor = Color.white;   // закрытое состояние красим сами
             b.colors = c;
             return b;
         }
 
-        // Обычная кнопка: тёмная подложка со светлой рамкой.
+        // Обычная кнопка: тёмная подложка, рамка кости и золотая метка слева (не серая плита).
         public static Button Secondary(Transform parent, string name, string caption, int fontSize) {
-            var b = UIKit.Btn(parent, name, caption, fontSize, UIKit.BgPanel, UIKit.TextMain);
-            var frame = b.gameObject.AddComponent<Outline>();
-            frame.effectColor = new Color(1f, 1f, 1f, 0.22f);
-            frame.effectDistance = new Vector2(2f, -2f);
+            var b = UIKit.Btn(parent, name, caption, fontSize, UIKit.BgPanel, UIKit.Bone);
+            var rt = (RectTransform)b.transform;
+            b.GetComponent<UIBorder>().Color = BoneFrame;
+            var n = UIKit.Plain(rt, "Notch", UIKit.Accent);
+            UIKit.SetAnchors(n, 0f, 0.18f, 0f, 0.82f); n.offsetMin = new Vector2(8f, 0f); n.offsetMax = new Vector2(16f, 0f);
+            n.SetSiblingIndex(0);
             var c = b.colors;
             c.disabledColor = Color.white;
             b.colors = c;
@@ -160,12 +244,36 @@ namespace VoxGame {
 
         public static void SetCaption(Button b, string caption) => b.GetComponentInChildren<Text>().text = caption;
 
+        // Подпись мельче под надписью кнопки: надпись уходит в верхние 60 %.
+        public static Text SubCaption(Button b, string text) {
+            var main = b.GetComponentInChildren<Text>();
+            UIKit.SetAnchors(main.rectTransform, 0f, 0.36f, 1f, 1f);
+            var t = UIKit.Label(b.transform, "Sub", UIKit.FontSm, UIKit.TextSub, semiBold: false);
+            UIKit.SetAnchors(t.rectTransform, 0.05f, 0.08f, 0.95f, 0.44f);
+            t.rectTransform.offsetMin = t.rectTransform.offsetMax = Vector2.zero;
+            t.text = text;
+            return t;
+        }
+
+        static readonly Color BoneFrame = new Color(0.93f, 0.89f, 0.78f, 0.45f);
+
+        // Обычная кнопка, ставшая главной (и обратно): метка и светлая рамка только у обычной.
+        public static void SetSecondaryLook(Button b, bool secondary) {
+            var n = b.transform.Find("Notch"); if (n != null) n.gameObject.SetActive(secondary);
+            b.GetComponent<UIBorder>().Color = secondary ? BoneFrame : new Color(UIKit.Ink.r, UIKit.Ink.g, UIKit.Ink.b, 0.95f);
+        }
+
+        // Метка обычной кнопки своим цветом (раздел: боец — синий, магазин — золото, настройки — кость).
+        public static void SetNotch(Button b, Color c) {
+            var n = b.transform.Find("Notch"); if (n != null) n.GetComponent<Image>().color = c;
+        }
+
         // Кнопка-действие: доступна (оранжевая) или закрыта (серая с серой надписью).
         public static void SetActionState(Button b, bool enabled) {
             b.interactable = enabled;
             b.GetComponent<Image>().color = enabled ? UIKit.Accent : UIKit.BgPanelLt;
             var lbl = b.GetComponentInChildren<Text>();
-            lbl.color = enabled ? UIKit.BgDark : UIKit.TextSub;
+            lbl.color = enabled ? UIKit.Ink : UIKit.TextSub;
             lbl.GetComponent<Outline>().enabled = !enabled;
         }
 

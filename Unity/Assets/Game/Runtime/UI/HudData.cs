@@ -19,5 +19,8 @@ namespace VoxGame {
         public float  telegraphAlpha;  // 0..1 (прозрачность «!» по прогрессу замаха)
         public bool   playerBlocking;
         public int    combo;           // текущее комбо игрока (0 = нет)
+        public float  foeStun01;       // 0..1: оглушение соперника (полное — нокдаун)
+        public float  cineBars;        // 0..1: кинополосы FxScreen (нокдаун) — шкалы уходят под них
+        public float  staminaHitCost;  // цена удара в единицах выносливости (деления зарядов); 0 — по умолчанию
     }
 }

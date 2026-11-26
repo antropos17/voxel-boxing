@@ -41,6 +41,7 @@ namespace VoxGame {
         public List<string> boughtGloveIds = new List<string> { "classic" };
         public bool soundEnabled = true;
         public bool vibrationEnabled = true;
+        public bool reduceMotion;          // интерфейс без тряски и вспышек (UIMotion.Reduced)
         public float masterVolume = 1f;   // 0..1
         public float sfxVolume = 1f;
         public float crowdVolume = 1f;
@@ -165,6 +166,7 @@ namespace VoxGame {
             ladderIndex      = Mathf.Max(0, d.ladderIndex);
             soundEnabled     = d.soundEnabled;
             vibrationEnabled = d.vibrationEnabled;
+            reduceMotion     = d.reduceMotion;
             masterVolume     = SaveService.Volume01(d.masterVolume);
             sfxVolume        = SaveService.Volume01(d.sfxVolume);
             crowdVolume      = SaveService.Volume01(d.crowdVolume);
@@ -203,6 +205,7 @@ namespace VoxGame {
             d.ladderIndex     = ladderIndex;
             d.soundEnabled    = soundEnabled;
             d.vibrationEnabled = vibrationEnabled;
+            d.reduceMotion    = reduceMotion;
             d.masterVolume    = masterVolume;
             d.sfxVolume       = sfxVolume;
             d.crowdVolume     = crowdVolume;

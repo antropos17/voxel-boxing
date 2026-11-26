@@ -65,7 +65,7 @@ namespace VoxGame {
 
             _header = UIKit.Label(transform, "Header", UIKit.FontXl, UIKit.Accent, semiBold: true, TextAnchor.MiddleLeft);
             _header.text = "ЛЕСТНИЦА";
-            _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
+            _line = MenuKit.Rule(transform);
             _progress = UIKit.Label(transform, "Progress", UIKit.FontSm, UIKit.TextSub, semiBold: false, TextAnchor.MiddleRight);
 
             // Прокручиваемый список: Viewport с RectMask2D (без трафарета), строки раскладываются вручную —
@@ -102,7 +102,7 @@ namespace VoxGame {
             _fightBtn.onClick.AddListener(PressFight);
             _fightImg = _fightBtn.GetComponent<Image>();
             _fightLbl = _fightBtn.GetComponentInChildren<Text>();
-            _fightOutline = _fightBtn.GetComponentInChildren<Outline>();
+            _fightOutline = _fightBtn.GetComponentInChildren<Text>().GetComponent<Outline>();
             _fightOutline.enabled = false;   // тёмная надпись на светлой кнопке: обводка её только мажет
             var fc = _fightBtn.colors;
             fc.disabledColor = Color.white;  // закрытое состояние красим сами

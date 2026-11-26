@@ -33,7 +33,7 @@ namespace VoxGame {
 
             _header = UIKit.Label(transform, "Header", UIKit.FontXl, UIKit.Accent, semiBold: true, TextAnchor.MiddleLeft);
             _header.text = "РЕЖИМ";
-            _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
+            _line = MenuKit.Rule(transform);
 
             _ladder   = MakeCard("CardLadder", "ЛЕСТНИЦА", PressLadder);
             _quick    = MakeCard("CardQuick", "БЫСТРЫЙ БОЙ", PressQuick);
@@ -51,9 +51,7 @@ namespace VoxGame {
             var c = new Card();
             c.btn = UIKit.Btn(transform, name, "", UIKit.FontSm, UIKit.BgPanel, UIKit.TextMain);
             c.rt = c.btn.GetComponent<RectTransform>();
-            var frame = c.btn.gameObject.AddComponent<Outline>();
-            frame.effectColor = new Color(UIKit.Accent.r, UIKit.Accent.g, UIKit.Accent.b, 0.55f);
-            frame.effectDistance = new Vector2(2f, -2f);
+            c.btn.GetComponent<UIBorder>().Color = new Color(UIKit.Accent.r, UIKit.Accent.g, UIKit.Accent.b, 0.55f);
             c.btn.onClick.AddListener(onTap);
             // подпись кнопки из UIKit не нужна — у карточки свои надписи
             c.btn.GetComponentInChildren<Text>().gameObject.SetActive(false);

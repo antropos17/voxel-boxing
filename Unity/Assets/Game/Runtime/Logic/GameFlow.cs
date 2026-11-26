@@ -369,6 +369,13 @@ namespace VoxGame {
             return true;
         }
 
+        public bool SetReduceMotion(bool on) {
+            if (State != AppState.Settings) return false;
+            Profile.reduceMotion = on;
+            Save();
+            return true;
+        }
+
         // Сброс прогресса доступен только из настроек главного меню (не из паузы боя). Звук и вибрация остаются.
         public bool CanResetProgress => State == AppState.Settings && _settingsReturn == AppState.MainMenu;
 
@@ -378,6 +385,7 @@ namespace VoxGame {
             Profile = new PlayerProfile {
                 soundEnabled = old.soundEnabled,
                 vibrationEnabled = old.vibrationEnabled,
+                reduceMotion = old.reduceMotion,
                 masterVolume = old.masterVolume,
                 sfxVolume = old.sfxVolume,
                 crowdVolume = old.crowdVolume,

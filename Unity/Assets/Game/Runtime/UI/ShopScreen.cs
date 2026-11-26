@@ -61,7 +61,7 @@ namespace VoxGame {
             public Image bg;
             public RectTransform stripA, stripB;
             public Text name, status;
-            public Outline frame;
+            public UIBorder frame;
         }
 
         class UpgradeRow {
@@ -120,7 +120,7 @@ namespace VoxGame {
             _header = UIKit.Label(transform, "Header", UIKit.FontXl, UIKit.Accent, semiBold: true, TextAnchor.MiddleLeft);
             _header.text = "МАГАЗИН";
             _coins = UIKit.Label(transform, "Coins", UIKit.FontMd, UIKit.MegaGold, semiBold: true, TextAnchor.MiddleRight);
-            _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
+            _line = MenuKit.Rule(transform);
 
             _tabGloves = MenuKit.Secondary(transform, "TabGloves", "ПЕРЧАТКИ", UIKit.FontMd);
             _tabGloves.onClick.AddListener(() => ShowTab(Tab.Gloves));
@@ -139,7 +139,7 @@ namespace VoxGame {
 
             // Надпись-отказ поверх содержимого
             _toastBox = UIKit.Panel(transform, "Toast", new Color(0.05f, 0.03f, 0.04f, 0.92f));
-            _toast = UIKit.Label(_toastBox, "Lbl", UIKit.FontMd, UIKit.HpRed, semiBold: true);
+            _toast = UIKit.Label(_toastBox, "Lbl", UIKit.FontMd, UIKit.RedText, semiBold: true);
             MenuKit.Place(_toast.rectTransform, 0f, 0f, 1f, 1f);
             _toastBox.gameObject.SetActive(false);
             _toast.gameObject.SetActive(false);
@@ -160,7 +160,7 @@ namespace VoxGame {
                 t.btn = UIKit.Btn(_glovesRoot, "Tile" + i, "", UIKit.FontSm, UIKit.BgPanel, UIKit.TextMain);
                 t.btn.GetComponentInChildren<Text>().gameObject.SetActive(false);
                 t.bg = t.btn.GetComponent<Image>();
-                t.frame = t.btn.gameObject.AddComponent<Outline>();
+                t.frame = t.btn.GetComponent<UIBorder>();
                 var rt = t.btn.GetComponent<RectTransform>();
                 t.stripA = UIKit.Panel(rt, "A", g.colorA);
                 t.stripB = UIKit.Panel(rt, "B", g.colorB);
@@ -182,9 +182,7 @@ namespace VoxGame {
             }
 
             _card = UIKit.Panel(_glovesRoot, "Card", UIKit.BgPanel);
-            var cf = _card.gameObject.AddComponent<Outline>();
-            cf.effectColor = new Color(UIKit.Accent.r, UIKit.Accent.g, UIKit.Accent.b, 0.6f);
-            cf.effectDistance = new Vector2(2f, -2f);
+            _card.GetComponent<UIBorder>().Color = new Color(UIKit.Accent.r, UIKit.Accent.g, UIKit.Accent.b, 0.6f);
 
             // Место под 3D-превью: пока текстуры нет — две плашки цветов перчатки (кулак и манжета)
             _previewBox = UIKit.Panel(_card, "PreviewBox", new Color32(10, 9, 14, 255));
@@ -264,13 +262,12 @@ namespace VoxGame {
             bool sel = i == _selected;
             // выбранная — тёмная плитка с рамкой акцента: цена и статус на ней читаются (на заливке AccentDim красный не виден)
             t.bg.color = sel ? (Color)new Color32(58, 38, 22, 255) : UIKit.BgPanel;
-            t.frame.effectColor = sel ? UIKit.Accent : new Color(1f, 1f, 1f, 0.18f);
-            t.frame.effectDistance = sel ? new Vector2(3f, -3f) : new Vector2(2f, -2f);
+            t.frame.Color = sel ? UIKit.Accent : new Color(1f, 1f, 1f, 0.18f);
             // надето — зелёным капсом, куплено — белым, цена — золотом или красным, закрыто — серым
             if (_profile.equippedGloveId == g.id) { t.status.text = "НАДЕТО"; t.status.color = UIKit.HpGreen; }
             else if (_profile.OwnsGlove(g.id)) { t.status.text = "куплено"; t.status.color = UIKit.TextMain; }
             else if (!GameFlow.IsGloveUnlocked(g, _profile)) { t.status.text = "закрыто"; t.status.color = UIKit.TextSub; }
-            else { t.status.text = MenuKit.Coins(g.price); t.status.color = _profile.coins >= g.price ? UIKit.MegaGold : UIKit.HpRed; }
+            else { t.status.text = MenuKit.Coins(g.price); t.status.color = _profile.coins >= g.price ? UIKit.MegaGold : UIKit.RedText; }
         }
 
         void RefreshCard() {
@@ -290,7 +287,7 @@ namespace VoxGame {
             else if (!unlocked) { _gStatus.text = UnlockText(GameFlow.GloveUnlockLadder(g)); _gStatus.color = UIKit.TextSub; }
             else if (_profile.coins < g.price) {
                 _gStatus.text = "Цена: " + MenuKit.Coins(g.price) + " · не хватает " + (g.price - _profile.coins);
-                _gStatus.color = UIKit.HpRed;
+                _gStatus.color = UIKit.RedText;
             }
             else { _gStatus.text = "Цена: " + MenuKit.Coins(g.price); _gStatus.color = UIKit.MegaGold; }
 

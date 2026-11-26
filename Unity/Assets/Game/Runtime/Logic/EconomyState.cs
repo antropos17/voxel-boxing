@@ -20,6 +20,7 @@ namespace VoxGame {
         public string[] boughtGloveIds = new string[] { "classic" };
         public bool soundEnabled = true;
         public bool vibrationEnabled = true;
+        public bool reduceMotion;          // «меньше движения» (UI-MOTION.md); в старых файлах поля нет — false
         // с версии 2: громкости 0..1 (в старых файлах полей нет — SaveService.Migrate ставит 1)
         public float masterVolume = 1f;
         public float sfxVolume = 1f;

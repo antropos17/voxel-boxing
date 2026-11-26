@@ -11,7 +11,7 @@ namespace VoxGame {
         public const int Steps = 5;   // ступеней громкости: 0, 20 … 100%
         const int RowFont = UIKit.FontSm + 4;
 
-        public Action<bool> OnSound, OnVibration;
+        public Action<bool> OnSound, OnVibration, OnMotion;
         public Action<VolumeKind, float> OnVolume;
         public Action OnReset, OnBack;
 
@@ -36,7 +36,7 @@ namespace VoxGame {
 
         Text _header;
         RectTransform _line;
-        ToggleRow _soundRow, _vibRow;
+        ToggleRow _soundRow, _vibRow, _motionRow;
         readonly StepRow[] _vol = new StepRow[3];   // индекс = VolumeKind
         RectTransform _resetRow;
         Button _resetBtn, _backBtn;
@@ -44,11 +44,12 @@ namespace VoxGame {
         Text _confirmText;
         Button _yesBtn, _noBtn;
 
-        bool _sound, _vibration, _canReset;
+        bool _sound, _vibration, _motion, _canReset;
         readonly int[] _level = new int[3];
 
         public bool SoundOn => _sound;
         public bool Vibration => _vibration;
+        public bool ReduceMotion => _motion;
         public int Level(VolumeKind k) => _level[(int)k];
         public bool ConfirmShown => _confirm.gameObject.activeSelf;
         public bool ResetVisible => _resetRow.gameObject.activeSelf;
@@ -57,8 +58,8 @@ namespace VoxGame {
         public static float ToVolume(int level) => (float)Mathf.Clamp(level, 0, Steps) / Steps;
 
         public void Init(UIRoot root, Action<bool> onSound, Action<VolumeKind, float> onVolume, Action<bool> onVibration,
-                         Action onReset, Action onBack) {
-            OnSound = onSound; OnVolume = onVolume; OnVibration = onVibration; OnReset = onReset; OnBack = onBack;
+                         Action onReset, Action onBack, Action<bool> onMotion = null) {
+            OnSound = onSound; OnVolume = onVolume; OnVibration = onVibration; OnReset = onReset; OnBack = onBack; OnMotion = onMotion;
             BuildUI();
             root.Register(ScreenId.Settings, gameObject);
         }
@@ -69,13 +70,14 @@ namespace VoxGame {
 
             _header = UIKit.Label(transform, "Header", UIKit.FontXl, UIKit.Accent, semiBold: true, TextAnchor.MiddleLeft);
             _header.text = "НАСТРОЙКИ";
-            _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
+            _line = MenuKit.Rule(transform);
 
             _soundRow = MakeToggleRow("Sound", "Звук", PressSound);
             _vol[(int)VolumeKind.Master] = MakeStepRow("Master", "Громкость", VolumeKind.Master);
             _vol[(int)VolumeKind.Sfx]    = MakeStepRow("Sfx", "Удары", VolumeKind.Sfx);
             _vol[(int)VolumeKind.Crowd]  = MakeStepRow("Crowd", "Толпа", VolumeKind.Crowd);
             _vibRow = MakeToggleRow("Vibration", "Вибрация", PressVibration);
+            _motionRow = MakeToggleRow("Motion", "Меньше движения", PressMotion);
 
             _resetRow = new GameObject("ResetRow", typeof(RectTransform)).GetComponent<RectTransform>();
             _resetRow.SetParent(transform, false);
@@ -98,9 +100,7 @@ namespace VoxGame {
             var card = UIKit.Panel(_confirm, "Card", new Color32(30, 23, 36, 255));
             UIKit.SetAnchors(card, 0f, 0f, 1f, 1f);
             card.offsetMin = card.offsetMax = Vector2.zero;
-            var cardFrame = card.gameObject.AddComponent<Outline>();
-            cardFrame.effectColor = UIKit.Accent;
-            cardFrame.effectDistance = new Vector2(2f, -2f);
+            UIKit.Frame(card, UIKit.Accent, 2f);
             _confirmText = UIKit.Label(_confirm, "Text", UIKit.FontMd, UIKit.TextMain, semiBold: true);
             _confirmText.text = "Сбросить весь прогресс?\nМонеты, перчатки, улучшения и лестница пропадут навсегда.";
             _yesBtn = UIKit.Btn(_confirm, "BtnYes", "ДА, СБРОСИТЬ", UIKit.FontMd, UIKit.HpRed, UIKit.TextMain);
@@ -143,6 +143,7 @@ namespace VoxGame {
         public void SetData(PlayerProfile p, bool canReset) {
             _sound = p.soundEnabled;
             _vibration = p.vibrationEnabled;
+            _motion = p.reduceMotion;
             for (int i = 0; i < 3; i++) _level[i] = ToLevel(p.GetVolume((VolumeKind)i));
             _canReset = canReset;
             _resetRow.gameObject.SetActive(canReset);
@@ -153,6 +154,7 @@ namespace VoxGame {
         void Refresh() {
             SetSwitch(_soundRow, _sound);
             SetSwitch(_vibRow, _vibration);
+            SetSwitch(_motionRow, _motion);
             for (int i = 0; i < 3; i++) {
                 var r = _vol[i];
                 MenuKit.SetPips(r.pips, _level[i]);
@@ -202,6 +204,13 @@ namespace VoxGame {
             OnVibration?.Invoke(_vibration);
         }
 
+        // «Меньше движения»: без тряски, вспышек и каскадов (UIMotion.Reduced).
+        public void PressMotion() {
+            _motion = !_motion;
+            Refresh();
+            OnMotion?.Invoke(_motion);
+        }
+
         // Первое нажатие только спрашивает подтверждение.
         public void PressReset() {
             if (!_canReset) return;
@@ -236,9 +245,11 @@ namespace VoxGame {
                 PlaceToggle(_soundRow, 0.020f, top0, 0.325f, top1, true);
                 PlaceStep(_vol[0],     0.345f, top0, 0.655f, top1, true);
                 PlaceStep(_vol[1],     0.675f, top0, 0.980f, top1, true);
-                PlaceStep(_vol[2],     0.020f, bot0, 0.325f, bot1, true);
-                PlaceToggle(_vibRow,   0.345f, bot0, 0.655f, bot1, true);
-                MenuKit.Place(_resetRow, 0.675f, bot0 + 0.06f, 0.980f, bot1 - 0.06f);
+                // нижний ряд — четыре ячейки: толпа, вибрация, меньше движения, сброс
+                PlaceStep(_vol[2],     0.020f, bot0, 0.300f, bot1, true);
+                PlaceToggle(_vibRow,   0.315f, bot0, 0.520f, bot1, true);
+                PlaceToggle(_motionRow, 0.535f, bot0, 0.740f, bot1, true);
+                MenuKit.Place(_resetRow, 0.755f, bot0 + 0.06f, 0.980f, bot1 - 0.06f);
                 MenuKit.Place(back, 0.02f, 0.02f, 0.24f, 0.21f);
                 MenuKit.Place(_confirm, 0.10f, 0.08f, 0.90f, 0.92f);
                 MenuKit.Place(_confirmText.rectTransform, 0.05f, 0.45f, 0.95f, 0.95f);
@@ -247,14 +258,15 @@ namespace VoxGame {
             } else {
                 MenuKit.Place(_header.rectTransform, 0.05f, 0.935f, 0.95f, 0.998f);
                 MenuKit.Place(_line,                 0.05f, 0.929f, 0.95f, 0.933f);
-                // семь строк по 0.105 с зазором 0.012 сверху вниз
+                // семь строк по 0.094 с зазором 0.010 сверху вниз
                 float y = 0.918f;
-                const float h = 0.103f, gap = 0.012f;
+                const float h = 0.094f, gap = 0.010f;
                 PlaceToggle(_soundRow, 0.03f, y - h, 0.97f, y, false); y -= h + gap;
                 PlaceStep(_vol[0],     0.03f, y - h, 0.97f, y, false); y -= h + gap;
                 PlaceStep(_vol[1],     0.03f, y - h, 0.97f, y, false); y -= h + gap;
                 PlaceStep(_vol[2],     0.03f, y - h, 0.97f, y, false); y -= h + gap;
                 PlaceToggle(_vibRow,   0.03f, y - h, 0.97f, y, false); y -= h + gap;
+                PlaceToggle(_motionRow, 0.03f, y - h, 0.97f, y, false); y -= h + gap;
                 MenuKit.Place(_resetRow, 0.03f, y - h, 0.97f, y);
                 MenuKit.Place(back, 0.03f, 0.012f, 0.40f, 0.125f);
                 MenuKit.Place(_confirm, 0.03f, 0.25f, 0.97f, 0.70f);

@@ -108,6 +108,7 @@ namespace VoxGame {
             _uiSound.Init(transform, seed);
             if (cam.GetComponent<AudioListener>() == null) cam.gameObject.AddComponent<AudioListener>();
             UIKit.OnButtonClick = OnUiClick;
+            UIMotion.Reduced = Flow.Profile.reduceMotion;
             ApplyAudio();
 
             Flow.OnStateChanged += OnState;
@@ -144,7 +145,8 @@ namespace VoxGame {
                 (k, v) => { f.SetVolume(k, v); ApplyAudio(); },
                 on => f.SetVibration(on),
                 () => { if (f.ResetProgress()) Settings.SetData(f.Profile, f.CanResetProgress); },
-                () => f.Back());
+                () => f.Back(),
+                on => { f.SetReduceMotion(on); UIMotion.Reduced = on; });
 
             Pause = NewScreen<PauseScreen>("Pause");
             Pause.Init(UI, () => f.Resume(), RestartFromPause, () => f.OpenSettings(), () => f.QuitToMenu());
@@ -653,6 +655,7 @@ namespace VoxGame {
                 // настройки
                 case "settings.sound":     if (s != AppState.Settings) return false; Settings.PressSound(); return true;
                 case "settings.vibration": if (s != AppState.Settings) return false; Settings.PressVibration(); return true;
+                case "settings.motion":    if (s != AppState.Settings) return false; Settings.PressMotion(); return true;
                 case "settings.master-":   if (s != AppState.Settings) return false; Settings.PressVolume(VolumeKind.Master, -1); return true;
                 case "settings.master+":   if (s != AppState.Settings) return false; Settings.PressVolume(VolumeKind.Master, 1); return true;
                 case "settings.sfx-":      if (s != AppState.Settings) return false; Settings.PressVolume(VolumeKind.Sfx, -1); return true;

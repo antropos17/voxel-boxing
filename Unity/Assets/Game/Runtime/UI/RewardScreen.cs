@@ -14,14 +14,15 @@ namespace VoxGame {
         public Action OnNext, OnShop, OnRematch, OnMenu;
 
         Text _header, _total, _xp, _levelUp, _extra, _next;
-        RectTransform _line, _xpBg, _xpFill, _linesBox;
+        RectTransform _line, _xpBg, _xpFill, _linesBox, _totalPlate;
         readonly Text[] _lineL = new Text[MaxLines], _lineR = new Text[MaxLines];
         Button _mainBtn, _shopBtn, _menuBtn;
         bool _won = true, _land;
         int _n = MaxLines;   // строк разбивки: рамка под них, без пустого хвоста
         float _pulse;
 
-        public string TotalText => _total.text;
+        public string TotalText => _totalFinal;   // конечная строка (на экране монеты ещё могут набегать)
+        string _totalFinal = "";
         public string NextFoeText => _next.text;
         public string MainCaption => _mainBtn.GetComponentInChildren<Text>().text;
         public bool Won => _won;
@@ -37,8 +38,12 @@ namespace VoxGame {
             MenuKit.Backdrop(transform, UIKit.BgDark);
 
             _header = UIKit.Label(transform, "Header", UIKit.FontXl, UIKit.Accent, semiBold: true, TextAnchor.MiddleLeft);
-            _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
-            _total = UIKit.Label(transform, "Total", 58, UIKit.MegaGold, semiBold: true);
+            _line = MenuKit.Rule(transform);
+            // сумма — главное число экрана: печать на чернильной плашке в золотой рамке
+            _totalPlate = UIKit.Plain(transform, "TotalPlate", UIKit.Ink);
+            UIKit.Frame(_totalPlate, UIKit.Accent, 3f);
+            UIKit.Strip(_totalPlate, "Hi", new Color(1f, 1f, 1f, 0.08f), 0f, 1f, 8f);
+            _total = UIKit.Label(transform, "Total", 64, UIKit.Accent, semiBold: true);
             var sh = _total.gameObject.AddComponent<Shadow>();
             sh.effectColor = new Color(0f, 0f, 0f, 0.8f);
             sh.effectDistance = new Vector2(3f, -3f);
@@ -72,7 +77,9 @@ namespace VoxGame {
             _won = r.won;
             _header.text = r.won ? "НАГРАДА" : "УТЕШИТЕЛЬНЫЙ ПРИЗ";
             _header.color = r.won ? UIKit.Accent : UIKit.TextMain;
-            _total.text = "+" + MenuKit.Coins(r.coins);
+            _totalFinal = "+" + MenuKit.Coins(r.coins);
+            UIMotion.Count(_total, 0, r.coins, "+", " " + MenuKit.Plural(r.coins, "монета", "монеты", "монет"), UIMotion.CountUp, 0.08f);
+            UIMotion.Stamp(_total.rectTransform, 0.04f);
 
             int n = Mathf.Min(MaxLines, r.lines.Count);
             for (int i = 0; i < MaxLines; i++) {
@@ -82,14 +89,18 @@ namespace VoxGame {
                 if (!on) continue;
                 _lineL[i].text = r.lines[i].label;
                 int v = r.lines[i].value;
-                _lineR[i].text = v >= 0 ? "+" + v : "−" + (-v);
+                if (v >= 0) UIMotion.Count(_lineR[i], 0, v, "+", "", UIMotion.CountUp, 0.14f + i * UIMotion.StaggerStep);
+                else { UIMotion.Complete(_lineR[i]); _lineR[i].text = "−" + (-v); }
             }
 
             bool max = p.level >= PlayerProfile.MaxPlayerLevel;
             _xp.text = "Опыт +" + r.xp + (max ? "" : "   (" + p.xp + " / " + PlayerProfile.XpForNextLevel(p.level) + ")");
-            UIKit.SetBarH(_xpFill, max ? 1f : (float)p.xp / Mathf.Max(1, PlayerProfile.XpForNextLevel(p.level)));
+            float xpK = max ? 1f : (float)p.xp / Mathf.Max(1, PlayerProfile.XpForNextLevel(p.level));
+            UIKit.SetBarH(_xpFill, xpK);
+            UIMotion.Bar(_xpFill, 0f, Mathf.Clamp01(xpK), UIMotion.CountUp, 0.2f);
             _levelUp.gameObject.SetActive(r.levelsGained > 0);
             _levelUp.text = "НОВЫЙ УРОВЕНЬ: " + r.newLevel + "!";
+            if (r.levelsGained > 0) UIMotion.Stamp(_levelUp.rectTransform, 0.3f);
 
             string extra = "";
             if (r.belt) extra = "ПОЯС ЛЕСТНИЦЫ — ТВОЙ!";
@@ -185,6 +196,9 @@ namespace VoxGame {
                 MenuKit.Place(shop, 0.05f, 0.012f, 0.49f, 0.128f);
                 MenuKit.Place(menu, 0.51f, 0.012f, 0.95f, 0.128f);
             }
+            var tr = _total.rectTransform;
+            _totalPlate.anchorMin = tr.anchorMin; _totalPlate.anchorMax = tr.anchorMax;
+            _totalPlate.offsetMin = tr.offsetMin; _totalPlate.offsetMax = tr.offsetMax;
         }
 
         // Пульс надписи нового уровня.

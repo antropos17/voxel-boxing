@@ -494,7 +494,7 @@ namespace VoxGame
 
         // ---- Вспомогательные -----------------------------------------------
 
-        void AddShake(float s) { if (s > _shake) _shake = s; }
+        void AddShake(float s) { if (UIMotion.Reduced) return; if (s > _shake) _shake = s; }   // «меньше движения» (UI-MOTION.md): без тряски камеры
 
         // Перчатки игрока (PlayerGloves: камера/playerArms/playerGlove0..1) → экранные прямоугольники для места плашки удара.
         readonly MeshFilter[] _gloveMf = new MeshFilter[2];
