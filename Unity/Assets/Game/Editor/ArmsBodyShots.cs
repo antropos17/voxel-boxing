@@ -193,6 +193,13 @@ namespace VoxGame.Editor
             Vector3 e = el.position;
             CamShot(cam, e + fr.right * 0.75f + fr.forward * 0.25f + fr.up * 0.02f, e + fr.up * 0.02f, 40f, BPW, BPH,
                     Path.Combine(dir, prefix + "foe-arm.png"));
+            // согнутая рука спереди-снаружи (бицепс, дельта, предплечье) и сзади (трицепс, локоть)
+            var up = FindDeep(fr, "upperArm0").position;
+            Vector3 mid = (up + e) * 0.5f;
+            CamShot(cam, mid + fr.forward * 0.55f + fr.right * 0.45f + fr.up * 0.05f, mid, 38f, BPW, BPH,
+                    Path.Combine(dir, prefix + "foe-arm-flex.png"));
+            CamShot(cam, mid - fr.forward * 0.65f + fr.right * 0.40f + fr.up * 0.10f, mid, 38f, BPW, BPH,
+                    Path.Combine(dir, prefix + "foe-arm-back.png"));
             d.Gloves.SetVisible(true);
         }
 
@@ -241,6 +248,43 @@ namespace VoxGame.Editor
             Debug.Log(ArmsLog);
             File.WriteAllText(Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Logs", "arms-buildprof.txt")), ArmsLog);
         }
+
+        // Обхват звеньев руки соперника (по функции формы, шаг 0,05 см): площадь сечения поперёк оси через каждые 0,5 см,
+        // наибольшая → равновеликий обхват 2√(πA); и габариты сеток рук (соперник и игрок, перчатка «классика»).
+        public static void ArmsGirth(string tag)
+        {
+            var sb = new StringBuilder();
+            foreach (var (name, len) in new[] { ("upper", 29f), ("fore", 27f) })
+            {
+                float best = 0f, by = 0f;
+                for (float y = 0.5f; y < len; y += 0.5f)
+                {
+                    int n = 0;
+                    for (float x = -7f; x < 7f; x += 0.05f)
+                    for (float z = -7f; z < 7f; z += 0.05f)
+                        if ((name == "upper" ? BoxerParts.UpperArm(x, y, z) : BoxerParts.ForeArm(x, y, z)) < 0f) n++;
+                    float a = n * 0.0025f;
+                    if (a > best) { best = a; by = y; }
+                }
+                sb.Append("ARMS_GIRTH " + name + " max=" + F(2f * Mathf.Sqrt(Mathf.PI * best)) + "cm at y=" + F(by) + "\n");
+            }
+            var look = GloveLooks.Get("classic");
+            var ms = new[]
+            {
+                ("foeUpper", BoxerParts.UpperArmMesh(new Color32(200, 150, 120, 255))), ("foeFore", BoxerParts.ForeArmMesh(new Color32(200, 150, 120, 255))),
+                ("foeGlove", BoxerParts.GloveMesh(-1, Color.red, Color.white)), ("playerUpper", GloveLooks.BuildUpperArmMesh()),
+                ("playerFore", GloveLooks.BuildForeArmMesh(look)), ("playerGlove", GloveLooks.BuildGloveMesh(look, 1)),
+            };
+            foreach (var (n, m) in ms)
+            {
+                var b = m.bounds;
+                sb.Append("ARMS_BOUNDS " + n + " size=" + V3(b.size) + " center=" + V3(b.center) + "\n");
+                Object.DestroyImmediate(m);
+            }
+            ArmsLog = sb.ToString();
+            File.WriteAllText(Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Logs", "arms-girth-" + tag + ".txt")), ArmsLog);
+        }
+        public static void ArmsGirthNow() => ArmsGirth(System.Environment.GetEnvironmentVariable("ARMS_TAG") ?? "x");
 
         public static void ArmsBench(string tag)
         {

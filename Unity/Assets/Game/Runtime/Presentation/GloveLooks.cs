@@ -112,9 +112,9 @@ namespace VoxGame
 
         // Предплечье игрока: запястье в начале координат, локоть на −ForeLenCm по Y. Форма — предплечье соперника
         // (BoxerParts.ForeArm: сужение к запястью, разгибатели и сгибатели, локтевой отросток и сгиб), по длине до ForeLenCm,
-        // по толщине ×ForeK (запястье 2.8, у локтя 4.3 см, как было). +Z — тыльная сторона. Тон вокселями: свет и тень.
+        // по толщине ×ForeK (габариты как до правки рук). +Z — тыльная сторона. Тон вокселями: свет и тень.
         // У бинтов предплечье замотано от запястья.
-        const float ForeK = 1.08f;
+        const float ForeK = 1.0f;
         static float ForeY(float y) => BoxerParts.ForeLen * 100f + y * (BoxerParts.ForeLen * 100f / ForeLenCm);
 
         public static Mesh BuildForeArmMesh(GloveLook look)
@@ -142,8 +142,8 @@ namespace VoxGame
         }
 
         // Плечо игрока: локоть в начале координат, плечевой сустав на −UpperLenCm по Y. Одно на все виды перчаток.
-        // Форма — плечо соперника (дельта, бицепс, трицепс, локоть), по длине до UpperLenCm, по толщине ×UpperK.
-        const float UpperK = 1.1f;
+        // Форма — плечо соперника (дельта, бицепс, трицепс, локоть), по длине до UpperLenCm, по толщине ×UpperK (габариты как до правки рук).
+        const float UpperK = 1.0f;
         static float UpperY(float y) => BoxerParts.UpperLen * 100f + y * (BoxerParts.UpperLen * 100f / UpperLenCm);
 
         public static Mesh BuildUpperArmMesh()

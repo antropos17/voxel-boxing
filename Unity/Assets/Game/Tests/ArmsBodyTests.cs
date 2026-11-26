@@ -89,8 +89,6 @@ namespace VoxGame.Tests
         }
 
         // Допуск 1 %: точка — 1 % её значения (не меньше 0,5 мм), доля экрана — 0,01, центр габарита — 1 % размера по той же оси.
-        const float TorsoQuant = (0.007f + 0.0057f) * 0.5f * 2f;   // м: по полклетки старого и нового шага с двух сторон
-
         [Test]
         public void LayoutUnchanged()
         {
@@ -108,10 +106,6 @@ namespace VoxGame.Tests
                 if (kv.Key.EndsWith(".vx") || kv.Key.EndsWith(".vy")) tol = 0.01f;
                 else if (kv.Key.Contains(".center.")) tol = 0.01f * bl[kv.Key.Replace(".center.", ".size.")];
                 else tol = Mathf.Max(0.0005f, 0.01f * Mathf.Abs(b));
-                // Торс теперь в клетках 0,57 см вместо 0,7: край сетки сдвигается до полклетки старого и нового шага
-                // с каждой стороны (квантование, не форма). Проверено: при шаге 0,7 и новых формах все габариты в 1 %.
-                if (kv.Key.Contains(".torso.size.")) tol = Mathf.Max(tol, TorsoQuant);
-                if (kv.Key.Contains(".torso.center.")) tol = Mathf.Max(tol, TorsoQuant * 0.5f);
                 if (Mathf.Abs(a - b) > tol) { bad.AppendLine(kv.Key + " было " + b + " стало " + a); n++; }
             }
             Assert.AreEqual(0, n, bad.ToString());

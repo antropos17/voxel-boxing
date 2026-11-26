@@ -33,21 +33,35 @@ namespace VoxGame
 
         // ---- Формы ----------------------------------------------------------------------------
 
+        // Рельеф мышц: борозды заданы глубиной (см, внутрь поверхности), rel — сила рельефа бойца (FoeBody: от armMult,
+        // у худого слабее). Те же функции дают тень в бороздах при раскраске. Шаг руки 0,65 см: борозда 0,65–1,0 см =
+        // 1–1,5 вокселя.
+        const float DeltGroove = 0.85f, ArmSideGroove = 0.7f, ForeDorsGroove = 0.65f, ForeVolGroove = 0.4f;
+
+        // Плечо: борозда дельта|бицепс (спереди и с боков, сзади дельта переходит в трицепс) и боковые борозды бицепс|трицепс.
+        static float UpperGroove(float x, float y, float z) =>
+            DeltGroove * Bump(y, 9.2f, 1.0f) * Mathf.Clamp01((z + 2f) / 3f)
+          + ArmSideGroove * Bump(z, 0.1f, 0.9f) * Bump(y, 18.5f, 7f) * Mathf.Clamp01(Mathf.Abs(x) / 2f - 0.8f);
+
+        // Предплечье: тыльная борозда по локтевой кости (разгибатели | сгибатели) и неглубокая ладонная.
+        static float ForeGroove(float x, float y, float z) =>
+            ForeDorsGroove * Bump(x, -0.5f, 0.75f) * Bump(y, 12f, 9f) * Mathf.Clamp01(z / 1.5f)
+          + ForeVolGroove * Bump(x, 0.6f, 0.7f) * Bump(y, 12f, 8f) * Mathf.Clamp01(-z / 1.5f);
+
         // Плечо: начало в плечевом суставе, ось +Y к локтю.
         // +Z — бицепс (к подсказке back), −Z — трицепс и локтевой отросток.
-        public static float UpperArm(float x, float y, float z)
+        public static float UpperArm(float x, float y, float z, float rel = 1f)
         {
             float d = VoxModel.Cap(x, y, z, 0, 0, 0, 0, 29, 0, 4.4f, 3.5f);
-            d = VoxModel.Smin(d, VoxModel.Ell(x, y - 4.0f, z, 5.0f, 6.6f, 4.9f), 1.6f);                // дельта — шапка плеча
-            d = VoxModel.Smin(d, VoxModel.Ell(x, y - 16.5f, z + 1.6f, 3.8f, 7.2f, 3.9f), 1.1f);        // бицепс
-            d = VoxModel.Smin(d, VoxModel.Ell(x, y - 13.5f, z - 1.8f, 4.0f, 8.2f, 3.7f), 1.1f);        // трицепс
+            d = VoxModel.Smin(d, VoxModel.Ell(x, y - 4.0f, z, 4.6f, 6.6f, 4.9f), 1.4f);                // дельта — шапка плеча
+            d = VoxModel.Smin(d, VoxModel.Ell(x, y - 16.5f, z + 1.6f, 3.8f, 7.2f, 3.9f), 0.9f);        // бицепс
+            d = VoxModel.Smin(d, VoxModel.Ell(x, y - 13.5f, z - 1.8f, 4.0f, 8.2f, 3.7f), 0.9f);        // трицепс
             d = VoxModel.Smin(d, VoxModel.Ell(x, y - 29.0f, z - 2.0f, 2.1f, 2.4f, 1.7f), 1.0f);        // локтевой отросток
             d = VoxModel.Smin(d, VoxModel.Ell(Mathf.Abs(x) - 3.0f, y - 28.3f, z, 1.3f, 1.6f, 1.4f), 0.9f);   // надмыщелки
-            d += 0.30f * Bump(y, 8.6f, 1.3f) * Bump(z, 0f, 4f);                                    // борозда под дельтой
-            return d;
+            return d + rel * UpperGroove(x, y, z);
         }
 
-        public static byte UpperArmPaint(float x, float y, float z, bool band)
+        public static byte UpperArmPaint(float x, float y, float z, bool band, float rel = 1f)
         {
             if (band)
             {
@@ -57,30 +71,33 @@ namespace VoxGame
                 if (y > 11.6f && y < 13.4f + 1.9f * tooth) return 2;
                 if (y > 9.8f && y < 10.7f) return 2;
             }
-            if (Mathf.Abs(y - 8.6f) < 0.9f || (y > 25.5f && y < 27.2f && z > 0.5f)) return AShade;  // борозда под дельтой, локтевой сгиб
-            if (y > 13f && y < 20f && z > 2.6f) return ALight;                                           // верх бицепса
-            if (y < 5f && Mathf.Abs(x) < 3f && z * z + x * x > 16f) return ALight;                       // шапка дельты
+            if (rel * UpperGroove(x, y, z) > 0.3f || (y > 25.5f && y < 27.2f && z > 0.5f)) return AShade;  // борозды, локтевой сгиб
+            if (y > 13f && y < 21f && z > 2.4f && Mathf.Abs(x) < 2.6f) return ALight;                    // верх бицепса
+            if (y > 10f && y < 19f && z < -2.6f && Mathf.Abs(x) < 2.4f) return ALight;                   // верх трицепса
+            if (y < 6f && z > -1f && x * x + z * z > 14f) return ALight;                                  // шапка дельты
             return ASkin;
         }
 
         // Предплечье: начало в локте, ось +Y к запястью.
-        // +Z — тыльная сторона (разгибатели), −Z — сгибатели; запястье уплощено.
-        public static float ForeArm(float x, float y, float z)
+        // +Z — тыльная сторона (разгибатели), −Z — сгибатели; +X — лучевая сторона (плечелучевая у локтя); запястье уплощено.
+        public static float ForeArm(float x, float y, float z, float rel = 1f)
         {
             float d = VoxModel.Cap(x, y, z, 0, 0, 0, 0, 27, 0, 4.0f, 2.6f);
-            d = VoxModel.Smin(d, VoxModel.Ell(x - 1.0f, y - 7.5f, z - 0.9f, 3.5f, 7.5f, 3.0f), 1.3f);   // плечелучевая и разгибатели
-            d = VoxModel.Smin(d, VoxModel.Ell(x + 0.9f, y - 8.5f, z + 1.0f, 3.3f, 8.0f, 3.0f), 1.3f);   // сгибатели
+            d = VoxModel.Smin(d, VoxModel.Ell(x - 1.0f, y - 8.0f, z - 0.9f, 3.3f, 7.5f, 3.0f), 1.0f);   // разгибатели
+            d = VoxModel.Smin(d, VoxModel.Ell(x + 0.9f, y - 8.5f, z + 1.0f, 3.3f, 8.0f, 3.0f), 1.0f);   // сгибатели
+            d = VoxModel.Smin(d, VoxModel.Ell(x - 2.0f, y - 4.5f, z - 0.3f, 1.8f, 5.5f, 2.0f), 0.8f);   // плечелучевая у локтя
             d = VoxModel.Smin(d, VoxModel.Ell(x, y - 25.8f, z, 3.1f, 2.2f, 2.2f), 1.0f);               // запястье
             d = VoxModel.Smin(d, VoxModel.Ell(x, y + 0.6f, z + 2.2f, 1.9f, 2.0f, 1.5f), 0.9f);          // локтевой отросток
             d += 0.28f * Bump(y, 3.0f, 1.1f) * Mathf.Clamp01(z / 2f);                                // локтевой сгиб
-            d += 0.18f * Bump(x, -0.4f, 0.8f) * Bump(y, 15f, 9f) * Mathf.Clamp01(-z / 2f);              // борозда по локтевой кости
-            return d;
+            return d + rel * ForeGroove(x, y, z);
         }
 
-        public static byte ForeArmPaint(float x, float y, float z)
+        public static byte ForeArmPaint(float x, float y, float z, float rel = 1f)
         {
-            if ((y > 2f && y < 4.2f && z > 0.8f) || (Mathf.Abs(x + 0.4f) < 0.7f && y > 9f && y < 21f && z < -1.5f)) return AShade;
-            if (y > 3.5f && y < 13f && x > 1.2f && z > 1.0f) return ALight;                            // верх плечелучевой
+            if (rel * ForeGroove(x, y, z) > 0.25f || (y > 2f && y < 4.2f && z > 0.8f)) return AShade;   // борозды, локтевой сгиб
+            if (y > 3f && y < 12f && x > 1.4f && z > 0.4f) return ALight;                              // плечелучевая
+            if (y > 4f && y < 16f && x < -0.8f && z < -1.4f) return ALight;                            // сгибатели
+            if (x < -1.2f && x > -2.0f && z > 1.2f && y > 6f && y < 24f) return ALight;                // гребень локтевой кости
             if (y > 24.6f && Mathf.Abs(z) < 1.2f && Mathf.Abs(x) > 2.4f) return AShade;              // складка запястья
             return ASkin;
         }
@@ -91,7 +108,7 @@ namespace VoxGame
         {
             x /= k * kx; y /= k; z /= k;
             float d = Fist(x, y, z, thumb);
-            d = VoxModel.Smin(d, CuffShape(x, y, z, -15.2f, 4.7f, 4.9f), 2.2f);
+            d = VoxModel.Smin(d, CuffShape(x, y, z, -16.2f, 4.7f, 4.9f), 2.2f);
             if (studs)
                 for (int i = 0; i < 4; i++)
                     d = Mathf.Min(d, VoxModel.Ell(x - (-4.2f + 2.8f * i), y - 2.6f, z - 7.6f, 1.1f, 1.1f, 1.5f));
@@ -152,7 +169,7 @@ namespace VoxGame
         static byte GlovePaint(float x, float y, float z, float k, float kx, bool studs, int thumb)
         {
             x /= k * kx; y /= k; z /= k;
-            if (z < -6.8f) return CuffDetail(GCuff, GCuff, x, y, z, -15.2f, 4.9f, GEdge, GFold, GMain, GLace);   // манжета
+            if (z < -6.8f) return CuffDetail(GCuff, GCuff, x, y, z, -16.2f, 4.9f, GEdge, GFold, GMain, GLace);   // манжета
             if (Mathf.Abs(y + 0.7f) < 0.33f && Mathf.Abs(x) > 4.6f && z < 6.5f) return GSeam;           // боковой шов
             if (Mathf.Abs(x - thumb * 3.0f) < 0.35f && y < -0.6f && z > -2.5f && z < 4.8f) return GSeam;  // шов у большого пальца
             if (studs && z > 7.2f && y > 1.2f && y < 4.2f) {               // шипы на костяшках
@@ -168,31 +185,31 @@ namespace VoxGame
         // ---- Сетки ----------------------------------------------------------------------------
 
         // Плечо. thick — толщина (поперёк оси руки), band — татуировка-браслет с зубцами.
-        public static Mesh UpperArmMesh(Color32 skin, float thick = 1f, bool band = false)
+        public static Mesh UpperArmMesh(Color32 skin, float thick = 1f, bool band = false, float rel = 1f)
         {
             float k = Mathf.Max(0.5f, thick);
             var mn = new Vector3(-6.4f * k, -5.6f, -6.4f * k); var mx = new Vector3(6.4f * k, 34.4f, 6.4f * k);
             var m = VoxModel.FromSdf(mn, mx, ArmCell,
-                (x, y, z) => UpperArm(x / k, y, z / k) * Mathf.Min(1f, k),
-                (x, y, z) => UpperArmPaint(x / k, y, z / k, band), true);
+                (x, y, z) => UpperArm(x / k, y, z / k, rel) * Mathf.Min(1f, k),
+                (x, y, z) => UpperArmPaint(x / k, y, z / k, band, rel), true);
             return m.BuildMesh("upperArm", new[] { default, skin, Ink, default, Tone(skin, ShadeK), Tone(skin, LightK) },
                                mn * 0.01f, ArmCell * 0.01f);
         }
 
         // Предплечье. thick — толщина, wraps — бинты у запястья (видны между локтем и манжетой перчатки).
-        public static Mesh ForeArmMesh(Color32 skin, float thick = 1f, bool wraps = false, Color32 wrapColor = default)
+        public static Mesh ForeArmMesh(Color32 skin, float thick = 1f, bool wraps = false, Color32 wrapColor = default, float rel = 1f)
         {
             float k = Mathf.Max(0.5f, thick);
             var mn = new Vector3(-5.6f * k, -4.8f, -5.6f * k); var mx = new Vector3(5.6f * k, 30.4f, 5.6f * k);
             var m = VoxModel.FromSdf(mn, mx, ArmCell,
                 (x, y, z) =>
                 {
-                    float d = ForeArm(x / k, y, z / k) * Mathf.Min(1f, k);
+                    float d = ForeArm(x / k, y, z / k, rel) * Mathf.Min(1f, k);
                     return wraps && y > 14.2f ? d - 0.35f : d;   // бинт чуть толще кожи
                 },
                 (x, y, z) =>
                 {
-                    if (!wraps || y < 14.2f) return ForeArmPaint(x / k, y, z / k);
+                    if (!wraps || y < 14.2f) return ForeArmPaint(x / k, y, z / k, rel);
                     // витки бинта наискось: два тона
                     float a = Mathf.Atan2(z, x) / Mathf.PI;
                     return Mathf.Repeat(y * 0.55f + a, 1f) < 0.5f ? (byte)2 : (byte)3;

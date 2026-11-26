@@ -20,7 +20,7 @@ namespace VoxGame
         const float HeadZ   = 0.02f;
         const float NeckLen = 0.1995f; // от начала координат головы до низа её шеи
         const float ShoulderX = 0.195f, ShoulderY = 0.415f;
-        const float TorsoCell = 0.57f; // см (до ARMS-BODY.md 0.7)
+        const float TorsoCell = 0.7f;  // см (0.57 давал расхождение габаритов до 3 %, ARMS-BODY.md, доработка 2)
         const float LegsCell  = 0.7f;  // см, голени и боксёрки
         const float StretchFrom = 10f; // см от пояса: выше корпус растягивается по длине (torsoLen), трусы — нет
 
@@ -134,9 +134,11 @@ namespace VoxGame
 
             // татуировка-браслет — только на одном плече (рука 0 — сторона +X)
             int bandArm = mark == BodyMark.ArmBand ? (markSide > 0f ? 0 : 1) : -1;
-            var upperPlain = BoxerParts.UpperArmMesh(skin, armK);
-            var upperBand  = bandArm >= 0 ? BoxerParts.UpperArmMesh(skin, armK, true) : null;
-            var foreMesh   = BoxerParts.ForeArmMesh(skin, Mathf.Lerp(1f, armK, 0.8f), def.colors.handWraps, def.colors.wraps);
+            // рельеф мышц рук по телосложению: у худого (armMult мал) слабее, у мощного сильнее
+            float rel = Mathf.Lerp(0.6f, 1.2f, Mathf.InverseLerp(0.88f, 1.22f, armK));
+            var upperPlain = BoxerParts.UpperArmMesh(skin, armK, false, rel);
+            var upperBand  = bandArm >= 0 ? BoxerParts.UpperArmMesh(skin, armK, true, rel) : null;
+            var foreMesh   = BoxerParts.ForeArmMesh(skin, Mathf.Lerp(1f, armK, 0.8f), def.colors.handWraps, def.colors.wraps, rel);
             var gloveMeshes = new[]
             {
                 BoxerParts.GloveMesh(-1, def.colors.gloveA, def.colors.gloveB),
