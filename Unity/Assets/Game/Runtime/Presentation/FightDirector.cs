@@ -29,6 +29,7 @@ namespace VoxGame
         public VictoryScene Victory   => _victory;
         public PlayerGloves Gloves    => _playerGloves;
         public FoeBody     FoeFigure => _foeBody;
+        public FoeFace     FoeMimic  => _face;     // мимика соперника (EMOTIONS.md)
         public bool        TitleFight => _titleFight;
         public int         HitsThrown => _hitsTotal;    // ударов игрока
         public int         HitsLanded => _hitsLanded;   // из них попало (по логике боя)
@@ -106,6 +107,7 @@ namespace VoxGame
         CrowdView     _crowd;
         BeltView      _belt;
         VictoryScene  _victory;
+        FoeFace       _face;
         bool          _titleFight;
         static readonly Color BeltStrap = new Color(0.50f, 0.05f, 0.07f);   // тёмно-красная кожа ремня
 
@@ -201,6 +203,7 @@ namespace VoxGame
             AnatSkin.on = true;
             AnatSkin.Reset();
             _v = new AnatView(_sceneRoot, _foeBody.headMount.position, _anatMat, FighterGen.AnatLookOf(foe));   // тон кожи и причёска бойца
+            _face = new FoeFace(foe);   // мимика: характер бойца, события боя → выражения
 
             // Руки игрока
             var glove = GlovesCatalog.Get(profile.equippedGloveId);
@@ -380,10 +383,12 @@ namespace VoxGame
             AnatSkin.Step(sdt);
             _v.Tick(sdt);
             AnatSkin.SetGlobals(_v.root);
+            _face.Tick(realDt, _sim.State); _face.Apply(_v);   // мимика — в реальном времени (стоп-кадр удара её не замораживает)
             if (MeasureAlloc) _allocAnatFrame += AllocNow() - a0;
             double t1g = _tickSw.Elapsed.TotalMilliseconds;
             double anatMs = t1g - t0;
             _foeBody.gear.SyncToSkull();   // накладки головы — по позе черепа этого кадра
+            _foeBody.gear.SetJaw(_face.JawAngle, _face.JawSide);   // нижняя часть бороды — с челюстью мимики
             double gearMs = _tickSw.Elapsed.TotalMilliseconds - t1g;
 
             // Рефери (реальное время) и развязка
@@ -544,6 +549,7 @@ namespace VoxGame
 
                 if (!result.hit)
                 {
+                    _face.OnPlayerMiss();
                     _ai.TriggerCounter();
                     _sound.Play(SoundId.Miss);
                     if (strength > 0) _sound.Play(SoundId.Swing, 0.8f);
@@ -553,6 +559,7 @@ namespace VoxGame
                     // Эффекты удара. В HitResult перелом и разрыв — признаки порога травмы (держатся до конца боя),
                     // поэтому для эффектов и звука берётся их появление: новый перелом в анатомии, первый разрыв головы.
                     bool fracture = _v.sim.fractures.Count > fractures0;
+                    _face.OnHit(strength, p.isMega, (int)_v.sim.lastZone, fracture, counter, hitPick && hitPt.x < 0f ? -1 : 1);
                     bool burst = result.headBurst && !_headBurstShown;
                     if (burst) _headBurstShown = true;
                     var fx = new HitFx
@@ -571,6 +578,7 @@ namespace VoxGame
 
                     if (result.isKO)
                     {
+                        _face.OnKnockout();
                         _referee.OnKnockout(true);
                         PlayerWon = true;
                         Finished  = true;
@@ -589,6 +597,7 @@ namespace VoxGame
                         var ks = _sim.State;
                         int riseAt = RefereeLogic.RiseCount(ks.knockdowns, ks.hpMax > 0f ? ks.hp / ks.hpMax : 0f);
                         _referee.OnKnockdown(riseAt);
+                        _face.OnKnockdown();
                         _crowd.SetMood(CrowdMood.Tense);
                         _crowd.Burst(0.8f);
                         _fx.OnKnockdown();
@@ -668,6 +677,7 @@ namespace VoxGame
         void OnHandRaised()
         {
             _crowd.Burst(1f);
+            _face.OnFinale(!_referee.PlayerWon);
             _sound.Play(_referee.PlayerWon ? SoundId.Win : SoundId.Lose);
             if (_referee.PlayerWon) _fx.Banners?.ShowCenter(FxBanners.Victory, BannerStyle.Huge, 0f, 0.88f, 0.12f);
         }
@@ -732,7 +742,10 @@ namespace VoxGame
         {
             // Замах: сигнал игроку
             if (cmd.newPhase == FightPhase.Windup && _prevAIPhase != FightPhase.Windup && !Finished)
+            {
                 _sound.Play(SoundId.FoeWarn);
+                _face.OnWindup();
+            }
 
             // Начало фазы Strike
             if (cmd.newPhase == FightPhase.Strike && _prevAIPhase != FightPhase.Strike)
@@ -740,7 +753,7 @@ namespace VoxGame
                 _strikePending = true;
                 _strikeTimer   = 0f;
                 _strikeCmd     = cmd;
-                if (!Finished) _sound.Play(SoundId.Whoosh);
+                if (!Finished) { _sound.Play(SoundId.Whoosh); _face.OnStrike(); }
             }
 
             if (!_strikePending) return;
@@ -759,6 +772,7 @@ namespace VoxGame
                 st.phase = FightPhase.Open;
                 _ai.TriggerCounter();
                 _fx.OnDodge();
+                _face.OnDodged();
                 _sound.Play(SoundId.Dodge);
                 return;
             }
@@ -793,6 +807,7 @@ namespace VoxGame
             st.OnPlayerHurt();
             float power = dmgBase / 15f;
             _fx.OnFoeHit(power, blocked);
+            _face.OnFoeLanded(blocked, broken);
             if (blocked) _sound.Play(SoundId.Block);
             else
             {
@@ -805,6 +820,7 @@ namespace VoxGame
             {
                 Finished  = true;
                 PlayerWon = false;
+                _face.OnFinale(true);
                 _referee.OnKnockout(false);
                 _crowd.SetMood(CrowdMood.Cheer);
                 _crowd.Burst(1f);
@@ -826,6 +842,7 @@ namespace VoxGame
                 case RefereeEventType.SayBox:
                     // Rise, не Guard: FightAI.SyncExternal(Rise) выдерживает RISE_DUR=1.9с перед EnterIdle.
                     _sim.State.phase = FightPhase.Rise;
+                    _face.OnRise();
                     _sim.State.groggy = Mathf.Max(0f, _sim.State.groggy * 0.5f);
                     _hud.ShowBanner("БОЙ!", 1.5f);
                     _crowd.SetMood(CrowdMood.Idle);
@@ -838,6 +855,7 @@ namespace VoxGame
                         PlayerWon = _referee.PlayerWon;
                         _sim.State.phase = FightPhase.KO;
                         _strikePending = false;
+                        if (PlayerWon) _face.OnKnockout(); else _face.OnFinale(true);
                         _crowd.SetMood(CrowdMood.Cheer);
                         _crowd.Burst(1f);
                         _sound.Play(SoundId.Bell);
@@ -959,6 +977,7 @@ namespace VoxGame
             if (_v == null) return;
             _v.Restore();
             AnatSkin.Reset();
+            _face = new FoeFace(_foeDef);
             _foeBody.ResetGear();
             _foeBody.spring.Reset();
             // «Заново» — тот же бой с нуля: мега-шкала не переносится
@@ -1013,6 +1032,7 @@ namespace VoxGame
 
         public void Dispose()
         {
+            AnatFace.Off();
             _fx?.Dispose();
             _sound?.Dispose();
             _fx           = null;

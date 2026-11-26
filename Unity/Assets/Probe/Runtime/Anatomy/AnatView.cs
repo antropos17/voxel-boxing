@@ -76,6 +76,7 @@ namespace VoxProbe
         public AnatView(Transform parent, Vector3 center, Material material, AnatLook look)
         {
             AnatPalette.Apply(look);
+            AnatFace.Off();   // мимику включает её хозяин (AnatFace.Apply) — у новой головы лицо в покое
             if (AnatBones.B10Off) Shader.SetGlobalFloat("_AnatB10Off", 1);   // часть 10: снимки «без» через игровой слой
             this.material = material;
             a = AnatomyBuilder.Build(look);

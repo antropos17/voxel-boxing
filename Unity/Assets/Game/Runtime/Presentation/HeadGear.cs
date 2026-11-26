@@ -112,13 +112,13 @@ namespace VoxGame
         }
 
         Transform Part(string name, Vector3 mn, Vector3 mx, float cell, VoxModel.Sdf sdf, VoxModel.Paint paint,
-                       Color32[] pal, float[] ao = null)
+                       Color32[] pal, float[] ao = null, Transform parent = null)
         {
             var m = VoxModel.FromSdf(mn, mx, cell, sdf, paint);
             var mesh = m.BuildMesh(name, pal, mn * 0.01f, cell * 0.01f, 0.3f, ao);
             if (mesh.vertexCount == 0) { GameUtil.Destroy(mesh); return null; }
             meshes.Add(mesh);
-            return VoxModel.Spawn(name, fit, mesh, mat);
+            return VoxModel.Spawn(name, parent != null ? parent : fit, mesh, mat);
         }
 
         // Оболочка над кожей головы между inner и outer (см). Далеко от неё — настоящее расстояние (Fill пропускает
@@ -287,8 +287,30 @@ namespace VoxGame
             Color32 hc = look.hairColor;
             var pal = new Color32[] { default, hc, Color.Lerp(hc, Color.black, 0.35f), Color.Lerp(hc, Color.white, 0.15f) };
             var ao = new[] { 1f, 0.5f, 0.5f, 0.5f };
-            return Part("beard", new Vector3(-8.5f, -14.5f, -3f), new Vector3(8.5f, 2f, 12.5f), BeardCell,
-                (x, y, z) =>
+            // мимика (EMOTIONS.md): борода в две части — выше шва губ (усы, щёки) и ниже (подбородок), нижняя ходит с челюстью (SetJaw)
+            var root = new GameObject("beard").transform;
+            root.SetParent(fit, false);
+            float cut = VoxProbe.AnatFace.YL;
+            Part("beardTop", new Vector3(-8.5f, cut, -3f), new Vector3(8.5f, 2f, 12.5f), BeardCell, (x, y, z) => BeardSdf(s, x, y, z), BeardPaint, pal, ao, root);
+            beardJaw = Part("beardJaw", new Vector3(-8.5f, -14.5f, -3f), new Vector3(8.5f, cut, 12.5f), BeardCell, (x, y, z) => BeardSdf(s, x, y, z), BeardPaint, pal, ao, root);
+            return root;
+        }
+
+        Transform beardJaw;
+        static byte BeardPaint(float x, float y, float z) { float n = Hash3(x, y, z, 0.6f); return n < 0.3f ? PDark : n > 0.85f ? PLight : PMain; }
+
+        // Нижняя часть бороды за челюстью: угол открывания (рад) вокруг оси суставов и сдвиг вбок (см) — как AnatFace.Deform для челюсти.
+        public void SetJaw(float angle, float side)
+        {
+            if (beardJaw == null) return;
+            var r = Quaternion.AngleAxis(angle * Mathf.Rad2Deg, Vector3.right);
+            Vector3 pv = (Vector3)VoxProbe.AnatFace.JawPivot * 0.01f;
+            beardJaw.localRotation = r;
+            beardJaw.localPosition = pv - r * pv + new Vector3(side * 0.01f, 0f, 0f);
+        }
+
+        static float BeardSdf(BeardStyle s, float x, float y, float z)
+        {
                 {
                     float ax = Mathf.Abs(x), outer;
                     if (s == BeardStyle.Mustache || (s != BeardStyle.Chinstrap && MustacheZone(ax, y, z)))
@@ -298,12 +320,7 @@ namespace VoxGame
                     else
                         outer = BeardOut;
                     return Shell(Body(x, y, z), BeardIn, outer, BeardZone(s, x, y, z));
-                },
-                (x, y, z) =>
-                {
-                    float n = Hash3(x, y, z, 0.6f);
-                    return n < 0.3f ? PDark : n > 0.85f ? PLight : PMain;
-                }, pal, ao);
+                }
         }
 
         // ---- Головной убор ---------------------------------------------------------------------------
@@ -565,7 +582,7 @@ namespace VoxGame
             foreach (var m in meshes) GameUtil.Destroy(m);
             meshes.Clear();
             if (holder != null) GameUtil.Destroy(holder.gameObject);
-            holder = skull = fit = hair = beard = wear = extras = null;
+            holder = skull = fit = hair = beard = wear = extras = beardJaw = null;
         }
     }
 }
