@@ -26,6 +26,7 @@ namespace VoxGame
 
         void Play(string tag, int e, float gain, float dur, int prio, int side = 0, bool hold = false)
         {
+            if (prio <= 2) gain *= 1f - 0.5f * math.saturate(face.fatigue + face.fear);   // избитый и уставший меньше дразнится и злится
             if (face.Play(e, gain, dur, prio, side, hold)) { lastEvent = tag; nextE = -1; }
         }
         void Then(int e, float gain, float dur, int prio) { nextE = e; nextGain = gain; nextDur = dur; nextPrio = prio; }

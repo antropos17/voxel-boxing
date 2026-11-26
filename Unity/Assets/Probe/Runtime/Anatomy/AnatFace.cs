@@ -60,8 +60,8 @@ namespace VoxProbe
         static AnatFace()
         {
             P(AnatEmo.Calm, (LidUpL, 0.12f), (LidUpR, 0.12f), (CornerL, 0.05f), (CornerR, 0.05f));
-            P(AnatEmo.Focus, (BrowInL, -0.45f), (BrowInR, -0.45f), (BrowOutL, -0.1f), (BrowOutR, -0.1f), (Knit, 0.6f), (LidUpL, 0.22f), (LidUpR, 0.22f),
-                (LidLoL, 0.45f), (LidLoR, 0.45f), (GazeY, 0.12f), (Press, 0.6f), (CornerL, -0.2f), (CornerR, -0.2f));
+            P(AnatEmo.Focus, (BrowInL, -0.65f), (BrowInR, -0.65f), (BrowOutL, -0.15f), (BrowOutR, -0.15f), (Knit, 0.8f), (LidUpL, 0.25f), (LidUpR, 0.25f),
+                (LidLoL, 0.55f), (LidLoR, 0.55f), (GazeY, 0.12f), (Press, 0.8f), (CornerL, -0.3f), (CornerR, -0.3f));
             P(AnatEmo.Anger, (BrowInL, -1f), (BrowInR, -1f), (BrowOutL, 0.25f), (BrowOutR, 0.25f), (Knit, 1f), (LidUpL, -0.2f), (LidUpR, -0.2f),
                 (LidLoL, 0.55f), (LidLoR, 0.55f), (Nose, 0.5f), (Press, 0.7f), (CornerL, -0.6f), (CornerR, -0.6f), (LipUp, 0.2f), (CheekL, 0.2f), (CheekR, 0.2f));
             P(AnatEmo.Rage, (BrowInL, -1f), (BrowInR, -1f), (BrowOutL, 0.35f), (BrowOutR, 0.35f), (Knit, 1f), (LidUpL, -0.4f), (LidUpR, -0.4f),
@@ -85,8 +85,8 @@ namespace VoxProbe
                 (Jaw, 0.4f), (LipDown, 0.5f), (GazeY, 0.15f));
             P(AnatEmo.Defeat, (BrowInL, 0.9f), (BrowInR, 0.9f), (BrowOutL, -0.5f), (BrowOutR, -0.5f), (Knit, 0.5f), (LidUpL, 0.5f), (LidUpR, 0.5f),
                 (GazeY, -0.7f), (CornerL, -0.9f), (CornerR, -0.9f), (Press, 0.4f), (Jaw, 0.05f));
-            P(AnatEmo.Contempt, (CornerR, 0.65f), (CornerL, -0.25f), (LidUpL, 0.4f), (LidUpR, 0.4f), (BrowOutR, 0.35f), (BrowInL, -0.3f),
-                (Nose, 0.35f), (Press, 0.5f), (CheekR, 0.3f), (GazeY, -0.1f), (GazeX, 0.2f));
+            P(AnatEmo.Contempt, (CornerR, 0.95f), (CornerL, -0.4f), (LidUpL, 0.45f), (LidUpR, 0.45f), (BrowOutR, 0.5f), (BrowInL, -0.45f), (LipUp, 0.25f),
+                (Nose, 0.5f), (Press, 0.5f), (CheekR, 0.5f), (GazeY, -0.1f), (GazeX, 0.2f));
         }
 
         // размеры движений, см и радианы (ими же пользуется шейдер Anatomy, функция Face)
@@ -104,7 +104,7 @@ namespace VoxProbe
         public float fatigue, fear, time;   // 0..1: усталость (дыхание ртом), страх; время мимики, с
         public bool hold;                   // событие держится до следующего (нокдаун, нокаут, развязка)
         public float omega = 20f;           // жёсткость пружин весов, рад/с
-        uint rng; float blinkT, blinkAt, breath, gazeT, gx, gy, gxT, gyT;
+        uint rng; float tirS, blinkT, blinkAt, breath, gazeT, gx, gy, gxT, gyT;
         public bool jawGone;                // нижняя челюсть оторвана: рот не двигается
         public bool blinks = true;          // моргание (снимки выражений — без него)
 
@@ -183,8 +183,9 @@ namespace VoxProbe
             }
             ch[BrowInL] += temper.brow * 0.4f; ch[BrowInR] += temper.brow * 0.4f; ch[BrowOutL] += temper.brow * 0.2f; ch[BrowOutR] += temper.brow * 0.2f;
             // фон: дыхание ртом при усталости (чаще и глубже с усталостью и страхом)
-            float tir = math.saturate(w[AnatEmo.Tired] + fatigue * 0.5f + w[AnatEmo.Fear] * 0.3f);
-            breath += dt * (1.2f + 1.6f * tir) * 2 * math.PI;
+            float tir0 = math.saturate(w[AnatEmo.Tired] + fatigue * 0.5f + w[AnatEmo.Fear] * 0.3f);
+            tirS = dt > 0 ? tirS + (tir0 - tirS) * (1 - math.exp(-dt * 3f)) : tir0; float tir = tirS;   // усталость меняется скачком (удар) — дыхание нарастает плавно
+            breath += dt * (0.45f + 0.6f * tir) * 2 * math.PI;   // 0,45–1,05 вдоха в секунду
             if (breath > 2 * math.PI) breath -= 2 * math.PI;
             ch[Jaw] += tir * 0.35f * (0.5f - 0.5f * math.cos(breath)); ch[LipDown] += tir * 0.15f * (0.5f - 0.5f * math.cos(breath));
             // моргание: закрыть-открыть за 0,16 с, у оглушённого медленнее

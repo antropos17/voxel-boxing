@@ -153,7 +153,7 @@ namespace VoxGame.Editor
         }
 
         // Бой от первого лица: боль в момент удара, насмешка после своего попадания, мало здоровья; портрет 1080×2340 и ландшафт.
-        public static void EmotionFight(int foe = 3)
+        public static void EmotionFight(int foe = 8)
         {
             var log = new StringBuilder();
             var dir = EmoDir();
@@ -167,7 +167,7 @@ namespace VoxGame.Editor
                 int seq = d.hitFrameSeq;
                 run.Punch(PunchType.Hook, 1, 1.3f);
                 for (int i = 0; i < 20 && d.hitFrameSeq == seq; i++) run.Tick();
-                run.Ticks(6);
+                run.Ticks(14);
                 log.AppendLine("EMO fight-hit event=" + d.FoeMimic.lastEvent + " dominant=" + AnatEmo.Names[d.FoeMimic.face.Dominant] + " w=" + F(d.FoeMimic.face.w[d.FoeMimic.face.Dominant]));
                 d.SetViewSize(PW, PH); Shot(cam, ui, PW, PH, Path.Combine(dir, "fight-hit.png"));
                 d.SetViewSize(PH, PW); Shot(cam, ui, PH, PW, Path.Combine(dir, "fight-hit-land.png"));
@@ -199,7 +199,7 @@ namespace VoxGame.Editor
                     run.Ticks(24);
                 }
                 d.FoeMimic.face.Clear();
-                run.Ticks(50);
+                run.Ticks(50); for (int i = 0; i < 150 && d.FoeMimic.face.ev >= 0; i++) run.Tick(); run.Ticks(20);
                 log.AppendLine("EMO fight-low-hp hp=" + F(d.State.hp / d.State.hpMax) + " finished=" + d.Finished + " fatigue=" + F(d.FoeMimic.face.fatigue) + " fear=" + F(d.FoeMimic.face.fear)
                     + " dominant=" + AnatEmo.Names[d.FoeMimic.face.Dominant] + " event=" + d.FoeMimic.lastEvent);
                 d.SetViewSize(PW, PH); Shot(cam, ui, PW, PH, Path.Combine(dir, "fight-low-hp.png"));
