@@ -579,6 +579,7 @@ namespace VoxGame {
             StepFloaters(udt);
             StepSparks(udt);
             StepShards(udt);
+            StepFinale(udt);
 
             // счёт рефери: цифра падает крупной и гаснет; последние счёты — алые
             if (_countTimer > 0f) {

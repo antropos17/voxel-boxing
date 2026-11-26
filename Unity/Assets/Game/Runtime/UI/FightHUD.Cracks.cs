@@ -80,7 +80,7 @@ namespace VoxGame {
             }
         }
 
-        // Нокаут: рамка шкалы раскалывается на ShardCols × ShardRows осколков, они разлетаются от середины и падают.
+        // Нокаут: рамка шкалы раскалывается на ShardCols × ShardRows осколков, они разлетаются от середины вниз и падают.
         void Shatter(HpBar b) {
             if (b.shattered) return;
             b.shattered = true;
@@ -93,7 +93,8 @@ namespace VoxGame {
                 Color col = fm <= b.value + 0.02f ? b.fillColor : cy == 0 ? Ink : new Color(b.fillColor.r * 0.45f, b.fillColor.g * 0.45f, b.fillColor.b * 0.45f, 1f);
                 var p = BarPoint(b, fm, (cy == 0 ? 0.25f : -0.25f) * r.height);
                 float side = (fm - 0.5f) * (b.right ? -1f : 1f);
-                var v = new Vector2(side * (260f + 220f * Rand01()) + (Rand01() - 0.5f) * 80f, 160f + 260f * Rand01() - cy * 60f);
+                // вниз и в стороны: на нокауте сверху выезжают кинополосы FxScreen — осколки падают на экран, а не под них
+                var v = new Vector2(side * (260f + 220f * Rand01()) + (Rand01() - 0.5f) * 80f, -(80f + 200f * Rand01()) - cy * 60f);
                 EmitShard(p, v, new Vector2(w * (0.7f + 0.5f * Rand01()), h * (0.8f + 0.4f * Rand01())), col);
             }
             for (int i = 0; i < 8; i++) {
@@ -138,12 +139,41 @@ namespace VoxGame {
         void ResetCracks() {
             for (int i = 0; i < MaxShards; i++) { _sh[i].alive = false; _sh[i].rt.gameObject.SetActive(false); }
             ResetCracks(_plr); ResetCracks(_foe);
+            EndFinale();
         }
 
         static void ResetCracks(HpBar b) {
             b.shattered = false;
             if (!b.frame.gameObject.activeSelf) b.frame.gameObject.SetActive(true);
             for (int i = 0; i < b.cracks.Length; i++) { b.cracks[i].gameObject.SetActive(false); b.cracks[i].localScale = Vector3.one; b.crackT[i] = 9f; }
+        }
+
+        // Развязка прячет HUD целиком (UIRoot.HideAll), а осколки летят ещё ~1,1 с. Пока они живы, экран остаётся включённым,
+        // но виден только слой Fx: шкалы, таймер и кнопки скрыты. Потом экран выключается сам; OnDisable всё возвращает.
+        const float FinaleHold = ShardLife + 0.3f;
+        bool _finaleOnly; float _finaleT;
+        public bool FinaleOnly => _finaleOnly;
+        public bool HoldForFinale() {
+            if (UIMotion.Reduced || !gameObject.activeSelf) return false;
+            if (!_finaleOnly) {
+                for (int i = 0; i < transform.childCount; i++) { var c = transform.GetChild(i); if (c != _fx) c.gameObject.SetActive(false); }
+                for (int i = 0; i < MaxFloaters; i++) { _fl[i].alive = false; _fl[i].t.gameObject.SetActive(false); }
+                var g = GetComponent<CanvasGroup>(); if (g != null) g.blocksRaycasts = false;
+                _finaleOnly = true; _finaleT = 0f;
+            }
+            return true;
+        }
+        void StepFinale(float udt) {
+            if (!_finaleOnly) return;
+            _finaleT += udt;
+            if (_finaleT >= FinaleHold && LiveShards == 0) { EndFinale(); gameObject.SetActive(false); }
+        }
+        void OnDisable() => EndFinale();
+        void EndFinale() {
+            if (!_finaleOnly) return;
+            _finaleOnly = false;
+            for (int i = 0; i < transform.childCount; i++) transform.GetChild(i).gameObject.SetActive(true);
+            var g = GetComponent<CanvasGroup>(); if (g != null) g.blocksRaycasts = true;
         }
 
         // Для тестов и снимков.

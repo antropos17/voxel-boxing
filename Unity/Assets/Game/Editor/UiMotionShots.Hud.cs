@@ -125,7 +125,9 @@ namespace VoxGame.Editor
                 Ticks(5); S("hud-24-shatter-b"); S("hud-24-shatter-b", true);
                 Ticks(12); S("hud-25-shatter-c");
                 Ticks(30); S("hud-26-shatter-d");
-                _log.AppendLine("UI_HUD ko +0.8s shards=" + hud.LiveShards);
+                _log.AppendLine("UI_HUD ko +0.8s shards=" + hud.LiveShards + " screenOn=" + hud.gameObject.activeSelf + " finaleOnly=" + hud.FinaleOnly);
+                Ticks(120);
+                _log.AppendLine("UI_HUD ko +2.8s shards=" + hud.LiveShards + " screenOn=" + hud.gameObject.activeSelf);
             }
             finally
             {

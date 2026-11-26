@@ -252,8 +252,15 @@ namespace VoxGame.Tests
             Assert.IsTrue(hud.Shattered(true));
             Assert.Greater(hud.LiveShards, 0);
             Assert.LessOrEqual(hud.LiveShards, FightHUD.MaxShards);
-            Run(hud, ref d, FightHUD.ShardLife * 1.3f + 0.1f);
+            // развязка прячет HUD: экран держится, пока летят осколки, видно только их слой
+            Assert.IsTrue(hud.HoldForFinale());
+            Assert.IsTrue(hud.gameObject.activeSelf && FindDeep(hud.transform, "Fx").gameObject.activeInHierarchy);
+            Assert.IsFalse(FindDeep(hud.transform, "FoeHp").gameObject.activeInHierarchy, "шкала спрятана");
+            Run(hud, ref d, FightHUD.ShardLife * 1.3f + 0.4f);
             Assert.AreEqual(0, hud.LiveShards, "осколки догорели");
+            Assert.IsFalse(hud.gameObject.activeSelf, "экран боя выключился сам");
+            Assert.IsFalse(hud.FinaleOnly);
+            hud.gameObject.SetActive(true);
             hud.ResetTransient();
             Assert.IsFalse(hud.Shattered(true));
             Assert.IsTrue(FindDeep(hud.transform, "FoeHp").gameObject.activeSelf, "шкала снова целая");

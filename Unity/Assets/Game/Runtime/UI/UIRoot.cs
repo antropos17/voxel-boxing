@@ -138,6 +138,8 @@ namespace VoxGame {
 
         public void HideAll() {
             foreach (var kv in _screens) {
+                // осколки шкалы на нокауте долетают поверх чистого кадра развязки, затем экран боя выключается сам
+                if (kv.Key == ScreenId.Fight) { var hud = kv.Value.GetComponent<FightHUD>(); if (hud != null && hud.HoldForFinale()) continue; }
                 UIMotion.Complete(kv.Value.GetComponent<CanvasGroup>());
                 kv.Value.SetActive(false);
             }
