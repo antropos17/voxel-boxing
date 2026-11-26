@@ -195,6 +195,28 @@ namespace VoxGame.Tests
             Assert.AreEqual("Нокдауны: 7", t.text, "в тестах и проходе — без ожидания");
         }
 
+        // Кинополосы нокдауна: шкалы уходят под них (прозрачные, выше), а когда полосы уехали — возвращаются.
+        [Test]
+        public void CinemaBars_HideAndReturnPanels()
+        {
+            var hud = NewHud(out var d);
+            var plr = FindDeep(hud.transform, "PlrPanel");
+            var g = plr.GetComponent<CanvasGroup>();
+            Assert.AreEqual(1f, g.alpha, 1e-3f);
+            d.cineBars = 1f; Run(hud, ref d, 0.1f);
+            Assert.Less(g.alpha, 0.01f, "под полосами шкала не видна");
+            d.cineBars = 0f; Run(hud, ref d, 0.1f);
+            Assert.AreEqual(1f, g.alpha, 1e-3f, "полосы уехали — шкала на месте");
+            Assert.AreEqual(Vector2.zero, ((RectTransform)plr).anchoredPosition);
+        }
+
+        static Transform FindDeep(Transform t, string name)
+        {
+            if (t.name == name) return t;
+            for (int i = 0; i < t.childCount; i++) { var r = FindDeep(t.GetChild(i), name); if (r != null) return r; }
+            return null;
+        }
+
         // Все длительности в рамках 120–350 мс.
         [Test]
         public void Durations_WithinBudget()

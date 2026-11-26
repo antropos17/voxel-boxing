@@ -970,6 +970,7 @@ namespace VoxGame
             _hudData.combo          = st.phase == FightPhase.Down || st.phase == FightPhase.KO ? 0 : st.comboCount;
             _hudData.foeStun01      = st.stunMax > 0f ? st.stunAccum / st.stunMax : 0f;   // шкала оглушения (UI-MOTION.md)
             _hudData.staminaHitCost = FightState.STAMINA_HIT_COST * st.fightParams.staminaCostMult;
+            _hudData.cineBars       = _fx != null && _fx.Overlay != null ? _fx.Overlay.Bars : 0f;
         }
 
         // ---- Перезапуск ----------------------------------------------------

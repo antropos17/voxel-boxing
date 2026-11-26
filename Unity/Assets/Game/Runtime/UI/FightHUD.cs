@@ -369,6 +369,7 @@ namespace VoxGame {
 
             _mega = Mathf.Clamp01(d.megaMeter * 0.01f);
             _stun = Mathf.Clamp01(d.foeStun01);
+            _cine = Mathf.Clamp01(d.cineBars);
 
             // Заряды выносливости: кубик — один удар; потраченный рассыпается золотом, восстановленный вспыхивает
             float cost = d.staminaHitCost > 0.5f ? d.staminaHitCost : 12f;
@@ -593,9 +594,12 @@ namespace VoxGame {
             return UIMotion.Eval(Ease.OutQuint, (_introT - i * IntroStagger) / IntroTime);
         }
 
+        // Уход: в конце боя — насовсем; при кинополосах (нокдаун) — под полосы и обратно, когда они уезжают.
+        float _cine;
         float Exit(int i) {
-            if (!_outro || _outroT <= 0f) return 0f;
-            return UIMotion.Eval(Ease.InCubic, (_outroT - i * IntroStagger * 0.5f) / (IntroTime * 0.8f));
+            float c = _cine * _cine * (3f - 2f * _cine);
+            if (!_outro || _outroT <= 0f) return c;
+            return Mathf.Max(c, UIMotion.Eval(Ease.InCubic, (_outroT - i * IntroStagger * 0.5f) / (IntroTime * 0.8f)));
         }
 
         // Панель шкалы: выезд сверху, толчок от удара (сдвиг по силе с затуханием и лёгкий наклон масштаба).
