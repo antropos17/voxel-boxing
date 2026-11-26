@@ -482,5 +482,57 @@ namespace VoxGame.Tests
                 Object.DestroyImmediate(scene);
             }
         }
+
+        // HIT-FX-2: брызги летят от точки удара по направлению удара, не уходят вверх и к объективу, тяжесть роняет их.
+        [Test]
+        public void BloodBurst_FollowsPunch_FallsDown()
+        {
+            var at = new Vector3(0f, 1.6f, 0f);
+            var toCam = Vector3.back;   // камера на −Z, смотрит на +Z: экран вправо — +X
+            var buf = new Vector3[FxParticles.MaxParticles];
+            foreach (int kind in new[] { FxParticles.BurstJab, FxParticles.BurstHook, FxParticles.BurstUpper })
+            {
+                var p = new FxParticles(null);
+                Vector3 dir = kind == FxParticles.BurstHook ? Vector3.left : kind == FxParticles.BurstUpper ? Vector3.up : Vector3.forward;
+                p.BloodBurst(at, dir, toCam, 60, kind, FxDirector.SpdPower, 2f);
+                for (int i = 0; i < 6; i++) p.Tick(Dt);   // 0,1 с
+                int n = p.CopyBlood(0u, buf);
+                Vector3 m = Vector3.zero; float back = 0f;
+                for (int i = 0; i < n; i++) { m += buf[i] - at; back = Mathf.Min(back, buf[i].z - at.z); }
+                m /= Mathf.Max(1, n);
+                if (kind == FxParticles.BurstHook) Assert.Less(m.x, -0.03f, "хук: облако уходит вбок по удару");
+                if (kind == FxParticles.BurstUpper) Assert.Greater(m.y, 0.03f, "апперкот: облако уходит вверх");
+                if (kind == FxParticles.BurstJab) Assert.Less(m.z, -0.01f, "джеб: облако к камере");
+                Assert.Greater(back, -FxParticles.ToCamMax * 0.1f - FxParticles.SpawnLead - 0.02f, "к камере не быстрее ToCamMax");
+                for (int i = 0; i < 24; i++) p.Tick(Dt);  // 0,5 с
+                n = p.CopyBlood(0u, buf);
+                int high = 0;
+                for (int i = 0; i < n; i++) if (buf[i].y > at.y + 0.2f) high++;
+                Assert.LessOrEqual(high, n / 10, "через 0,5 с капли не выше точки удара больше чем на 20 см (вид " + kind + ")");
+            }
+        }
+
+        // HIT-FX-2, приёмка на настоящем бою (портрет 1080×2400 и ландшафт 2400×1080): кровь у точки удара на 0,15 с,
+        // через 0,5 с не выше; плашка не под перчатками, контрастная, внутри safe-area, не на полосах HUD и счётчике комбо.
+        [Test]
+        public void HitFx2_Criteria()
+        {
+            VoxGame.Editor.ShotsTaker.HitFx2("", false);
+            var rs = VoxGame.Editor.ShotsTaker.HitFx2Results;
+            Assert.AreEqual(6, rs.Count);
+            foreach (var r in rs)
+            {
+                string w = (r.land ? "ландшафт " : "портрет ") + r.punch;
+                Assert.IsTrue(r.hit, w + ": удар дошёл");
+                Assert.GreaterOrEqual(r.in15Frac, 0.6f, w + ": кровь в круге 0,2·W на 0,15 с");
+                Assert.LessOrEqual(r.after05HighFrac + r.after05BehindFrac, 0.1f, w + ": через 0,5 с выше точки или за камерой");
+                Assert.IsTrue(r.plateSeen, w + ": плашка видна");
+                Assert.LessOrEqual(r.plateGloveFrac, 0.05f, w + ": плашка под перчаткой");
+                Assert.GreaterOrEqual(r.plateContrastMin, 4.5f, w + ": контраст плашки");
+                Assert.IsTrue(r.plateInSafe, w + ": плашка в safe-area");
+                Assert.AreEqual(0f, r.plateHudFrac, 1e-4f, w + ": плашка на полосах HUD");
+                Assert.AreEqual(0f, r.plateComboFrac, 1e-4f, w + ": плашка на счётчике комбо");
+            }
+        }
     }
 }

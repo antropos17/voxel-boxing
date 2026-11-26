@@ -204,7 +204,8 @@ namespace VoxGame
             Vector3 side = d - Vector3.Dot(d, c) * c;
             for (int i = 0; i < n; i++)
             {
-                Vector3 v = side * R(0.6f, 2f) + RandSphere() * 1.2f + Vector3.up * R(0.6f, 2f) + c * R(0.3f, 1.6f);
+                // подъём и полёт к камере ограничены, как у крови (HIT-FX-2): кубики не улетают за верхний край
+                Vector3 v = side * R(0.6f, 2f) + RandSphere() * 0.8f + Vector3.up * R(0.2f, 1f) + c * R(0f, 0.6f);
                 Color32 col = Rand01() < 0.6f ? new Color32((byte)R(140, 190), (byte)R(18, 40), (byte)R(20, 36), 255)
                                               : new Color32((byte)R(200, 230), (byte)R(120, 150), (byte)R(110, 130), 255);
                 Spawn(FxKind.Chunk, at + c * SpawnLead + RandSphere() * 0.015f, v * spd * Mathf.Sqrt(k), R(0.006f, 0.011f) * k,

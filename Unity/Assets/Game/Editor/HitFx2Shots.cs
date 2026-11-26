@@ -35,6 +35,7 @@ namespace VoxGame.Editor
         // Пик крови: все капли удара живут ~0,3 с и больше, число видимых держится с кадра удара (полка), поэтому «кадр максимума»
         // неоднозначен; снимок и главная цифра — на 0,15 с (9 кадров), когда облако раскрылось. Первый кадр максимума — peakFrame.
         const int PeakAt = 9;
+        const int T27 = 16;
 
         // prefix: "" — снимки после правки, "before-" — только пара хука до правки. shots=false — только числа (тесты).
         public static void HitFx2(string prefix = "", bool shots = true)
@@ -99,6 +100,8 @@ namespace VoxGame.Editor
                         res.peakVis = vis; res.peakIn = inside; res.in15Frac = vis > 0 ? (float)inside / vis : 0f;
                         if (dir != null) HF2Shot(cam, ui, w, h, tmpPeak);
                     }
+                    // 0,27 с: перчатка ушла с лица, облако крови открыто (дополнительный снимок, портрет)
+                    if (dir != null && !land && f == T27) HF2Shot(cam, ui, w, h, Path.Combine(dir, tag + "-t27.png"));
                     if (f == 20) res.in33Frac = vis > 0 ? (float)inside / vis : 0f;
                     if (f == 30)
                     {
