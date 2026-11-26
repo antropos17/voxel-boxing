@@ -155,12 +155,12 @@ namespace VoxGame
         // доворотом к k. Все точки — в мировых осях. upper может быть null (у игрока плечо не рисуется).
         // Возвращает настоящий центр перчатки.
         public static Vector3 SolveArm(Transform upper, Transform fore, Transform glove, Vector3 S, Vector3 gt,
-                                       Vector3 k, Vector3 pole, Vector3 back, float scale = 1f)
+                                       Vector3 k, Vector3 pole, Vector3 back, float scale = 1f, float nearM = 0.12f)
         {
             float l1 = UpperLen * scale, l2 = ForeLen * scale, go = GloveOff * scale;
             k = k.normalized;
             Vector3 w = gt - k * go;
-            Vector3 u = w - S; float d = u.magnitude, reach = (l1 + l2) * 0.985f, near = 0.12f * scale;
+            Vector3 u = w - S; float d = u.magnitude, reach = (l1 + l2) * 0.985f, near = nearM * scale;   // nearM: плечо–запястье не ближе (сгиб локтя)
             if (d > reach) w = S + u * (reach / d);
             else if (d < near && d > 1e-5f) w = S + u * (near / d);
 

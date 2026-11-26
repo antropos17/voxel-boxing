@@ -94,6 +94,25 @@ namespace VoxGame.Tests
             finally { FoeFall.Enabled = was; }
         }
 
+        // Суставы при падении (дополнение к направлению 3), счёт по кадрам: ни один сустав не выходит за предел больше чем на 3°,
+        // колено и локоть не переразгибаются (> 5°), ноги лёжа не «книжкой» (бедро–голень ≥ 35°, бедро–корпус ≥ 30°), голени не
+        // в одном объёме. Взаимопроникновение капсул критерию (≤ 1,5 / 0,5 см) пока не отвечает — здесь только защита от ухудшения.
+        [Test]
+        public void FallKeepsJointLimits([Values(false, true)] bool ko)
+        {
+            bool was = FoeFall.Enabled; FoeFall.Enabled = true;
+            try
+            {
+                var l = ShotsTaker.FallStats(4, 5, 1f / 60f, ko).limb;
+                string s = l.Line() + l.By();
+                Assert.Greater(l.frames, 0, s);
+                Assert.AreEqual(0, l.framesOver, s); Assert.AreEqual(0, l.framesHyper, s); Assert.AreEqual(0, l.legsSame, s);
+                Assert.GreaterOrEqual(l.minKneeRest, 35f, s); Assert.GreaterOrEqual(l.minHipRest, 30f, s);
+                Assert.LessOrEqual(l.worstPenRest, 0.07f, s); Assert.LessOrEqual(l.worstPen, 0.22f, s);
+            }
+            finally { FoeFall.Enabled = was; }
+        }
+
         // Куски (направление 4): в бою мегой и силовыми куски падают на настил ринга, через 3 с не под ним и не в воздухе,
         // ≥ 90 % уснули за ≤ 3 с; пределы кусков, капель и подтёков не превышены.
         [Test]

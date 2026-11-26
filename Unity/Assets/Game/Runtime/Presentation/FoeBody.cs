@@ -13,6 +13,16 @@ namespace VoxGame
         public readonly Transform headMount;  // сюда ставится начало координат головы (уровень ушей)
         public readonly HeadGear  gear;       // причёска, борода, головной убор и мелочи головы
         public Transform Torso => torsoJoint;  // корпус (замеры PHYSICS.md)
+        // замеры суставов и объёмов при падении (PHYSICS.md, направление 3)
+        public Transform Knee => kneeJoint;
+        public Transform UpperArm(int s) => upper[s];
+        public Transform ForeArm(int s) => fore[s];
+        public Transform GloveT(int s) => glove[s];
+        public Vector3 FallPoint(int i) => torsoJoint.TransformPoint(fallLocal[i]);
+        public Vector3 FootPoint(int s) => kneeJoint.TransformPoint(footKnee[s]);
+        public float Scale => scale;
+        // м: плечо–запястье не ближе — внутренний угол локтя ≥ 36° (сгиб ≤ 144°) при звеньях 0,30 и 0,27
+        public const float ElbowNear = 0.18f;
         public Vector3 GloveWorld(int s) => glove[s].position;
 
         // ---- Размеры (метры, от корня при масштабе 1) -------------------------------------------
@@ -161,6 +171,12 @@ namespace VoxGame
             }
             FallRest();
             Pose(Vector3.zero);
+            headRest = Quaternion.Inverse(torsoJoint.rotation) * headMount.rotation;
+            for (int s = 0; s < 2; s++)
+            {
+                upperRest[s] = torsoJoint.InverseTransformDirection(upper[s].up); backRest[s] = torsoJoint.InverseTransformDirection(upper[s].forward);
+                foreRest[s] = torsoJoint.InverseTransformDirection(glove[s].position - fore[s].position).normalized;
+            }
 
             gear = new HeadGear();
             gear.Build(headMount, def, mat, voxelHair);
@@ -541,11 +557,6 @@ namespace VoxGame
                 float sg = ArmSign(s);
                 Vector3 sh = torsoJoint.TransformPoint(shoulderLocal[s]);
                 Vector3 gt = root.TransformPoint(sp ? glovePos[s] + spring.glove[s] / scale : glovePos[s]);
-                if (fw > 0f)
-                {
-                    gt = Vector3.Lerp(gt, fall.x[FoeFall.Hand0 + s], fw);
-                    gt.y = Mathf.Max(gt.y, root.position.y + 0.10f * scale);
-                }
                 Vector3 fwd = root.forward, up = root.up, right = root.right;
                 // костяшки: в стойке вверх и вперёд, в ударе — по линии плечо → цель, на настиле — вниз
                 Vector3 kn = phase == FightPhase.Strike ? (gt - sh).normalized
@@ -560,9 +571,23 @@ namespace VoxGame
                 if (sp) ArmStyle(s, sg, sh, gt, fwd, up, right, sk, ref kn, ref pole);
                 if (fw > 0f)
                 {
-                    pole = Vector3.Lerp(pole, Vector3.up + right * sg * 0.3f, fw);   // лёжа локти над настилом, не в нём
-                    Vector3 kf = gt - sh; kf.y = 0f;                                  // кулак лежит на боку, костяшки вдоль настила
-                    if (kf.sqrMagnitude > 1e-4f) kn = Vector3.Slerp(kn, kf.normalized, fw).normalized;
+                    // лёжа и в первой половине подъёма: плечо и предплечье — направления в осях корпуса от узлов падения к стойке
+                    // покоя (поворотом, а не сквозь корпус); во второй половине — плавно в живую стойку. Локоть по узлу, кулак по
+                    // линии предплечья, тыльная сторона — стойка, перенесённая поворотом плеча без скручивания.
+                    Quaternion tq = torsoJoint.rotation;
+                    Vector3 elw = FallMap(fall.x[FoeFall.El0 + s]), hdw = FallMap(fall.x[FoeFall.Hand0 + s]);
+                    float a = Mathf.InverseLerp(0.5f, 1f, fw), b2 = Mathf.InverseLerp(0f, 0.5f, fw);
+                    Vector3 side = tq * new Vector3(sg, -0.35f, 0.1f).normalized;   // путь руки — через сторону от плеча, не сквозь корпус
+                    Vector3 u = Via(tq * upperRest[s], side, (elw - sh).normalized, a);
+                    { Vector3 ax = tq * new Vector3(sg, -1f, 0f).normalized; float ca = Vector3.Angle(ax, u);   // плечо в конусе 115° (предел 120°)
+                      if (ca > FoeFall.ShCone) u = Vector3.Slerp(ax, u, FoeFall.ShCone / ca).normalized; }
+                    Vector3 f = Via(tq * foreRest[s], side, (hdw - elw).normalized, a);
+                    Vector3 e = sh + u * (BoxerParts.UpperLen * scale), gf = e + f * ((BoxerParts.ForeLen + BoxerParts.GloveOff) * scale);
+                    gt = Vector3.Lerp(gt, gf, b2); gt.y = Mathf.Max(gt.y, root.position.y + 0.10f * scale);
+                    pole = Vector3.Lerp(pole, e - (sh + gt) * 0.5f, b2);
+                    kn = Vector3.Slerp(kn, f, b2).normalized;
+                    Vector3 bk = tq * CarryBack(upperRest[s], backRest[s], Quaternion.Inverse(tq) * u, sg);
+                    back = Vector3.Slerp(back.normalized, bk, b2);
                 }
                 if (s == holdArm && holdW > 0f)
                 {
@@ -572,16 +597,37 @@ namespace VoxGame
                     pole = Vector3.Lerp(pole, right * sg * 0.8f - fwd * 0.4f, holdW);
                     back = Vector3.Lerp(back, fwd, holdW);
                 }
-                BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale);
+                float near = fw > 0f ? Mathf.Lerp(0.12f, ElbowNear, Mathf.InverseLerp(0f, 0.5f, fw)) : 0.12f;   // лёжа локоть сгибается не больше ~144°
+                BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale, near);
                 if (fw > 0f)
                 {
+                    // лёжа: предплечье и перчатка не входят в корпус и голову — цель отодвигается на глубину, рука решается заново
+                    for (int pi = 0; pi < 3; pi++)
+                    {
+                        Vector3 A = FallPoint(FoeFall.Pelvis), B = FallPoint(FoeFall.Chest), H = headMount.TransformPoint(new Vector3(0f, 0.02f, 0.01f));
+                        Vector3 E = fore[s].position, W = E + fore[s].up * (BoxerParts.ForeLen * scale), G = glove[s].position;
+                        Vector3 push = Vector3.zero;
+                        void Seg(Vector3 p, Vector3 q, Vector3 a2, Vector3 b2, float rr)
+                        {
+                            FoeFall.Closest(p, q, a2, b2, out float ps, out float pt);
+                            Vector3 d = Vector3.Lerp(p, q, ps) - Vector3.Lerp(a2, b2, pt); float l = d.magnitude, dep = rr * scale - l;
+                            if (dep <= 0f) return;
+                            Vector3 n = l > 1e-5f ? d / l : Vector3.up;
+                            if (n.y < -0.3f) { n.y = 0f; n = n.sqrMagnitude > 1e-4f ? n.normalized : torsoJoint.right * sg; }
+                            if (dep > Vector3.Dot(push, n)) push += n * (dep - Vector3.Dot(push, n));
+                        }
+                        Seg(E, W, A, B, 0.13f + 0.045f + 0.003f); Seg(G, G, A, B, 0.13f + 0.07f + 0.003f);
+                        Seg(E, W, H, H, 0.11f + 0.045f + 0.003f); Seg(G, G, H, H, 0.11f + 0.07f + 0.003f);
+                        if (push.sqrMagnitude < 1e-6f) break;
+                        gt += push; BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale, near);
+                    }
                     // лёжа: перчатка (по углам её габарита) не ниже настила — цель выше на недостачу, рука решается ещё раз
                     if (gloveB == null) { gloveB = new Bounds[2]; for (int k = 0; k < 2; k++) gloveB[k] = glove[k].GetComponent<MeshFilter>().sharedMesh.bounds; }
                     float gl = float.MaxValue; Bounds gb = gloveB[s];
                     for (int c = 0; c < 8; c++)
                         gl = Mathf.Min(gl, glove[s].TransformPoint(gb.center + Vector3.Scale(gb.extents, new Vector3((c & 1) == 0 ? -1 : 1, (c & 2) == 0 ? -1 : 1, (c & 4) == 0 ? -1 : 1))).y);
                     float lack = root.position.y - gl;
-                    if (lack > 0f) { gt.y += lack; BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale); }
+                    if (lack > 0f) { gt.y += lack; BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale, near); }
                 }
             }
         }
@@ -637,7 +683,38 @@ namespace VoxGame
         readonly Vector3[] footKnee = new Vector3[2];       // стопы в осях коленного узла
         readonly Vector3[] fallPos = new Vector3[FoeFall.N];
         static readonly Vector3 HeadC = new Vector3(0f, 0.02f, 0.01f);   // центр головы от начала её координат
-        Vector3 fallCenL, neck0; Quaternion frame0, headRel0;
+        public const float NeckTilt = 55f, NeckTwist = 40f;   // шея лёжа: наклон и скручивание головы от позы стойки, град
+        Quaternion headRest = Quaternion.identity;            // голова в осях корпуса в стойке
+        readonly Vector3[] upperRest = new Vector3[2], backRest = new Vector3[2], foreRest = new Vector3[2];   // плечо в стойке: ось звена и тыльная сторона, оси корпуса
+
+        // Тыльная сторона плеча при оси звена u (оси корпуса): поза стойки (u0, f0), перенесённая поворотом без скручивания через
+        // направление «в сторону от плеча» — перенос однозначен и для руки над головой (прямой поворот на ~180° не определён)
+        public static Vector3 CarryBack(Vector3 u0, Vector3 f0, Vector3 u, float sg)
+        {
+            Vector3 m = new Vector3(sg, -0.35f, 0.1f).normalized;
+            return Quaternion.FromToRotation(m, u.normalized) * (Quaternion.FromToRotation(u0, m) * f0);
+        }
+
+        // Поворот направления a -> m -> b по t (0 — a, 1 — b) через промежуточное m
+        static Vector3 Via(Vector3 a, Vector3 m, Vector3 b, float t) =>
+            (t < 0.5f ? Vector3.Slerp(a, m, t * 2f) : Vector3.Slerp(m, b, t * 2f - 1f)).normalized;
+
+        // Голова относительно корпуса (rel) не дальше NeckTilt по наклону и NeckTwist по скручиванию от стойки
+        Quaternion NeckLimit(Quaternion rel)
+        {
+            Quaternion q = Quaternion.Inverse(headRest) * rel;
+            Vector3 u = q * Vector3.up;
+            Quaternion sw = Quaternion.FromToRotation(Vector3.up, u), tw = Quaternion.Inverse(sw) * q;
+            float a = Vector3.Angle(Vector3.up, u);
+            if (a > NeckTilt) sw = Quaternion.Slerp(Quaternion.identity, sw, NeckTilt / a);
+            tw.ToAngleAxis(out float ta, out Vector3 tax); ta = Mathf.DeltaAngle(0f, ta);
+            if (Mathf.Abs(ta) > NeckTwist) tw = Quaternion.AngleAxis(Mathf.Sign(ta) * NeckTwist, tax);
+            return headRest * sw * tw;
+        }
+        Quaternion riseRel = Quaternion.identity; bool riseFixed;
+        Vector3 fallCenL, neck0, fallTP; Quaternion frame0, headRel0, fallTQ = Quaternion.identity;
+        // узел падения (мир) -> мир при текущем корпусе: на подъёме узлы заморожены, корпус встаёт — руки идут с ним, а не сквозь него
+        Vector3 FallMap(Vector3 p) => torsoJoint.position + torsoJoint.rotation * (Quaternion.Inverse(fallTQ) * (p - fallTP));
 
         void FallRest()
         {
@@ -662,6 +739,7 @@ namespace VoxGame
             fallPos[FoeFall.Foot0] = kneeJoint.TransformPoint(footKnee[0]); fallPos[FoeFall.Foot1] = kneeJoint.TransformPoint(footKnee[1]);
             fallPos[FoeFall.Head] = headMount.TransformPoint(HeadC);
             fallPos[FoeFall.Hand0] = glove[0].position; fallPos[FoeFall.Hand1] = glove[1].position;
+            fallPos[FoeFall.El0] = fore[0].position; fallPos[FoeFall.El1] = fore[1].position;
             neck0 = torsoJoint.InverseTransformDirection(fallPos[FoeFall.Head] - fallPos[FoeFall.Chest]).normalized;
             headRel0 = Quaternion.Inverse(torsoJoint.rotation) * headMount.rotation;
             fall.Begin(fallPos, lastHitDirW, lastHitJ, ko, root.position.y);
@@ -685,15 +763,27 @@ namespace VoxGame
             Quaternion tw = Quaternion.LookRotation(Vector3.Cross(rt, up), up) * Quaternion.Inverse(frame0);
             Vector3 cen = Vector3.zero; for (int i = 0; i < 6; i++) cen += x[i] / 6f;
             Vector3 tp = cen - tw * (fallCenL * scale);
-            torsoJoint.SetPositionAndRotation(Vector3.Lerp(torsoJoint.position, tp, w), Quaternion.Slerp(torsoJoint.rotation, tw, w));
+            fallTP = tp; fallTQ = tw;
+            // корпус: стойка -> поза падения; на подъёме путь поворота выбран один раз (иначе при повороте около 180° он перескакивает)
+            Quaternion tr;
+            if (w >= 1f) { tr = tw; riseRel = Quaternion.identity; riseFixed = false; }
+            else
+            {
+                if (!riseFixed) { riseRel = Quaternion.Inverse(torsoJoint.rotation) * tw; if (riseRel.w < 0f) riseRel = new Quaternion(-riseRel.x, -riseRel.y, -riseRel.z, -riseRel.w); riseFixed = true; }
+                tr = torsoJoint.rotation * Quaternion.SlerpUnclamped(Quaternion.identity, riseRel, w);
+            }
+            torsoJoint.SetPositionAndRotation(Vector3.Lerp(torsoJoint.position, tp, w), tr);
             // колени: голени по средней линии колено -> стопа
-            Vector3 sd = torsoJoint.InverseTransformDirection(x[FoeFall.Foot0] - x[FoeFall.Knee0] + x[FoeFall.Foot1] - x[FoeFall.Knee1]);
+            Vector3 sd = Quaternion.Inverse(tw) * (x[FoeFall.Foot0] - x[FoeFall.Knee0] + x[FoeFall.Foot1] - x[FoeFall.Knee1]);
             Vector3 sd0 = footKnee[0] + footKnee[1];
-            kneeJoint.localRotation = Quaternion.Slerp(Quaternion.identity, Quaternion.FromToRotation(sd0, sd), w);
+            // колено — шарнир вокруг оси X корпуса: сгиб от покоя 0…KneeMax, без бокового излома и переразгибания
+            float ka = (Mathf.Atan2(-sd.z, -sd.y) - Mathf.Atan2(-sd0.z, -sd0.y)) * Mathf.Rad2Deg;
+            ka = Mathf.Clamp(FoeFall.Wrap(ka), 0f, FoeFall.KneeMax);
+            kneeJoint.localRotation = Quaternion.Slerp(Quaternion.identity, Quaternion.AngleAxis(ka, Vector3.right), w);
             // голова на шее: наклон шеи от покоя, поворот головы относительно корпуса — как в начале падения
-            Vector3 nk = torsoJoint.InverseTransformDirection(x[FoeFall.Head] - x[FoeFall.Chest]);
-            Quaternion hr = torsoJoint.rotation * Quaternion.FromToRotation(neck0, nk) * headRel0;
-            Vector3 hp = x[FoeFall.Head] - hr * HeadC;
+            Vector3 nk = Quaternion.Inverse(tw) * (x[FoeFall.Head] - x[FoeFall.Chest]);
+            Quaternion hr = torsoJoint.rotation * NeckLimit(Quaternion.FromToRotation(neck0, nk) * headRel0);
+            Vector3 hp = FallMap(x[FoeFall.Head]) - hr * HeadC;   // на подъёме голова идёт с корпусом
             headMount.SetPositionAndRotation(Vector3.Lerp(headMount.position, hp, w), Quaternion.Slerp(headMount.rotation, hr, w));
             // не ниже настила: самая низкая точка узлов корпуса, стоп и головы (с их радиусами)
             float floor = root.position.y, low = float.MaxValue;

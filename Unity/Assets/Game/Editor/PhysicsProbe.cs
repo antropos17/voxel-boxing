@@ -237,9 +237,169 @@ namespace VoxGame.Editor
         }
         public const float RingYaw = 57f;
 
+        // ---- Суставы и взаимопроникновение при падении (PHYSICS.md, направление 3, дополнение) --------------------------
+        // Пределы, град: колено 0…140 (сгиб от покоя), локоть 0…145, шея наклон ≤ 60 и скручивание ≤ 45, плечо — конус 120°
+        // вокруг оси «наружу-вниз» и скручивание ±100, запястье ≤ 30. Бедро, поясница и голеностоп у модели жёсткие (бедро — часть
+        // торса, обе голени с ботинками — одна сетка): их углы постоянны и равны покою.
+        public const float LimKnee = 140f, LimElbow = 145f, LimNeckTilt = 60f, LimNeckTwist = 45f, LimShCone = 120f, LimShTwist = 100f, LimWrist = 30f;
+
+        public sealed class LimbRest { public Quaternion head; public Vector3[] u = new Vector3[2], f = new Vector3[2]; public float[] knee = new float[2], side = new float[2]; }
+
+        public sealed class LimbStat
+        {
+            public float worstPhysPen; public string physPenWhat = ""; public int physPenFrames;
+            public int frames, framesOver, framesHyper, legsSame, restRuns;
+            public float worstOver, worstHyper, worstPen, worstPenRest, minKneeRest = 999f, minHipRest = 999f;
+            public string overWhat = "", hyperWhat = "", penWhat = "", penRestWhat = "";
+            public float[] maxAng = new float[8]; public Dictionary<string, int> overBy = new Dictionary<string, int>(), penBy = new Dictionary<string, int>();
+            public string By() { var sb = new StringBuilder(" physPen=" + F(worstPhysPen * 100f) + "cm(" + physPenWhat + ") physPen>1.5frames=" + physPenFrames + " overBy:"); foreach (var kv in overBy) sb.Append(" " + kv.Key + "=" + kv.Value); sb.Append(" pen>1.5By:"); foreach (var kv in penBy) sb.Append(" " + kv.Key + "=" + kv.Value); return sb.ToString(); }   // худшее за все кадры: колено, переразгиб колена, локоть, шея наклон, шея скрут, плечо конус, плечо скрут, запястье
+            public string Line() => "LIMBS frames=" + frames + " over3=" + framesOver + " (worst " + F(worstOver) + "° " + overWhat + ") hyper5=" + framesHyper
+                + " (worst " + F(worstHyper) + "° " + hyperWhat + ") pen=" + F(worstPen * 100f) + "cm(" + penWhat + ") penRest=" + F(worstPenRest * 100f) + "cm(" + penRestWhat
+                + ") kneeRestMin=" + F(minKneeRest) + "° hipRestMin=" + F(minHipRest) + "° legsSame=" + legsSame + "/" + restRuns
+                + " max: knee=" + F(maxAng[0]) + " kneeHyper=" + F(maxAng[1]) + " elbow=" + F(maxAng[2]) + " neckTilt=" + F(maxAng[3]) + " neckTwist=" + F(maxAng[4])
+                + " shCone=" + F(maxAng[5]) + " shTwist=" + F(maxAng[6]) + " wrist=" + F(maxAng[7]);
+        }
+
+        static float KneeAng(FoeBody b, int s, out float side)
+        {
+            Vector3 v = b.Torso.InverseTransformDirection(b.FootPoint(s) - b.Knee.position);
+            side = Mathf.Asin(Mathf.Clamp(v.x / Mathf.Max(1e-5f, v.magnitude), -1f, 1f)) * Mathf.Rad2Deg;
+            return Mathf.Atan2(-v.z, -v.y) * Mathf.Rad2Deg;
+        }
+
+        public static LimbRest LimbRestOf(FoeBody b)
+        {
+            var r = new LimbRest { head = Quaternion.Inverse(b.Torso.rotation) * b.headMount.rotation };
+            for (int s = 0; s < 2; s++)
+            {
+                r.u[s] = b.Torso.InverseTransformDirection(b.UpperArm(s).up); r.f[s] = b.Torso.InverseTransformDirection(b.UpperArm(s).forward);
+                r.knee[s] = KneeAng(b, s, out r.side[s]);
+            }
+            return r;
+        }
+
+        static float SegDist(Vector3 p1, Vector3 q1, Vector3 p2, Vector3 q2)
+        {
+            Vector3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+            float a = Vector3.Dot(d1, d1), e = Vector3.Dot(d2, d2), f = Vector3.Dot(d2, r), s, t;
+            if (a < 1e-9f && e < 1e-9f) return r.magnitude;
+            if (a < 1e-9f) { s = 0f; t = Mathf.Clamp01(f / e); }
+            else
+            {
+                float c = Vector3.Dot(d1, r);
+                if (e < 1e-9f) { t = 0f; s = Mathf.Clamp01(-c / a); }
+                else
+                {
+                    float bb = Vector3.Dot(d1, d2), den = a * e - bb * bb;
+                    s = den > 1e-9f ? Mathf.Clamp01((bb * f - c * e) / den) : 0f;
+                    t = (bb * s + f) / e;
+                    if (t < 0f) { t = 0f; s = Mathf.Clamp01(-c / a); } else if (t > 1f) { t = 1f; s = Mathf.Clamp01((bb - c) / a); }
+                }
+            }
+            return ((p1 + d1 * s) - (p2 + d2 * t)).magnitude;
+        }
+
+        static readonly string[] SegName = { "torso", "head", "upper0", "upper1", "fore0", "fore1", "glove0", "glove1", "shin0", "shin1" };
+        // соседние по суставу пары (не проверяются): корпус–плечи, корпус–голова, корпус–голени, плечо–предплечье, предплечье–перчатка, голени (одна сетка)
+        static bool Adjacent(int i, int j)
+        {
+            if (i > j) { int k = i; i = j; j = k; }
+            if (i == 0 && (j == 1 || j == 2 || j == 3 || j == 8 || j == 9)) return true;
+            if ((i == 2 && j == 4) || (i == 3 && j == 5) || (i == 4 && j == 6) || (i == 5 && j == 7) || (i == 8 && j == 9)) return true;
+            return false;
+        }
+
+        static readonly Vector3[] sa = new Vector3[10], sb = new Vector3[10]; static readonly float[] sr = new float[10];
+        public static float LastPen; public static string LastPenWhat = "";
+
+        // Один кадр: углы суставов против пределов и глубина пересечения несоседних объёмов. rest — поза покоя (тело уснуло).
+        public static void Limbs(FoeBody b, LimbRest r, LimbStat st, string tag, bool rest)
+        {
+            if (!rest && b.FallWeight < 0.5f) return;   // считаем, пока тело лежит или встаёт (вес позы падения ≥ 0,5); стойка — своя поза
+            float sc = b.Scale; st.frames++;
+            float over = 0f, hyper = 0f; string ow = "", hw = "";
+            void Over(float v, float lim, string w, int slot) { st.maxAng[slot] = Mathf.Max(st.maxAng[slot], v); if (v - lim > over) { over = v - lim; ow = w; } }
+            for (int s = 0; s < 2; s++)
+            {
+                float kn = Mathf.DeltaAngle(r.knee[s], KneeAng(b, s, out float side));
+                Over(kn, LimKnee, "knee" + s, 0);
+                st.maxAng[1] = Mathf.Max(st.maxAng[1], -kn); if (-kn > hyper) { hyper = -kn; hw = "knee" + s; }
+                if (Mathf.Abs(side - r.side[s]) > 10f + over) { over = Mathf.Abs(side - r.side[s]) - 10f; ow = "kneeSide" + s; }
+                Transform up = b.UpperArm(s), fo = b.ForeArm(s);
+                Vector3 S = up.position, E = fo.position, W = E + fo.up * (BoxerParts.ForeLen * sc);
+                Over(180f - Vector3.Angle(S - E, W - E), LimElbow, "elbow" + s, 2);
+                Over(Vector3.Angle(fo.up, b.GloveT(s).forward), LimWrist, "wrist" + s, 7);
+                Vector3 u = b.Torso.InverseTransformDirection(up.up), f = b.Torso.InverseTransformDirection(up.forward);
+                float sg = Mathf.Sign(b.Torso.InverseTransformPoint(S).x);
+                Over(Vector3.Angle(u, new Vector3(sg, -1f, 0f).normalized), LimShCone, "shoulder" + s, 5);
+                Vector3 ft = FoeBody.CarryBack(r.u[s], r.f[s], u, sg);
+                Over(Mathf.Abs(Vector3.SignedAngle(ft, f, u)), LimShTwist, "shTwist" + s, 6);
+            }
+            Quaternion q = Quaternion.Inverse(r.head) * (Quaternion.Inverse(b.Torso.rotation) * b.headMount.rotation);
+            Vector3 hu = q * Vector3.up;
+            Over(Vector3.Angle(hu, Vector3.up), LimNeckTilt, "neckTilt", 3);
+            Quaternion tw = Quaternion.Inverse(Quaternion.FromToRotation(Vector3.up, hu)) * q; tw.ToAngleAxis(out float ta, out _);
+            Over(Mathf.Abs(Mathf.DeltaAngle(0f, ta)), LimNeckTwist, "neckTwist", 4);
+            if (over > 3f) { st.framesOver++; string key = ow.TrimEnd('0', '1'); st.overBy[key] = (st.overBy.TryGetValue(key, out int c) ? c : 0) + 1; }
+            if (hyper > 5f) st.framesHyper++;
+            if (over > st.worstOver) { st.worstOver = over; st.overWhat = ow + " " + tag; }
+            if (hyper > st.worstHyper) { st.worstHyper = hyper; st.hyperWhat = hw + " " + tag; }
+            // объёмы: капсулы и шары
+            sa[0] = b.FallPoint(FoeFall.Pelvis); sb[0] = b.FallPoint(FoeFall.Chest); sr[0] = 0.13f * sc;
+            sa[1] = sb[1] = b.headMount.TransformPoint(new Vector3(0f, 0.02f, 0.01f)); sr[1] = 0.11f * sc;
+            for (int s = 0; s < 2; s++)
+            {
+                Transform up = b.UpperArm(s), fo = b.ForeArm(s);
+                sa[2 + s] = up.position; sb[2 + s] = fo.position; sr[2 + s] = 0.05f * sc;
+                sa[4 + s] = fo.position; sb[4 + s] = fo.position + fo.up * (BoxerParts.ForeLen * sc); sr[4 + s] = 0.045f * sc;
+                sa[6 + s] = sb[6 + s] = b.GloveT(s).position; sr[6 + s] = 0.07f * sc;
+                sa[8 + s] = b.FallPoint(FoeFall.Knee0 + s); sb[8 + s] = b.FootPoint(s); sr[8 + s] = 0.055f * sc;
+            }
+            float pen = 0f; string pw = "";
+            for (int i = 0; i < 10; i++) for (int j = i + 1; j < 10; j++)
+            {
+                if (Adjacent(i, j)) continue;
+                float d = sr[i] + sr[j] - SegDist(sa[i], sb[i], sa[j], sb[j]);
+                if (d > pen) { pen = d; pw = SegName[i] + "-" + SegName[j]; }
+            }
+            LastPen = pen; LastPenWhat = pw;
+            {
+                // то же по узлам падения (физика): отличие от сетки — перенос узлов на модель
+                var x = b.fall.x;
+                sa[0] = x[FoeFall.Pelvis]; sb[0] = x[FoeFall.Chest]; sr[0] = FoeFall.TorsoR;
+                sa[1] = sb[1] = x[FoeFall.Head]; sr[1] = FoeFall.Radius(FoeFall.Head);
+                for (int s = 0; s < 2; s++)
+                {
+                    sa[2 + s] = x[FoeFall.Sh0 + s]; sb[2 + s] = x[FoeFall.El0 + s]; sr[2 + s] = FoeFall.UpperR;
+                    sa[4 + s] = x[FoeFall.El0 + s]; sb[4 + s] = x[FoeFall.Hand0 + s]; sr[4 + s] = FoeFall.ForeR;
+                    sa[6 + s] = sb[6 + s] = x[FoeFall.Hand0 + s]; sr[6 + s] = FoeFall.Radius(FoeFall.Hand0);
+                    sa[8 + s] = x[FoeFall.Knee0 + s]; sb[8 + s] = x[FoeFall.Foot0 + s]; sr[8 + s] = FoeFall.ShinR;
+                }
+                float pp = 0f; string ppw = "";
+                for (int i = 0; i < 10; i++) for (int j = i + 1; j < 10; j++)
+                {
+                    if (Adjacent(i, j)) continue;
+                    float d = sr[i] + sr[j] - SegDist(sa[i], sb[i], sa[j], sb[j]);
+                    if (d > pp) { pp = d; ppw = SegName[i] + "-" + SegName[j]; }
+                }
+                if (b.FallWeight >= 1f && pp > st.worstPhysPen) { st.worstPhysPen = pp; st.physPenWhat = ppw + " " + tag; }
+                if (b.FallWeight >= 1f && pp > 0.015f) st.physPenFrames++;
+            }
+            if (pen > 0.015f) st.penBy[pw] = (st.penBy.TryGetValue(pw, out int pc) ? pc : 0) + 1;
+            if (pen > st.worstPen) { st.worstPen = pen; st.penWhat = pw + " " + tag; }
+            if (rest)
+            {
+                st.restRuns++;
+                if (pen > st.worstPenRest) { st.worstPenRest = pen; st.penRestWhat = pw + " " + tag; }
+                for (int s = 0; s < 2; s++) st.minKneeRest = Mathf.Min(st.minKneeRest, 180f - Mathf.Max(0f, Mathf.DeltaAngle(r.knee[s], KneeAng(b, s, out _))));
+                st.minHipRest = Mathf.Min(st.minHipRest, 180f);   // бедро — часть торса: угол бедро–торс постоянен
+                if ((((sa[8] + sb[8]) - (sa[9] + sb[9])) * 0.5f).magnitude < sr[8] + sr[9]) st.legsSame++;
+            }
+        }
+
         public sealed class FallStat
         {
-            public int runs, nan, under, outRing, slow, dirBad; public string meshWhat = ""; public float worstUnder, worstSettle, worstAngle, worstJump, worstStance, worstMesh;
+            public LimbStat limb = new LimbStat(); public int runs, nan, under, outRing, slow, dirBad; public string meshWhat = ""; public float worstUnder, worstSettle, worstAngle, worstJump, worstStance, worstMesh;
             public string Line() => "FALL runs=" + runs + " NaN=" + nan + " under2cm=" + under + " (worst " + F(worstUnder * 100f) + "cm) outRing=" + outRing
                 + " settle>2.5s=" + slow + " (worst " + F(worstSettle) + "s) dir>45=" + dirBad + " (" + F(100f * (runs - dirBad) / Mathf.Max(1, runs)) + "% ok, worst " + F(worstAngle)
                 + ") riseJump=" + F(worstJump * 100f) + "%H stanceErr=" + F(worstStance * 100f) + "cm meshLowest=" + F(worstMesh * 100f) + "cm(" + meshWhat + ")";
@@ -264,6 +424,7 @@ namespace VoxGame.Editor
                 for (int i = 0; i < 30; i++) b.Tick(idle, dt, Vector3.forward);
                 Vector3 stance = b.root.InverseTransformPoint(b.headMount.position);
                 float height = stance.y + 0.12f;
+                var lr = LimbRestOf(b);
                 for (int k = 0; k < per; k++)
                 {
                     st.runs++;
@@ -289,7 +450,9 @@ namespace VoxGame.Editor
                         }
                         float lw = LowestOverFloor(b, parts, out string lwhat);
                         if (lw < mesh) { mesh = lw; if (lw < st.worstMesh) st.meshWhat = lwhat; }
-                        if (settle < 0f && b.fall.asleep) settle = t + dt;
+                        string tag = "seed=" + sd + " k=" + k + (ko ? " KO" : "") + " t=" + F(t);
+                        if (settle < 0f && b.fall.asleep) { settle = t + dt; Limbs(b, lr, st.limb, tag + " rest", true); }
+                        else if (t > 0.2f) Limbs(b, lr, st.limb, tag, false);
                     }
                     // направление падения — ось лежащего тела: таз -> голова (у канатов тело сползает, но лежит по удару)
                     Vector3 fall = b.fall.x[FoeFall.Head] - b.fall.x[FoeFall.Pelvis]; fall.y = 0f;
@@ -308,15 +471,16 @@ namespace VoxGame.Editor
                     if (ko) { b.ResetFall(); continue; }
                     // подъём (Rise 1,9 с) и пауза стойки (1,1 с): скачок между кадрами, поза в конце
                     var rise = new AICommand { newPhase = FightPhase.Rise };
-                    Vector3 ph = b.headMount.position, pt = b.Torso.position;
+                    Vector3 ph = b.headMount.position, pt = b.Torso.position; Quaternion prevQ = b.Torso.rotation;
                     for (float t = 0f; t < 3f; t += dt)
                     {
                         b.Tick(t < 1.9f ? rise : idle, dt, Vector3.forward);
+                        Limbs(b, lr, st.limb, "seed=" + sd + " k=" + k + " rise t=" + F(t), false);
                         // рывок на 1/60 с: при 30 к/с кадр вдвое длиннее, та же скорость даёт вдвое больший сдвиг
                         float j = Mathf.Max((b.headMount.position - ph).magnitude, (b.Torso.position - pt).magnitude) / (dt * 60f);
-                        if (j / height > st.worstJump && log != null && j / height > 0.05f) log.AppendLine(" jump seed=" + sd + " k=" + k + " t=" + F(t) + " j=" + F(j * 100f) + " settle=" + F(settle) + " w=" + F(b.FallWeight));
+                        if (j / height > st.worstJump && log != null && j / height > 0.05f) log.AppendLine(" jump seed=" + sd + " k=" + k + " t=" + F(t) + " j=" + F(j * 100f) + " settle=" + F(settle) + " w=" + F(b.FallWeight) + " dh=" + F((b.headMount.position - ph).magnitude * 100f) + " dt=" + F((b.Torso.position - pt).magnitude * 100f) + " T=" + V(b.Torso.position) + " Tprev=" + V(pt) + " H=" + V(b.headMount.position) + " ang=" + F(Quaternion.Angle(b.Torso.rotation, prevQ)));
                         st.worstJump = Mathf.Max(st.worstJump, j / height);
-                        ph = b.headMount.position; pt = b.Torso.position;
+                        ph = b.headMount.position; pt = b.Torso.position; prevQ = b.Torso.rotation;
                         if (float.IsNaN(ph.x)) nan = true;
                     }
                     st.worstStance = Mathf.Max(st.worstStance, (b.root.InverseTransformPoint(b.headMount.position) - stance).magnitude);
@@ -330,12 +494,90 @@ namespace VoxGame.Editor
         public static void PhysFalls()
         {
             var log = new StringBuilder();
-            log.AppendLine(FallStats(20, 10, 1f / 60f, false, log).Line() + " (60)");
-            log.AppendLine(FallStats(5, 4, 1f / 30f).Line() + " (30)");
-            log.AppendLine(FallStats(5, 4, 1f / 120f).Line() + " (120)");
-            log.AppendLine(FallStats(5, 4, 1f / 60f, true).Line() + " (KO)");
-            log.AppendLine(FallStats(5, 4, 1f / 60f, false, null, true).Line() + " (near corner)");
+            void Both(FallStat st, string nm) { log.AppendLine(st.Line() + " (" + nm + ")"); log.AppendLine(st.limb.Line() + st.limb.By() + " (" + nm + ")"); }
+            Both(FallStats(20, 10, 1f / 60f, false, log), "60");
+            Both(FallStats(5, 4, 1f / 30f), "30");
+            Both(FallStats(5, 4, 1f / 120f), "120");
+            Both(FallStats(5, 4, 1f / 60f, true), "KO");
+            Both(FallStats(5, 4, 1f / 60f, false, null, true), "near corner");
             PhysLog = log.ToString();
+            File.WriteAllText("Logs/phys-falls.txt", PhysLog);
+        }
+
+        // Снимки поз лёжа крупно: тело соперника в сцене боя, удары как в FallStats (тот же генератор), n падений подряд с
+        // подъёмом; снимаются падения из shotAt и худшее по взаимопроникновению (ko-worst). Камера сверху-сбоку, видны все
+        // четыре конечности; перчатки игрока и интерфейс на снимке скрыты.
+        public static void PhysLimbShots(int n = 12, int[] shotAt = null, bool ko = false, string prefix = "ko-limbs-", uint seed = 5)
+        {
+            var d = NewFight(out var cam, out var ui, 0.6f, 0.5f, 0, false, null);
+            var b = d.FoeFigure; float dt = 1f / 60f;
+            Vector3[] dirs = { JabDir, HookDir, new Vector3(-HookDir.x, HookDir.y, HookDir.z), UpperDir, new Vector3(0.45f, 0.1f, -0.89f), new Vector3(-0.45f, 0.1f, -0.89f) };
+            shotAt = shotAt ?? new[] { 0, 2, 4, 6, 8, 10 };
+            var log = new StringBuilder(); var lr = LimbRestOf(b);
+            uint rng = seed * 2654435761u + 7u;
+            float Rnd() { rng = rng * 1664525u + 1013904223u; return (rng >> 8) / 16777216f; }
+            var idle = new AICommand { newPhase = FightPhase.Idle };
+            for (int i = 0; i < 30; i++) b.Tick(idle, dt, Vector3.forward);
+            float worst = -1f; int worstK = -1;
+            void Snap(string name)
+            {
+                d.Head.root.SetPositionAndRotation(b.headMount.position, b.headMount.rotation);
+                d.SetViewSize(PhysW, PhysH);
+                Vector3 cen = (b.fall.x[FoeFall.Pelvis] + b.fall.x[FoeFall.Chest] + b.fall.x[FoeFall.Head]) / 3f;
+                Vector3 ax = b.fall.x[FoeFall.Head] - b.fall.x[FoeFall.Pelvis]; ax.y = 0f; ax = ax.sqrMagnitude > 1e-4f ? ax.normalized : Vector3.forward;
+                Vector3 sideV = Vector3.Cross(Vector3.up, ax);
+                cen -= ax * 0.25f;   // середина от головы до стоп
+                Vector3 eye = cen + (sideV * 0.8f - ax * 0.3f + Vector3.up * 1.3f).normalized * 2.6f;
+                cam.transform.SetPositionAndRotation(eye, Quaternion.LookRotation(cen - eye, ax));
+                float fov = cam.fieldOfView; cam.fieldOfView = 55f;
+                var kids = new List<GameObject>(); foreach (Transform t in cam.transform) if (t.gameObject.activeSelf) { kids.Add(t.gameObject); t.gameObject.SetActive(false); }
+                bool uiOn = ui != null && ui.gameObject.activeSelf; if (uiOn) ui.gameObject.SetActive(false);
+                var rf = GameObject.Find("Referee"); if (rf != null) rf.SetActive(false);
+                Shot(cam, null, PhysW, PhysH, Path.Combine(PhysShots, PhysTag + name + ".png"));
+                foreach (var g in kids) g.SetActive(true); if (uiOn) ui.gameObject.SetActive(true); if (rf != null) rf.SetActive(true);
+                cam.fieldOfView = fov; d.SetViewSize(PortW, PortH);
+            }
+            for (int pass = 0; pass < 2; pass++)
+            {
+                rng = seed * 2654435761u + 7u; b.ResetFall();
+                for (int i = 0; i < 30; i++) b.Tick(idle, dt, Vector3.forward);
+                for (int k = 0; k < n; k++)
+                {
+                    Vector3 dir = dirs[(int)(Rnd() * dirs.Length) % dirs.Length];
+                    dir = (dir + new Vector3(Rnd() - 0.5f, (Rnd() - 0.5f) * 0.3f, 0f) * 0.4f).normalized;
+                    int strength = Rnd() < 0.5f ? 1 : (Rnd() < 0.5f ? 0 : 2);
+                    b.root.localPosition = Vector3.zero;
+                    for (int i = 0; i < 10; i++) b.Tick(idle, dt, Vector3.forward);
+                    b.AddHit(b.headMount.position + b.root.rotation * JabArm, b.root.rotation * dir, strength, 0.8f + Rnd());
+                    var down = new AICommand { newPhase = ko ? FightPhase.KO : FightPhase.Down };
+                    bool rest = false;
+                    for (float t = 0f; t < 3.5f; t += dt)
+                    {
+                        b.Tick(down, dt, Vector3.forward);
+                        if (!rest && (b.fall.asleep || t > 3.4f))
+                        {
+                            rest = true;
+                            var ls = new LimbStat(); Limbs(b, lr, ls, "", true);
+                            if (pass == 0)
+                            {
+                                log.AppendLine("k=" + k + " t=" + F(t) + " pen=" + F(LastPen * 100f) + "cm(" + LastPenWhat + ") kneeRest=" + F(ls.minKneeRest) + " over=" + F(ls.worstOver));
+                                if (LastPen > worst) { worst = LastPen; worstK = k; }
+                            }
+                            else
+                            {
+                                int si = System.Array.IndexOf(shotAt, k);
+                                if (si >= 0) Snap(prefix + (si + 1));
+                                if (k == worstK) Snap(ko ? "ko-worst-ko" : "ko-worst");
+                            }
+                        }
+                    }
+                    if (ko) { b.ResetFall(); continue; }
+                    var rise = new AICommand { newPhase = FightPhase.Rise };
+                    for (float t = 0f; t < 3f; t += dt) b.Tick(t < 1.9f ? rise : idle, dt, Vector3.forward);
+                }
+            }
+            log.AppendLine("worst k=" + worstK + " pen=" + F(worst * 100f) + "cm");
+            PhysLog = log.ToString(); File.WriteAllText("Logs/phys-limbshots-" + prefix.TrimEnd('-') + ".txt", PhysLog);
         }
 
         // ---- Нокдаун и куски в настоящем бою --------------------------------------------------------------
