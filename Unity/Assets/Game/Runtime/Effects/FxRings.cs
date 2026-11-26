@@ -36,6 +36,8 @@ namespace VoxGame
         GameObject _go;
         bool _empty = true;
 
+        // Показать или спрятать кольца (замер: кольцо над текстом плашки).
+        public void SetDrawn(bool on) { if (_go != null) _go.SetActive(on); }
         public int Active { get { int n = 0; for (int i = 0; i < MaxRings; i++) if (_r[i].on) n++; return n; } }
 
         // parent == null — только логика (тесты).
@@ -60,6 +62,7 @@ namespace VoxGame
 
             var sh = GameUtil.FindShader("VoxGame/FxAdditive", GameUtil.FxAddMaterial);
             _mat = new Material(sh) { name = "FxRings" };
+            _mat.renderQueue = 3000;   // в очереди прозрачных вместе с холстом: холст ближе к камере и рисуется после — кольцо под плашкой и HUD
             _go = new GameObject("FxRings");
             _go.transform.SetParent(parent, false);
             _go.AddComponent<MeshFilter>().sharedMesh = _mesh;

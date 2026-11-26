@@ -69,11 +69,9 @@ namespace VoxGame
         public const float WebFaceDist = 0.7f;      // м: лицо соперника от камеры веба; масштаб вида = расстояние / это
         public const float ViewKMin = 1f, ViewKMax = 2.5f;
         public const float WhiteFlash = 0.15f;      // ×FlashMax 0,7 ≈ 0,1: в линейном цвете Unity это та же яркость, что 0,36 #white веба
-        public const float PopBelow = 0.17f;        // м: плашка удара под центром головы (под подбородком)
-        public const int BloodJab = 12, BloodPower = 30, BloodPowerPerPw = 10, BloodMega = 140, BloodFracture = 30;
+        public const int BloodJab = 120, BloodPower = 130, BloodPowerPerPw = 10, BloodMega = 280, BloodFracture = 30;
         public const int BloodHeadBurst = 100, BloodCounter = 8, ChunksPower = 3, ChunksMega = 10, ChunksFracture = 6;
         public const int FireMega = 40, SweatJab = 4;
-        public const float UpUpper = 1.6f, UpHook = 0.2f, UpMega = 0.8f;
         public const float SpdJab = 0.9f, SpdPower = 1.2f, SpdMega = 1.5f;
 
         // Без эффектов: частицы, кольца, накладки и надписи не строятся; время (стоп-кадр, слоу-мо) и камера — как с ними.
@@ -98,6 +96,7 @@ namespace VoxGame
         public float SlowLeft   => _slow;
         public float ShakeAmp   => _shake;
         public float Clock      => _clock;
+        public Vector3 LastHitPoint { get; private set; }   // точка последнего удара игрока, мир (замеры)
 
         public FxParticles Particles { get; private set; }
         public FxBanners   Banners   { get; private set; }
@@ -223,7 +222,7 @@ namespace VoxGame
             }
             Rings?.Tick(dt, realDt, _cam != null ? _cam.transform : null);
             Banners?.Tick(realDt);
-            Pops?.Tick(realDt, realDt * TimeScale);
+            if (Pops != null) { RecordArms(); SyncAvoid(); Pops.Tick(realDt, realDt * TimeScale); }
             Overlay?.Tick(realDt);
             return TimeScale;
         }
@@ -279,6 +278,7 @@ namespace VoxGame
         {
             bool power = h.kind == PunchType.Hook || h.kind == PunchType.Upper;
             float pw = Mathf.Max(1f, h.power);
+            LastHitPoint = h.point;
 
             // Время
             if (h.mega) HitStop(MegaFreeze, MegaSlow);
@@ -324,8 +324,9 @@ namespace VoxGame
                 if (h.fracture) blood += BloodFracture;
                 if (h.headBurst) blood += BloodHeadBurst;
                 if (h.counter) blood += BloodCounter;
-                float up = h.mega ? UpMega : h.punch == PunchType.Upper ? UpUpper : UpHook;
-                Particles.BloodBurst(h.point, h.dir, toCam, blood, up, h.mega ? SpdMega : power ? SpdPower : SpdJab, k);
+                int bk = h.mega || h.headBurst ? FxParticles.BurstAll : h.punch == PunchType.Upper ? FxParticles.BurstUpper
+                       : h.punch == PunchType.Hook ? FxParticles.BurstHook : FxParticles.BurstJab;
+                Particles.BloodBurst(h.point, h.dir, toCam, blood, bk, h.mega ? SpdMega : power ? SpdPower : SpdJab, k);
                 int chunks = (h.mega ? ChunksMega : power ? ChunksPower : 0) + (h.fracture ? ChunksFracture : 0);
                 if (chunks > 0) Particles.Chunks(h.point, h.dir, toCam, chunks, 1f, k);
                 if (h.mega) Particles.Fire(h.point, h.dir, toCam, FireMega, k);
@@ -341,8 +342,7 @@ namespace VoxGame
             }
             else if (Pops != null)
             {
-                Vector3 at = new Vector3(h.point.x, _foeHead.y - PopBelow, h.point.z);
-                Pops.ShowPop(FxPops.PopText((int)h.punch, h.counter, dmg), at, power || h.counter);
+                Pops.ShowPop(FxPops.PopText((int)h.punch, h.counter, dmg), h.point, power || h.counter);
             }
             if (h.fracture && !h.mega) Banners?.ShowCenter(FxBanners.Fracture, BannerStyle.Power);
             Pops?.OnCombo(h.combo);
@@ -422,7 +422,7 @@ namespace VoxGame
             AddFov(PowerFovK);
             Banners?.ShowCenter(FxBanners.Knockdown, BannerStyle.Big);
             Overlay?.Cinema(KnockdownSlow + 0.4f, 0.5f);
-            Particles?.BloodBurst(_foeHead, Vector3.down, ToCam(_foeHead, Vector3.down), 30, 0.6f, SpdPower, ViewK(_foeHead));
+            Particles?.BloodBurst(_foeHead, Vector3.down, ToCam(_foeHead, Vector3.down), 30, FxParticles.BurstAll, SpdPower, ViewK(_foeHead));
             FinisherReady = false;
         }
 
@@ -436,7 +436,7 @@ namespace VoxGame
             Banners?.ShowCenter(FxBanners.Knockout, BannerStyle.Huge);
             Rings?.Impact(_foeHead, StrMega, 3, ViewK(_foeHead));
             Overlay?.Cinema(KnockoutSlow + 1.2f, 1f);
-            Particles?.BloodBurst(_foeHead, Vector3.down, ToCam(_foeHead, Vector3.down), 60, 0.8f, SpdMega, ViewK(_foeHead));
+            Particles?.BloodBurst(_foeHead, Vector3.down, ToCam(_foeHead, Vector3.down), 60, FxParticles.BurstAll, SpdMega, ViewK(_foeHead));
             FinisherReady = false;
         }
 
@@ -459,7 +459,7 @@ namespace VoxGame
             {
                 var c = ToCam(_foeHead, Vector3.down);
                 float k = ViewK(_foeHead);
-                Particles.BloodBurst(_foeHead, Vector3.down, c, 120, 0.8f, SpdMega, k);
+                Particles.BloodBurst(_foeHead, Vector3.down, c, 120, FxParticles.BurstAll, SpdMega, k);
                 Particles.Fire(_foeHead, Vector3.down, c, FireMega, k);
             }
             FinisherReady = false;
@@ -495,6 +495,105 @@ namespace VoxGame
         // ---- Вспомогательные -----------------------------------------------
 
         void AddShake(float s) { if (s > _shake) _shake = s; }
+
+        // Перчатки игрока (PlayerGloves: камера/playerArms/playerGlove0..1) → экранные прямоугольники для места плашки удара.
+        readonly MeshFilter[] _gloveMf = new MeshFilter[2];
+        void SyncAvoid()
+        {
+            if (_cam == null) { Pops.SetAvoid(Rect.zero, Rect.zero); if (Pops.NeedAvoid) { Pops.BeginMask(); Pops.EndMask(); } return; }
+            Pops.SetAvoid(GloveRect(0), GloveRect(1));
+            if (Pops.NeedAvoid) ArmMask();
+        }
+
+        // Руки игрока для места плашки (доработка 4): перчатки с манжетой и предплечья. Плашка выбирает место один раз и
+        // стоит всё время показа, поэтому обходит не только руки сейчас, но и их позы за ArmHistN кадров: рука после удара
+        // возвращается тем же путём, которым шла к удару.
+        public const int ArmHistN = 9, ArmHistStep = 4, ArmHistStride = 4;   // кадров истории (0,15 с); брать каждую 4-ю позу и каждую 4-ю точку
+        static readonly string[] ArmRigNames = { "playerArms/playerGlove0", "playerArms/playerGlove1", "playerArms/playerForeArm0", "playerArms/playerForeArm1" };
+        readonly MeshFilter[] _armMf = new MeshFilter[4];
+        readonly Matrix4x4[] _armHist = new Matrix4x4[ArmHistN * 4];   // поза части в осях камеры; [кадр·4 + часть]
+        readonly bool[] _armHistOn = new bool[ArmHistN * 4];
+        int _armHead;
+
+        void RecordArms()
+        {
+            if (_cam == null) return;
+            _armHead = (_armHead + 1) % ArmHistN;
+            Matrix4x4 c = _cam.transform.worldToLocalMatrix;
+            for (int s = 0; s < 4; s++)
+            {
+                if (_armMf[s] == null)
+                {
+                    var t = _cam.transform.Find(ArmRigNames[s]) ?? (s < 2 ? _cam.transform.Find(GloveNames[s]) : null);
+                    if (t != null) _armMf[s] = t.GetComponent<MeshFilter>();
+                }
+                var mf = _armMf[s];
+                bool on = mf != null && mf.gameObject.activeInHierarchy && mf.sharedMesh != null;
+                _armHistOn[_armHead * 4 + s] = on;
+                if (on) _armHist[_armHead * 4 + s] = c * mf.transform.localToWorldMatrix;
+            }
+        }
+
+        // Маска рук в кадре: сейчас — все точки силуэта; в прошлых позах (каждая ArmHistStep-я) — каждая ArmHistStride-я
+        // точка с пятном шире в ArmHistPad раз.
+        public const float ArmHistPad = 1.3f;
+        void ArmMask()
+        {
+            Pops.BeginMask();
+            float tv = Mathf.Tan(_cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            for (int ago = 0; ago < ArmHistN; ago += ArmHistStep)
+            {
+                int f = (_armHead - ago + ArmHistN) % ArmHistN;
+                int stride = ago == 0 ? 1 : ArmHistStride;
+                float pad = FxPops.MaskPad * (ago == 0 ? 1f : ArmHistPad);
+                for (int s = 0; s < 4; s++)
+                {
+                    if (!_armHistOn[f * 4 + s]) continue;
+                    var mf = _armMf[s];
+                    var pts = mf != null ? GloveLooks.Silhouette(mf.sharedMesh) : null;
+                    if (pts == null) continue;
+                    Matrix4x4 m = _armHist[f * 4 + s];
+                    float hw = pad * GloveLooks.SilStepCm * 0.01f * mf.transform.lossyScale.x;   // полшага с запасом, м
+                    for (int i = (ago / ArmHistStep) % stride; i < pts.Length; i += stride)
+                    {
+                        Vector3 v = m.MultiplyPoint3x4(pts[i]);
+                        if (v.z <= 0.01f) continue;
+                        float fy = 0.5f / (v.z * tv), fx = fy / _aspect;
+                        Pops.MaskSplat(0.5f + v.x * fx, 0.5f + v.y * fy, hw * fx, hw * fy);
+                    }
+                }
+            }
+            Pops.EndMask();
+        }
+
+        static readonly string[] GloveNames = { "playerGlove0", "playerGlove1" };
+        static readonly string[] GloveRigNames = { "playerArms/playerGlove0", "playerArms/playerGlove1" };   // руки в своей оснастке (поле зрения рук)
+        Rect GloveRect(int s)
+        {
+            if (_gloveMf[s] == null)
+            {
+                var t = _cam.transform.Find(GloveRigNames[s]) ?? _cam.transform.Find(GloveNames[s]);
+                if (t == null) return Rect.zero;
+                _gloveMf[s] = t.GetComponent<MeshFilter>();
+                if (_gloveMf[s] == null) return Rect.zero;
+            }
+            var mf = _gloveMf[s];
+            if (!mf.gameObject.activeInHierarchy || mf.sharedMesh == null) return Rect.zero;
+            // углы ориентированного короба сетки перчатки в кадре
+            Bounds b = mf.sharedMesh.bounds;
+            Transform tr = mf.transform;
+            float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 e = new Vector3((i & 1) == 0 ? -b.extents.x : b.extents.x, (i & 2) == 0 ? -b.extents.y : b.extents.y,
+                                        (i & 4) == 0 ? -b.extents.z : b.extents.z);
+                Vector3 w = tr.TransformPoint(b.center + e);
+                if (_cam.transform.InverseTransformPoint(w).z <= 0.01f) continue;
+                Vector2 v = FxBanners.ProjectView(_cam, _aspect, w, Vector2.zero);
+                x0 = Mathf.Min(x0, v.x); x1 = Mathf.Max(x1, v.x); y0 = Mathf.Min(y0, v.y); y1 = Mathf.Max(y1, v.y);
+            }
+            return x1 > x0 ? Rect.MinMaxRect(x0, y0, x1, y1) : Rect.zero;
+        }
         void AddFov(float k) { if (k > _fovK) _fovK = k; }
 
         float Rand01()

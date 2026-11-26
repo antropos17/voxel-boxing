@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.UI;
 
 namespace VoxGame
@@ -26,7 +27,14 @@ namespace VoxGame
         public static readonly Vector2 ChipsPort = new Vector2(0.97f, 0.785f), ChipsLand = new Vector2(0.04f, 0.86f);
         public const float ChipH = 30f, ChipGap = 5f;
 
-        static readonly Color Plate = new Color(14f / 255f, 8f / 255f, 12f / 255f, 0.72f);
+        // Плашка удара (правка HIT-FX-2): непрозрачная насыщенная заливка и рамка 3 px, рисуется поверх рук (ZTest Always).
+        // Силовой и встречный — жёлтый текст на алой плашке с чёрной рамкой; джеб — белый текст на чёрной плашке с алой рамкой.
+        static readonly Color PlatePower = new Color32(176, 18, 26, 255), PlateJab = new Color32(18, 12, 16, 255);
+        static readonly Color FramePower = new Color32(0, 0, 0, 255), FrameJab = new Color32(225, 30, 36, 255);
+        static readonly Color TextPower = new Color32(255, 232, 110, 255), TextJab = new Color32(255, 250, 240, 255);
+        public const float FramePx = 3f;
+        // Где плашка может стоять (доли кадра): ниже полос HUD, выше счётчика комбо и кнопок; в ландшафте — между кнопками.
+        public const float PopTopP = 0.80f, PopBotP = 0.20f, PopTopL = 0.83f, PopBotL = 0.12f, PopSideL = 0.17f, PopMargin = 0.01f;
         static readonly Color Bone  = new Color32(236, 226, 200, 255);
         static readonly Color Gold  = new Color32(255, 196, 64, 255);
         static readonly Color BloodRed = new Color32(200, 35, 28, 255);
@@ -81,7 +89,14 @@ namespace VoxGame
             public bool alive;
             public float age;
             public Vector3 world;
-            public Color color;
+            public Color color, fill, frame;
+            public Outline outline;
+            public Vector2 off;          // сдвиг от точки удара (доли кадра), выбран при появлении
+            public int chosen;           // номер тика, в котором выбрано место (−1 — ещё нет)
+            public Vector2 p0;           // экранная точка удара на момент выбора места: плашка не трясётся вместе с камерой
+            public int born;             // номер тика появления: в кадре удара плашка прозрачна, место выбирается в следующем
+            public float riseK;          // доля подъёма: у верхней границы области плашка всплывает меньше
+            public Rect g0, g1;          // перчатки, по которым выбрано место
             public uint seq;
         }
 
@@ -97,7 +112,9 @@ namespace VoxGame
         readonly Pop[] _pops = new Pop[MaxPops];
         readonly Chip[] _chips = new Chip[MaxChips];
         readonly Camera _cam;
-        RectTransform _root, _comboRt;
+        RectTransform _root, _comboRt, _safe;
+        Material _top;
+        readonly Rect[] _avoid = new Rect[2];   // экранные прямоугольники перчаток игрока (доли кадра), задаёт FxDirector
         Text _combo;
         float _aspect = 0.4615f;
         uint _seq;
@@ -120,6 +137,28 @@ namespace VoxGame
             }
         }
 
+        // Самая поздняя живая плашка (замер: прямоугольник, цвет плашки и текста); null — нет.
+        public RectTransform LastPopRect
+        {
+            get
+            {
+                Pop best = null;
+                for (int i = 0; i < MaxPops; i++) if (_pops[i].alive && (best == null || _pops[i].seq > best.seq)) best = _pops[i];
+                return best?.rt;
+            }
+        }
+        public bool LastPopShown { get { Pop b = null; for (int i = 0; i < MaxPops; i++) if (_pops[i].alive && (b == null || _pops[i].seq > b.seq)) b = _pops[i]; return b != null && b.chosen >= 0; } }
+        public float LastPopAge
+        {
+            get
+            {
+                Pop best = null;
+                for (int i = 0; i < MaxPops; i++) if (_pops[i].alive && (best == null || _pops[i].seq > best.seq)) best = _pops[i];
+                return best != null ? best.age : -1f;
+            }
+        }
+        public RectTransform ComboRect => _comboRt;
+
         public FxPops(Transform parent, Camera cam)
         {
             _cam = cam;
@@ -128,18 +167,29 @@ namespace VoxGame
             _root = go.GetComponent<RectTransform>();
             UIKit.SetAnchors(_root, 0f, 0f, 1f, 1f);
             _root.offsetMin = _root.offsetMax = Vector2.zero;
+            _safe = parent != null && parent.parent != null ? parent.parent.Find("SafeArea") as RectTransform : null;
+            var ui = Shader.Find("UI/Default");
+            if (ui != null)
+            {
+                _top = new Material(ui) { name = "FxPopsTop" };
+                _top.SetInt("unity_GUIZTestMode", (int)CompareFunction.Always);   // поверх рук игрока при любой глубине
+            }
 
             for (int i = 0; i < MaxPops; i++)
             {
                 var rt = NewRect("Pop" + i, _root);
                 var plate = rt.gameObject.AddComponent<Image>();
-                plate.color = Plate; plate.raycastTarget = false;
+                plate.color = PlateJab; plate.raycastTarget = false;
+                if (_top != null) plate.material = _top;
+                var ol = plate.gameObject.AddComponent<Outline>();
+                ol.effectDistance = new Vector2(FramePx, -FramePx); ol.useGraphicAlpha = true;
                 var t = UIKit.Label(rt, "Text", PopFontPower, Gold, semiBold: true);
                 t.horizontalOverflow = HorizontalWrapMode.Overflow;
                 Hard(t, 2f);
+                if (_top != null) t.material = _top;
                 Stretch(t.rectTransform);
                 rt.gameObject.SetActive(false);
-                _pops[i] = new Pop { rt = rt, plate = plate, text = t };
+                _pops[i] = new Pop { rt = rt, plate = plate, text = t, outline = ol };
             }
 
             _combo = UIKit.Label(_root, "Combo", 40, UIKit.Accent, semiBold: true, align: TextAnchor.MiddleLeft);
@@ -203,10 +253,13 @@ namespace VoxGame
             }
             // на экране одна плашка удара: прежняя гаснет сразу, иначе серия ляжет стопкой на грудь
             for (int i = 0; i < MaxPops; i++) if (_pops[i].alive) { _pops[i].alive = false; _pops[i].rt.gameObject.SetActive(false); }
-            s.alive = true; s.age = 0f; s.seq = ++_seq; s.world = at;
+            s.alive = true; s.age = 0f; s.seq = ++_seq; s.world = at; s.chosen = -1; s.born = _tick;
             if (!ReferenceEquals(s.text.text, text)) s.text.text = text;
             s.text.fontSize = gold ? PopFontPower : PopFontJab;
-            s.color = gold ? Gold : Bone;
+            s.color = gold ? TextPower : TextJab;
+            s.fill = gold ? PlatePower : PlateJab;
+            s.frame = gold ? FramePower : FrameJab;
+            s.off = Vector2.zero; s.g0 = s.g1 = Rect.zero;
             s.rt.sizeDelta = new Vector2(s.text.preferredWidth + PlatePadX * 2f, s.text.fontSize + PlatePadY * 2f);
             s.rt.gameObject.SetActive(true);
             s.rt.SetAsLastSibling();
@@ -225,6 +278,50 @@ namespace VoxGame
         }
 
         public void HideCombo() => _comboLeft = 0f;
+
+        // Перчатки игрока на экране (доли кадра, Rect.zero — нет); плашка выбирает место, которое они не закрывают.
+        public void SetAvoid(Rect glove0, Rect glove1) { _avoid[0] = glove0; _avoid[1] = glove1; }
+
+        // Маска силуэта перчаток (MaskN×MaskN клеток на кадр) и её суммы по прямоугольникам; пока маски нет — короба SetAvoid.
+        public const int MaskN = 96;
+        public const float MaskFree = 0.08f, MaskW = 10f, MaskPad = 0.9f;   // бесплатная доля перекрытия маски, вес перекрытия, пятно точки (доля шага)
+        readonly bool[] _mask = new bool[MaskN * MaskN];
+        readonly int[] _sat = new int[(MaskN + 1) * (MaskN + 1)];
+        bool _maskOn;
+        int _tick, _maskTick = -1;   // маска и место — не чаще раза за кадр (ShowPop и Tick в одном кадре)
+        public bool NeedAvoid { get { if (_maskTick == _tick) return false; for (int i = 0; i < MaxPops; i++) if (_pops[i].alive && _pops[i].chosen < 0 && ChooseNow(_pops[i])) return true; return false; } }
+        // место выбирается через ChooseDelay после удара (4 кадра): рука к этому времени прошла по инерции дальше точки удара,
+        // её путь — в истории поз (FxDirector.ArmMask); до выбора плашка прозрачна, её жизнь идёт от выбора
+        public const float ChooseDelay = 0.067f;
+        bool ChooseNow(Pop s) => s.born != _tick && s.age >= ChooseDelay;
+        public bool MaskStale => _maskTick != _tick;
+        public void BeginMask() { System.Array.Clear(_mask, 0, _mask.Length); _maskOn = false; _maskTick = _tick; }
+        public void MaskSplat(float x, float y, float hx, float hy)
+        {
+            int x0 = Mathf.Max(0, Mathf.FloorToInt((x - hx) * MaskN)), x1 = Mathf.Min(MaskN - 1, Mathf.FloorToInt((x + hx) * MaskN));
+            int y0 = Mathf.Max(0, Mathf.FloorToInt((y - hy) * MaskN)), y1 = Mathf.Min(MaskN - 1, Mathf.FloorToInt((y + hy) * MaskN));
+            for (int j = y0; j <= y1; j++) for (int i = x0; i <= x1; i++) _mask[j * MaskN + i] = true;
+            if (x1 >= x0 && y1 >= y0) _maskOn = true;
+        }
+        public void EndMask()
+        {
+            const int W = MaskN + 1;
+            for (int j = 0; j < MaskN; j++)
+            {
+                int row = 0;
+                for (int i = 0; i < MaskN; i++) { if (_mask[j * MaskN + i]) row++; _sat[(j + 1) * W + i + 1] = _sat[j * W + i + 1] + row; }
+            }
+        }
+        // площадь маски внутри прямоугольника (доли кадра), по клеткам с центром внутри
+        float MaskOv(Rect r)
+        {
+            const int W = MaskN + 1;
+            int x0 = Mathf.Clamp(Mathf.RoundToInt(r.xMin * MaskN), 0, MaskN), x1 = Mathf.Clamp(Mathf.RoundToInt(r.xMax * MaskN), 0, MaskN);
+            int y0 = Mathf.Clamp(Mathf.RoundToInt(r.yMin * MaskN), 0, MaskN), y1 = Mathf.Clamp(Mathf.RoundToInt(r.yMax * MaskN), 0, MaskN);
+            if (x1 <= x0 || y1 <= y0) return 0f;
+            int n = _sat[y1 * W + x1] - _sat[y0 * W + x1] - _sat[y1 * W + x0] + _sat[y0 * W + x0];
+            return n / (float)(MaskN * MaskN);
+        }
 
         // Метка травмы с ключом key: тот же ключ обновляет метку, новый — добавляет (самая старая уходит).
         public void SetChip(int key, string text, bool bad)
@@ -268,6 +365,7 @@ namespace VoxGame
                 if (s.age >= PopLife) { s.alive = false; s.rt.gameObject.SetActive(false); continue; }
                 Place(s);
             }
+            _tick++;
 
             _comboLeft = Mathf.Max(0f, _comboLeft - gdt);
             bool on = _comboLeft > 0f;
@@ -290,15 +388,148 @@ namespace VoxGame
             float k = s.age / PopLife;
             float a = k < PopIn ? k / PopIn : k < PopHold ? 1f : 1f - (k - PopHold) / (1f - PopHold);
             Vector2 p = _cam != null ? FxBanners.ProjectView(_cam, _aspect, s.world, new Vector2(0.5f, 0.55f)) : new Vector2(0.5f, 0.55f);
-            p.x = Mathf.Clamp(p.x, Land ? PopXMinLand : PopXMin, Land ? PopXMaxLand : PopXMax);
-            p.y = Mathf.Clamp(p.y, 0.2f, 0.8f);
+            Vector2 root = RootSize();
+            Vector2 half = new Vector2((s.rt.sizeDelta.x + 2f * FramePx) * 0.5f / root.x, (s.rt.sizeDelta.y + 2f * FramePx) * 0.5f / root.y);
+            float riseN = PopRise / root.y;
+            // место выбирается один раз, в первом кадре проявления (в кадре удара плашка прозрачна), и больше не меняется:
+            // плашка не прыгает; руки обходятся с запасом на путь возврата (маска с историей поз, FxDirector.ArmMask)
+            if (s.chosen < 0 && ChooseNow(s) && _maskTick == _tick)   // маска рук построена в этом же кадре
+            {
+                s.chosen = _tick;
+                s.g0 = _avoid[0]; s.g1 = _avoid[1];
+                s.off = Choose(p, half, riseN, s.g0, s.g1, out s.riseK);
+                s.p0 = p;
+                s.age = 0f; k = 0f; a = 0f;   // жизнь плашки идёт от выбора места: появление как обычно
+            }
+            if (s.chosen >= 0) p = s.p0;
+            p = Fit(p + s.off, half, riseN * s.riseK);
             s.rt.anchorMin = s.rt.anchorMax = p;
             // всплывает от +8 px (появление) до −46 css-px, как margin-top в @keyframes pop
-            float rise = k < PopIn ? -11f * (1f - k / PopIn) : PopRise * Mathf.Clamp01((k - PopIn) / (1f - PopIn));
+            float rise = k < PopIn ? -11f * (1f - k / PopIn) : PopRise * s.riseK * Mathf.Clamp01((k - PopIn) / (1f - PopIn));
             s.rt.anchoredPosition = new Vector2(0f, rise);
+            if (s.chosen < 0) a = 0f;   // пока место не выбрано (кадр удара), плашка прозрачна
             var c = s.color; c.a = a; s.text.color = c;
-            var pc = Plate; pc.a *= a; s.plate.color = pc;
+            var pc = s.fill; pc.a *= a; s.plate.color = pc;
+            s.outline.effectColor = s.frame;
         }
+
+        // Размер холста в его единицах при пропорциях кадра _aspect, как его задаёт CanvasScaler UIRoot на телефоне
+        // (опорное 540×1170 или 1170×540, match 0,5): не зависит от окна редактора и снимков.
+        Vector2 RootSize()
+        {
+            float r = Land ? 1170f / 540f : 540f / 1170f, q = Mathf.Sqrt(_aspect / r);
+            return Land ? new Vector2(1170f * q, 540f / q) : new Vector2(540f * q, 1170f / q);
+        }
+
+        // Допустимая область центра плашки: safe-area, ниже полос HUD, выше комбо и кнопок; в ландшафте — между кнопками.
+        // Плашка всплывает на riseN, поэтому сверху запас на весь подъём, снизу — на опускание при появлении.
+        Vector2 Fit(Vector2 c, Vector2 half, float riseN)
+        {
+            Vector2 smin = _safe != null ? _safe.anchorMin : Vector2.zero, smax = _safe != null ? _safe.anchorMax : Vector2.one;
+            float x0 = Mathf.Max(smin.x, Land ? PopSideL : 0f) + PopMargin + half.x;
+            float x1 = Mathf.Min(smax.x, Land ? 1f - PopSideL : 1f) - PopMargin - half.x;
+            float y0 = Mathf.Max(smin.y, Land ? PopBotL : PopBotP) + PopMargin + half.y + riseN * (11f / PopRise);
+            float y1 = Mathf.Min(smax.y, Land ? PopTopL : PopTopP) - PopMargin - half.y - riseN;
+            if (x1 < x0) x0 = x1 = 0.5f * (x0 + x1);
+            if (y1 < y0) y0 = y1 = 0.5f * (y0 + y1);
+            return new Vector2(Mathf.Clamp(c.x, x0, x1), Mathf.Clamp(c.y, y0, y1));
+        }
+
+        public const int OffNX = 24, OffNY = 22;         // грубая сетка: ±24 шага по 0,04 и ±22 шага по 0,03 меньшей стороны
+        public const float OffStepX = 0.04f, OffStepY = 0.03f;
+
+        // Место плашки рядом с точкой удара (доработка 2): наименьшая цена = перекрытие перчатками и счётчиком комбо
+        // (доля площади ×10) плюс расстояние центра до экранной точки удара в долях меньшей стороны кадра. Так плашка
+        // встаёт вплотную к краю перчатки со свободной стороны. Перебор 49×45 мест и 9×9 уточнения (шаг вчетверо мельче), без выделений памяти.
+        Rect _g0, _g1;
+        static Vector3[] _offs;   // сдвиги грубой сетки в долях меньшей стороны (x, y, длина), по возрастанию длины
+        static Vector3[] Offsets()
+        {
+            if (_offs != null) return _offs;
+            var l = new System.Collections.Generic.List<Vector3>((2 * OffNX + 1) * (2 * OffNY + 1));
+            for (int iy = -OffNY; iy <= OffNY; iy++)
+            for (int ix = -OffNX; ix <= OffNX; ix++)
+            {
+                float x = ix * OffStepX, y = iy * OffStepY;
+                l.Add(new Vector3(x, y, Mathf.Sqrt(x * x + y * y)));
+            }
+            l.Sort((a, b) => a.z.CompareTo(b.z));
+            return _offs = l.ToArray();
+        }
+        Vector2 Choose(Vector2 p, Vector2 half, float riseN, Rect g0, Rect g1, out float riseK)
+        {
+            Rect combo = ComboRectN();
+            _g0 = Inset(g0); _g1 = Inset(g1);   // запасной путь без маски: короб сетки шире силуэта перчатки (скруглённые края, манжета)
+            float best = float.MaxValue; Vector2 bo = Vector2.zero;
+            // границы области центра без запаса на подъём — один раз на выбор (Fit читает safe-area, это дорого)
+            Vector2 lo = Fit(new Vector2(-2f, -2f), half, 0f), hi = Fit(new Vector2(2f, 2f), half, 0f);
+            float top = hi.y;
+            riseK = 1f;
+            float kx = Land ? _aspect : 1f, ky = Land ? 1f : 1f / _aspect;   // доли кадра → доли меньшей стороны
+            // шаг сетки — в долях меньшей стороны: в ландшафте по ширине мельче; второй проход уточняет лучший шаг вчетверо
+            float sx = OffStepX / kx, sy = OffStepY / ky;   // шаги в долях кадра (для уточнения)
+            // места по возрастанию расстояния: цена не меньше расстояния, поэтому дальние после лучшей цены не нужны
+            var offs = Offsets();
+            for (int i = 0; i < offs.Length; i++)
+            {
+                Vector3 o = offs[i];
+                if (o.z >= best) break;
+                Try(p, p + new Vector2(o.x / kx, o.y / ky), half, riseN, top, lo, hi, kx, ky, combo, ref best, ref bo, ref riseK);
+            }
+            for (float q = 0.25f; q > 0.05f; q *= 0.25f)   // уточнение: шаг 1/4, затем 1/16 грубого
+            {
+                Vector2 c0 = p + bo;
+                for (int iy = -4; iy <= 4; iy++)
+                for (int ix = -4; ix <= 4; ix++)
+                    Try(p, c0 + new Vector2(ix * sx * q, iy * sy * q), half, riseN, top, lo, hi, kx, ky, combo, ref best, ref bo, ref riseK);
+            }
+            return bo;
+        }
+
+        void Try(Vector2 p, Vector2 want, Vector2 half, float riseN, float top, Vector2 lo, Vector2 hi, float kx, float ky, Rect combo,
+                 ref float best, ref Vector2 bo, ref float riseK)
+        {
+            Vector2 c = new Vector2(Mathf.Clamp(want.x, lo.x, hi.x), Mathf.Clamp(want.y, lo.y, hi.y));
+            float dx = (c.x - p.x) * kx, dy = (c.y - p.y) * ky;
+            float dist = Mathf.Sqrt(dx * dx + dy * dy);
+            // два варианта: всплывает (сколько позволяет верх области) или стоит на месте — у края перчатки подъём
+            // завёл бы плашку на неё
+            for (int v = 0; v < 2; v++)
+            {
+                float rk = v == 0 ? Mathf.Clamp01((top - c.y) / riseN) : 0f;
+                // плашка за время показа: от появления до конца удержания (всплывает примерно на 0,6 подъёма)
+                Rect r = Rect.MinMaxRect(c.x - half.x, c.y - half.y, c.x + half.x, c.y + half.y + riseN * rk * 0.6f);
+                float ov = (_maskOn ? MaskOv(r) : Ov(r, _g0) + Ov(r, _g1) - Ov(r, Inter(_g0, _g1))) + Ov(r, combo);
+                // маска шире силуэта (пятно точки MaskPad шага): первые MaskFree площади не штрафуются
+                float cost = MaskW * Mathf.Max(0f, ov / Mathf.Max(1e-6f, r.width * r.height) - (_maskOn ? MaskFree : 0f)) + dist + (v == 1 ? 0.001f : 0f);
+                if (cost < best) { best = cost; bo = c - p; riseK = rk; }
+            }
+        }
+
+        Rect ComboRectN()
+        {
+            Vector2 root = RootSize();
+            Vector2 a = Land ? ComboLand : ComboPort;
+            float w = _comboRt.sizeDelta.x / root.x, h = _comboRt.sizeDelta.y / root.y;
+            return Rect.MinMaxRect(a.x, a.y - h * 0.5f, a.x + w, a.y + h * 0.5f);
+        }
+
+        // доля размера короба с каждой стороны: короб углов сетки → силуэт перчатки (по бокам скруглён сильнее, чем сверху и снизу)
+        public const float GloveInsetX = 0.17f, GloveInsetY = 0.07f;
+        static Rect Inset(Rect r)
+        {
+            if (r.width <= 0f) return r;
+            float ix = r.width * GloveInsetX, iy = r.height * GloveInsetY;
+            return Rect.MinMaxRect(r.xMin + ix, r.yMin + iy, r.xMax - ix, r.yMax - iy);
+        }
+
+        static Rect Inter(Rect a, Rect b)
+        {
+            float x0 = Mathf.Max(a.xMin, b.xMin), y0 = Mathf.Max(a.yMin, b.yMin), x1 = Mathf.Min(a.xMax, b.xMax), y1 = Mathf.Min(a.yMax, b.yMax);
+            return x1 > x0 && y1 > y0 ? Rect.MinMaxRect(x0, y0, x1, y1) : Rect.zero;
+        }
+
+        static float Ov(Rect a, Rect b) { var r = Inter(a, b); return r.width * r.height; }
 
         void LayoutChips()
         {
@@ -332,7 +563,8 @@ namespace VoxGame
         public void Dispose()
         {
             if (_root != null) GameUtil.Destroy(_root.gameObject);
-            _root = null;
+            if (_top != null) GameUtil.Destroy(_top);
+            _root = null; _top = null;
         }
     }
 }
