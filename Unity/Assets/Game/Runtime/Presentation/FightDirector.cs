@@ -1033,6 +1033,7 @@ namespace VoxGame
         public void Dispose()
         {
             AnatFace.Off();
+            AnatSkin.Reset(); AnatSkin.Off();   // изгиб шеи включён в Build: вернуть покой, иначе он переживёт бой (тесты анатомии после тестов игры)
             _fx?.Dispose();
             _sound?.Dispose();
             _fx           = null;
