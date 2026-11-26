@@ -51,6 +51,29 @@ namespace VoxGame
         float _punchMaxZ = PunchMaxZP;
         const float ReachLen = 0.48f, ReachElbowDeg = 110f;   // в вытянутой руке локоть не прямее этого угла
 
+        // ---- Поле зрения рук (как viewmodel FOV в шутерах) ----------------------------------------------------------------
+        // В портрете горизонтальное поле камеры ~33° (CalcFov держит tan = 0,296), в ландшафте ~90°: одна и та же рука в метрах
+        // в портрете в 3,4 раза шире на экране. Руки ставятся в виртуальном кадре с горизонтальным tan не меньше ArmTanHMin
+        // (вертикальный — в той же пропорции) и рисуются через родителя _rig с масштабом (k, k, 1), k = tanH / tanH':
+        // точка p виртуального кадра видна там же, где её показала бы камера с полем шире, а глубина прежняя.
+        // Позы в долях экрана и точки попадания (луч из камеры) не меняются; в ландшафте k = 1.
+        public static bool  ViewFix = true;        // false — как до правки (сверка «без | с»)
+        public static float ArmTanHMin = 0.50f;    // tan половины горизонтального поля рук (≈ 53° на весь кадр; в портрете k ≈ 0,59)
+        float _k = 1f;                             // масштаб рук на экране (1 — как камера)
+        // ---- Поза руки в портрете (PoseFix) ----
+        // С полем рук перчатка в ударе стоит в центре кадра, а рука от неё шла прямой палкой до нижнего края (полэкрана).
+        // В портрете ближе всего боковой край: в ударе локоть уводится за него — предплечье от запястья наружу (SideFore…),
+        // плечо от локтя вниз-назад за край (SideUpper…), оси кадра рук, x — наружу. Длины звеньев прежние, перчатка на месте.
+        public static bool PoseFix = true;         // false — вид fd78630 (только поле рук)
+        public static Vector3 SideForeJab = new Vector3(1f, -0.60f, -0.40f), SideForeHook = new Vector3(1f, 0.05f, -0.35f),
+                              SideForeUpper = new Vector3(1f, -0.55f, -0.25f), SideUpper = new Vector3(0.4f, -1f, -0.4f);
+        // Перчатка в портрете: доля прежнего размера на экране (поле рук делает её мельче в k раз)
+        public static float GloveScreenK = 0.68f;
+        public static float SideFollow = 0.2f;     // ось перчатки в такой позе меньше следует за предплечьем: костяшки к цели
+        float _gs = 1f;                            // масштаб перчатки поверх Scale
+        bool  _pose;                               // PoseFix и поле рук действует (портрет)
+        readonly Transform _rig;
+
         readonly Transform _cam;
         readonly Transform[] _upper = new Transform[2], _fore = new Transform[2], _glove = new Transform[2];
         readonly MeshFilter[] _foreMf = new MeshFilter[2], _gloveMf = new MeshFilter[2];
@@ -70,7 +93,7 @@ namespace VoxGame
 
         // Удар
         readonly float[] _ext = new float[2], _timer = new float[2], _outT = new float[2];
-        readonly Vector3[] _goal = new Vector3[2];
+        readonly Vector3[] _goal = new Vector3[2], _tgt = new Vector3[2];   // _tgt — цель в осях камеры, _goal — в кадре рук
         readonly PunchType[] _kind = new PunchType[2];
 
         bool  _blocking;
@@ -115,14 +138,16 @@ namespace VoxGame
         public PlayerGloves(Transform cameraParent, GloveLook look, Material mat)
         {
             _cam = cameraParent;
+            _rig = new GameObject("playerArms").transform;
+            _rig.SetParent(_cam, false);
             BuildMeshes(look);
             _upperMesh = GloveLooks.BuildUpperArmMesh();
             for (int s = 0; s < 2; s++)
             {
-                _upper[s] = VoxModel.Spawn("playerUpperArm" + s, _cam, _upperMesh, mat);
+                _upper[s] = VoxModel.Spawn("playerUpperArm" + s, _rig, _upperMesh, mat);
                 _upper[s].localScale = Vector3.one * Scale;
-                _fore[s]  = VoxModel.Spawn("playerForeArm" + s, _cam, _foreMesh, mat);
-                _glove[s] = VoxModel.Spawn("playerGlove" + s, _cam, _gloveMesh[s], mat);
+                _fore[s]  = VoxModel.Spawn("playerForeArm" + s, _rig, _foreMesh, mat);
+                _glove[s] = VoxModel.Spawn("playerGlove" + s, _rig, _gloveMesh[s], mat);
                 _foreMf[s]  = _fore[s].GetComponent<MeshFilter>();
                 _gloveMf[s] = _glove[s].GetComponent<MeshFilter>();
                 _fore[s].localScale = _glove[s].localScale = Vector3.one * Scale;
@@ -168,6 +193,15 @@ namespace VoxGame
         {
             _tanV = Mathf.Tan(vFovDeg * 0.5f * Mathf.Deg2Rad);
             _tanH = _tanV * aspect;
+            // поле рук: дальше всё в виртуальном кадре (_tanH, _tanV шире настоящих в 1/k раз)
+            _k = ViewFix ? Mathf.Min(1f, _tanH / ArmTanHMin) : 1f;
+            _tanV /= _k; _tanH /= _k;
+            _pose = PoseFix && _k < 0.999f;
+            _gs = _pose ? Mathf.Max(1f, GloveScreenK / _k) : 1f;
+            if (!FoeSpring.Enabled)
+                for (int s = 0; s < 2; s++) if (_glove[s] != null) _glove[s].localScale = Vector3.one * (Scale * _gs);
+            var rs = new Vector3(_k, _k, 1f);
+            if (_rig.localScale != rs) _rig.localScale = rs;
             _nLen = Mathf.Sqrt(1f + _tanV * _tanV);
             bool port = aspect < 1f;
             _restAU = port ? RestAUP : RestAUL;
@@ -206,8 +240,8 @@ namespace VoxGame
                 case PunchType.Upper: t += new Vector3(0f, -0.075f, -0.04f); break;            // под подбородком
                 default:              t += new Vector3(0f, 0f, -0.08f); break;                 // перед лицом
             }
-            _goal[s]  = FoeSpring.Enabled ? ReachSphere(t, RealShoulder(s, 1f), ArmReach() + BoxerParts.GloveOff * Scale * 0.7f)
-                                          : Reach(t, _punchMaxZ);
+            _tgt[s] = t;
+            _goal[s] = Goal(s);
             _landed[s] = landed;
             _kind[s]  = kind;
             _timer[s] = Mathf.Max(duration, 0.08f);
@@ -221,19 +255,39 @@ namespace VoxGame
         public void RaiseVictory(int side, Vector3 worldWrist)
         {
             _vicSide  = side < 0 ? 0 : 1;
-            _vicWrist = FoeSpring.Enabled ? ReachSphere(_cam.InverseTransformPoint(worldWrist), VicRealShoulder(_vicSide), ArmReach())
-                                          : Reach(_cam.InverseTransformPoint(worldWrist), VictoryMaxZ);
+            Vector3 cw = _cam.InverseTransformPoint(worldWrist);
+            _vicWrist = ToArm(FoeSpring.Enabled ? ReachSphere(cw, VicShoulderCam(_vicSide), ArmReach()) : Reach(cw, VictoryMaxZ));
             _vicOn    = true;
         }
+
+        // Куда приходит перчатка (кадр рук): цель удара, перенесённая по лучу из камеры до досягаемой точки.
+        // Считается по текущему кадру: при повороте экрана посреди удара перчатка остаётся на цели.
+        Vector3 Goal(int s)
+        {
+            // досягаемость — в осях камеры по настоящему плечу: глубина и место перчатки те же, что без поля рук
+            return ToArm(FoeSpring.Enabled ? ReachSphere(_tgt[s], ShoulderCam(s, 1f), ArmReach() + BoxerParts.GloveOff * Scale * 0.7f)
+                                           : Reach(_tgt[s], _punchMaxZ));
+        }
+
+        // Точка в осях камеры → виртуальный кадр рук (на экране то же место, глубина та же)
+        Vector3 ToArm(Vector3 p) => new Vector3(p.x / _k, p.y / _k, p.z);
+
+        public float Extension(int s) => _ext[s];   // вылет руки 0..1 (снимки)
+        public float ArmScreenK => _k;
 
         float ArmReach() => (GloveLooks.UpperLenCm + GloveLooks.ForeLenCm) * 0.01f * Scale * ReachK;
 
         // Настоящее плечо (оси камеры) при вылете e (0 — стойка, 1 — удар)
-        Vector3 RealShoulder(int s, float e) =>
+        Vector3 ShoulderCam(int s, float e) =>
             new Vector3(Sign(s) * (_shP.x + ShoulderPunch.x * e), _shP.y + ShoulderPunch.y * e, _shP.z + ShoulderPunch.z * e);
 
-        Vector3 VicRealShoulder(int s) =>
+        Vector3 VicShoulderCam(int s) =>
             new Vector3(Sign(s) * (_shP.x + ShoulderVictory.x), _shP.y + ShoulderVictory.y, _shP.z + ShoulderVictory.z);
+
+        // То же в кадре рук: на экране сустав там же, где настоящий (за нижним краем). Если рука до него не достаёт,
+        // Place подтягивает его к запястью по той же линии — рука уходит за край в ту же сторону.
+        Vector3 RealShoulder(int s, float e) => ToArm(ShoulderCam(s, e));
+        Vector3 VicRealShoulder(int s) => ToArm(VicShoulderCam(s));
 
         // Точка на луче из камеры через t (на экране то же место), не дальше r от плеча sh: самая дальняя такая точка луча.
         // Луч мимо сферы — ближайшая к плечу точка луча, подтянутая к плечу.
@@ -317,6 +371,7 @@ namespace VoxGame
 
                 if (e > 0f)
                 {
+                    _goal[s] = Goal(s);
                     Vector3 pk, pb, bow;
                     float pu;
                     switch (_kind[s])
@@ -361,7 +416,7 @@ namespace VoxGame
 
                 float reachW = Mathf.Max(e, lockW);
                 Vector3 kp = _kind[s] == PunchType.Hook ? PoleHook : _kind[s] == PunchType.Upper ? PoleUpper : PoleJab;
-                Place(s, pos, kn, back, au, az, lockW, Mathf.Lerp(RestFollow, ForeFollow, reachW), reachW, e, kp);
+                Place(s, pos, kn, back, au, az, lockW, Mathf.Lerp(RestFollow, ForeFollow, reachW), reachW, e, kp, _kind[s]);
                 if (FoeSpring.Enabled) SquashApply(s);
             }
         }
@@ -370,7 +425,7 @@ namespace VoxGame
         // локоть сгибается вниз-наружу: плечо идёт из угла, предплечье — вверх к перчатке. w — вес позы 0..1.
         void VictoryPose(float sg, float w, ref Vector3 pos, ref Vector3 kn, ref Vector3 back, ref float au)
         {
-            Vector3 up = _cam.InverseTransformDirection(Vector3.up);
+            Vector3 up = ToArm(_cam.InverseTransformDirection(Vector3.up)).normalized;
             Vector3 vk = (up * 0.92f + new Vector3(-sg * 0.12f, 0f, 0.2f)).normalized;
             Vector3 gt = _vicWrist + vk * (BoxerParts.GloveOff * Scale);
             float vu = sg * VictoryAU;
@@ -385,9 +440,9 @@ namespace VoxGame
         // follow — насколько ось перчатки следует за предплечьем; reachW — вес вытянутой руки (удар, поднятая рука):
         // сустав уезжает вглубь по нижнему краю кадра к ближайшей к запястью точке, чтобы плечо не тянулось жердью.
         void Place(int s, Vector3 pos, Vector3 kn, Vector3 back, float au, float az, float lockW, float follow, float reachW,
-                   float ext = 0f, Vector3 kindPole = default)
+                   float ext = 0f, Vector3 kindPole = default, PunchType kind = PunchType.Jab)
         {
-            float go = BoxerParts.GloveOff * Scale;
+            float go = BoxerParts.GloveOff * Scale * _gs;
             Vector3 k = kn.sqrMagnitude > 1e-8f ? kn.normalized : Vector3.forward;
             Vector3 pole = new Vector3(Sign(s) * PoleOut, -1f, 0f);
             bool sp = FoeSpring.Enabled;
@@ -403,7 +458,11 @@ namespace VoxGame
                 Vector3 vp = sp ? new Vector3(Sign(s) * PoleVictory.x, PoleVictory.y, PoleVictory.z) : new Vector3(Sign(s), -0.9f, -0.2f);
                 pole = Vector3.Lerp(pole, vp, lockW);   // локоть вниз-наружу, к углу кадра
             }
-            Vector3 el = Elbow(w, ArmShoulder(s, au, az, w, reachW, lockW, ext), pole, maxDeg);
+            Vector3 sh0 = ArmShoulder(s, au, az, w, reachW, lockW, ext);
+            Vector3 el = Elbow(w, sh0, pole, maxDeg);
+            float pw = _pose ? reachW * (1f - lockW) : 0f;   // только удар, не поднятая рука
+            if (pw > 0f) SideArm(s, w, ref el, ref sh0, pw, kind);
+            if (pw > 0f) follow = Mathf.Lerp(follow, SideFollow, pw);
             Vector3 ga = Dir(Dir(w - el, k) * follow + k * (1f - follow), k);
             w = pos - ga * go;
             if (lockW > 0f) { w = Vector3.Lerp(w, _vicWrist, lockW); pos = w + ga * go; }
@@ -414,6 +473,7 @@ namespace VoxGame
             Vector3 ws = sh - w;
             if (ws.sqrMagnitude > reach * reach) sh = w + ws.normalized * reach;
             el = Elbow(w, sh, pole, maxDeg);
+            if (pw > 0f) SideArm(s, w, ref el, ref sh, pw, kind);
             Vector3 fa = Dir(w - el, ga), ua = Dir(el - sh, fa);
 
             _glove[s].localPosition = pos;
@@ -426,6 +486,18 @@ namespace VoxGame
             _upper[s].localPosition = el;
             _upper[s].localRotation = Quaternion.LookRotation(Perp(back, ua), ua);
             SetLenScale(_upper[s], ((el - sh).magnitude + UpperOver) / (GloveLooks.UpperLenCm * 0.01f));
+        }
+
+        // Локоть за боковым краем (PoseFix): направления звеньев поворачиваются к SideFore…/SideUpper с весом pw, длины те же.
+        void SideArm(int s, Vector3 w, ref Vector3 el, ref Vector3 sh, float pw, PunchType kind)
+        {
+            float sg = Sign(s);
+            Vector3 f = kind == PunchType.Hook ? SideForeHook : kind == PunchType.Upper ? SideForeUpper : SideForeJab;
+            Vector3 d1 = new Vector3(sg * f.x, f.y, f.z).normalized, d2 = new Vector3(sg * SideUpper.x, SideUpper.y, SideUpper.z).normalized;
+            float lf = (el - w).magnitude, lu = (sh - el).magnitude;
+            Vector3 u0 = Dir(sh - el, d2);
+            el = w + Vector3.Slerp(Dir(el - w, d1), d1, pw) * lf;
+            sh = el + Vector3.Slerp(u0, d2, pw) * lu;
         }
 
         // Длина звена по Y; растянутое звено толще (как ближе к камере), чтобы не читалось жердью.
@@ -503,7 +575,8 @@ namespace VoxGame
         void SquashApply(int s)
         {
             float q = Mathf.Abs(_sq[s]) > 0.002f ? _sq[s] : 0f;
-            var sc = new Vector3(Scale * (1f + q * 0.45f), Scale * (1f + q * 0.45f), Scale * (1f - q));
+            float gs = Scale * _gs;
+            var sc = new Vector3(gs * (1f + q * 0.45f), gs * (1f + q * 0.45f), gs * (1f - q));
             if ((_glove[s].localScale - sc).sqrMagnitude > 1e-10f) _glove[s].localScale = sc;
         }
 
@@ -564,6 +637,7 @@ namespace VoxGame
                 if (_fore[i] != null) GameUtil.Destroy(_fore[i].gameObject);
                 if (_glove[i] != null) GameUtil.Destroy(_glove[i].gameObject);
             }
+            if (_rig != null) GameUtil.Destroy(_rig.gameObject);
         }
     }
 }
