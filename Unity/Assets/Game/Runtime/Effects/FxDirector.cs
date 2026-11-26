@@ -69,8 +69,7 @@ namespace VoxGame
         public const float WebFaceDist = 0.7f;      // м: лицо соперника от камеры веба; масштаб вида = расстояние / это
         public const float ViewKMin = 1f, ViewKMax = 2.5f;
         public const float WhiteFlash = 0.15f;      // ×FlashMax 0,7 ≈ 0,1: в линейном цвете Unity это та же яркость, что 0,36 #white веба
-        public const float PopBelow = 0.17f;        // м: плашка удара под центром головы (под подбородком)
-        public const int BloodJab = 12, BloodPower = 30, BloodPowerPerPw = 10, BloodMega = 140, BloodFracture = 30;
+        public const int BloodJab = 36, BloodPower = 84, BloodPowerPerPw = 10, BloodMega = 180, BloodFracture = 30;
         public const int BloodHeadBurst = 100, BloodCounter = 8, ChunksPower = 3, ChunksMega = 10, ChunksFracture = 6;
         public const int FireMega = 40, SweatJab = 4;
         public const float SpdJab = 0.9f, SpdPower = 1.2f, SpdMega = 1.5f;
@@ -343,9 +342,8 @@ namespace VoxGame
             }
             else if (Pops != null)
             {
-                Vector3 at = new Vector3(h.point.x, _foeHead.y - PopBelow, h.point.z);
-                SyncAvoid();
-                Pops.ShowPop(FxPops.PopText((int)h.punch, h.counter, dmg), at, power || h.counter);
+                SyncAvoid(true);
+                Pops.ShowPop(FxPops.PopText((int)h.punch, h.counter, dmg), h.point, power || h.counter);
             }
             if (h.fracture && !h.mega) Banners?.ShowCenter(FxBanners.Fracture, BannerStyle.Power);
             Pops?.OnCombo(h.combo);
@@ -501,10 +499,36 @@ namespace VoxGame
 
         // Перчатки игрока (PlayerGloves: камера/playerArms/playerGlove0..1) → экранные прямоугольники для места плашки удара.
         readonly MeshFilter[] _gloveMf = new MeshFilter[2];
-        void SyncAvoid()
+        void SyncAvoid(bool force = false)
         {
             if (_cam == null) { Pops.SetAvoid(Rect.zero, Rect.zero); return; }
             Pops.SetAvoid(GloveRect(0), GloveRect(1));
+            if (force ? Pops.MaskStale : Pops.NeedAvoid) GloveMask();
+        }
+
+        // Маска силуэта перчаток в кадре (точки SDF перчатки, каждая — квадрат на шаг точек); нужна, пока плашка выбирает место.
+        void GloveMask()
+        {
+            Pops.BeginMask();
+            Transform ct = _cam.transform;
+            float tv = Mathf.Tan(_cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            for (int s = 0; s < 2; s++)
+            {
+                var mf = _gloveMf[s];
+                if (mf == null || !mf.gameObject.activeInHierarchy) continue;
+                var pts = GloveLooks.Silhouette(mf.sharedMesh);
+                if (pts == null) continue;
+                Matrix4x4 m = ct.worldToLocalMatrix * mf.transform.localToWorldMatrix;
+                float hw = FxPops.MaskPad * GloveLooks.SilStepCm * 0.01f * mf.transform.lossyScale.x;   // полшага с запасом, м
+                for (int i = 0; i < pts.Length; i++)
+                {
+                    Vector3 v = m.MultiplyPoint3x4(pts[i]);
+                    if (v.z <= 0.01f) continue;
+                    float fy = 0.5f / (v.z * tv), fx = fy / _aspect;
+                    Pops.MaskSplat(0.5f + v.x * fx, 0.5f + v.y * fy, hw * fx, hw * fy);
+                }
+            }
+            Pops.EndMask();
         }
 
         static readonly string[] GloveNames = { "playerGlove0", "playerGlove1" };

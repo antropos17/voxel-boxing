@@ -527,7 +527,13 @@ namespace VoxGame.Tests
                 Assert.GreaterOrEqual(r.in15Frac, 0.6f, w + ": кровь в круге 0,2·W на 0,15 с");
                 Assert.LessOrEqual(r.after05HighFrac + r.after05BehindFrac, 0.1f, w + ": через 0,5 с выше точки или за камерой");
                 Assert.IsTrue(r.plateSeen, w + ": плашка видна");
-                Assert.LessOrEqual(r.plateGloveFrac, 0.05f, w + ": плашка под перчаткой");
+                Assert.LessOrEqual(r.plateGlovePx, 0.05f, w + ": плашка под перчаткой (по пикселям перчаток)");
+                Assert.LessOrEqual(r.plateDist, 0.22f, w + ": плашка дальше 0,22 меньшей стороны от точки удара");
+                Assert.AreEqual(0f, r.ringOverText, 1e-4f, w + ": кольцо поверх текста плашки");
+                // доработка 2: крови на 0,15 с больше; до неё (a8d7ad5) в портрете видимых 12 / 34 / 34, пикселей 93 / 5455 / 18766
+                if (!r.land && r.punch == PunchType.Jab)  { Assert.GreaterOrEqual(r.peakVis, 30, w); Assert.GreaterOrEqual(r.bloodPx15, 279f, w); }
+                if (!r.land && r.punch == PunchType.Hook) { Assert.GreaterOrEqual(r.peakVis, 85, w); Assert.GreaterOrEqual(r.bloodPx15, 16365f, w); }
+                if (!r.land && r.punch == PunchType.Upper) { Assert.GreaterOrEqual(r.peakVis, 34, w); Assert.GreaterOrEqual(r.bloodPx15, 18766f, w); }
                 Assert.GreaterOrEqual(r.plateContrastMin, 4.5f, w + ": контраст плашки");
                 Assert.IsTrue(r.plateInSafe, w + ": плашка в safe-area");
                 Assert.AreEqual(0f, r.plateHudFrac, 1e-4f, w + ": плашка на полосах HUD");

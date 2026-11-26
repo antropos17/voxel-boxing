@@ -146,6 +146,7 @@ namespace VoxGame
         public const float BloodSpeed = 1.25f;   // м/с: основная скорость при spd = 1, k = 1
         public const float ToCamMax = 0.9f;      // м/с: предел скорости к камере
         public const float UpMax = 2.2f;         // м/с: предел подъёма (апперкот)
+        public const float DropK = 2.4f, BigDrop = 1.8f;   // размер капли ×масштаб вида ×DropK; каждая шестая ×BigDrop
 
         public void BloodBurst(Vector3 at, Vector3 dir, Vector3 toCam, int n, int kind, float spd, float k)
         {
@@ -163,7 +164,7 @@ namespace VoxGame
             {
                 var col = BloodCol[RandIdx(4)];
                 bool mist = i % 3 == 2;
-                float m = (i % 3 == 0) ? R(0.7f, 1.5f) : R(0.15f, 0.6f);   // треть быстрых, остальные — облако у точки
+                float m = (i % 3 == 0) ? R(0.8f, 1.7f) : R(0.3f, 0.8f);   // треть быстрых, остальные — облако у точки
                 Vector3 v;
                 switch (kind)
                 {
@@ -176,7 +177,7 @@ namespace VoxGame
                     case BurstJab:
                     {
                         float a = R(-1f, 1f);
-                        v = (cf * 0.5f + rx * a + Vector3.up * R(-0.1f, 0.3f)) * (0.6f * m);
+                        v = (cf * 0.5f + rx * a + Vector3.up * R(-0.1f, 0.3f)) * m;
                         break;
                     }
                     default:
@@ -187,8 +188,10 @@ namespace VoxGame
                 float vc = Vector3.Dot(v, c);
                 if (vc > ToCamMax) v -= c * (vc - ToCamMax);
                 if (v.y > UpMax) v.y = UpMax;
-                if (mist) Spawn(FxKind.Mist, from, v, R(MistMin, MistMax) * k * 1.6f, R(0.25f, 0.6f), col);
-                else Spawn(FxKind.Blood, from + RandSphere() * 0.01f, v, R(DropMin, DropMax) * k * 1.6f, R(DropLifeMin, DropLifeMax), col);
+                // размеры вразброс (доработка 2): каждая шестая капля крупная, морось тоже крупнее — всплеск читается на телефоне
+                float big = i % 6 == 0 ? BigDrop : 1f;
+                if (mist) Spawn(FxKind.Mist, from, v, R(MistMin, MistMax) * k * DropK, R(0.25f, 0.6f), col);
+                else Spawn(FxKind.Blood, from + RandSphere() * 0.01f, v, R(DropMin, DropMax) * k * DropK * big, R(DropLifeMin, DropLifeMax), col);
             }
         }
 
@@ -369,6 +372,9 @@ namespace VoxGame
         }
 
         // Положения живых капель и мороси, рождённых не раньше fromSeq (замер разлёта крови); вернёт число записанных.
+        // Показать или спрятать меш частиц (замер: площадь крови на снимке).
+        public void SetDrawn(bool on) { if (_go != null) _go.SetActive(on); }
+
         public int CopyBlood(uint fromSeq, Vector3[] dst)
         {
             int n = 0;

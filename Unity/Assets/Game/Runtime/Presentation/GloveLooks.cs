@@ -105,7 +105,32 @@ namespace VoxGame
             {
                 default, look.main, look.cuff, Color.Lerp(look.main, Color.black, 0.3f), look.trim, extra, BoxerParts.HeadSkin,
             };
-            return m.BuildMesh("glove_" + look.id, pal, mn * 0.01f, BoxerParts.GloveCell * 0.01f);
+            var mesh = m.BuildMesh("glove_" + look.id, pal, mn * 0.01f, BoxerParts.GloveCell * 0.01f);
+            Sil.Add(mesh, SilPoints(sh, th, mn, mx));
+            return mesh;
+        }
+
+        // Силуэт перчатки для места плашки удара (FxDirector): точки внутри SDF с шагом SilStepCm в координатах сетки (м).
+        // Сетка на ЦП не читается, поэтому точки берутся из той же SDF при постройке.
+        public const float SilStepCm = 1.5f;
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Mesh, Vector3[]> Sil =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<Mesh, Vector3[]>();
+        public static Vector3[] Silhouette(Mesh m) => m != null && Sil.TryGetValue(m, out var p) ? p : null;
+
+        static Vector3[] SilPoints(GloveShape sh, int th, Vector3 mn, Vector3 mx)
+        {
+            var l = new System.Collections.Generic.List<Vector3>(2048);
+            for (float x = mn.x + SilStepCm * 0.5f; x < mx.x; x += SilStepCm)
+            for (float y = mn.y + SilStepCm * 0.5f; y < mx.y; y += SilStepCm)
+            for (float z = mn.z + SilStepCm * 0.5f; z < mx.z; z += SilStepCm)
+            {
+                if (Sdf(sh, th, x, y, z) >= 0f) continue;
+                float h = SilStepCm;   // только точки у поверхности: силуэт тот же, точек в разы меньше
+                if (Sdf(sh, th, x + h, y, z) < 0f && Sdf(sh, th, x - h, y, z) < 0f && Sdf(sh, th, x, y + h, z) < 0f
+                    && Sdf(sh, th, x, y - h, z) < 0f && Sdf(sh, th, x, y, z + h) < 0f && Sdf(sh, th, x, y, z - h) < 0f) continue;
+                l.Add(new Vector3(x, y, z) * 0.01f);
+            }
+            return l.ToArray();
         }
 
         // Предплечье игрока: запястье в начале координат, локоть на −ForeLenCm по Y (с округлым локтевым суставом).

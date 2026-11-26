@@ -25,7 +25,7 @@ namespace VoxGame.Editor
             public float in15Frac, in33Frac;                // то же через 0,15 и 0,33 с
             public int after05Alive; public float after05HighFrac, after05BehindFrac;   // через 0,5 с: выше точки на 0,25·H
             public bool plateSeen; public float hudBottom, plateGloveFrac, plateContrastMin, plateHudFrac, plateComboFrac;
-            public bool plateInSafe; public Rect plateN, safeN, gloveN0, gloveN1;
+            public Vector2 hitN; public float bloodPx15, plateDist, ringOverText, plateGlovePx; public Rect glovePxN; public bool plateInSafe; public Rect plateN, safeN, gloveN0, gloveN1;
         }
 
         public static readonly List<HitFx2Res> HitFx2Results = new List<HitFx2Res>();
@@ -55,10 +55,10 @@ namespace VoxGame.Editor
                     HitFx2Results.Add(r);
                     log.AppendLine("HITFX2 " + (land ? "land " : "port ") + name + " hit=" + r.hit
                                    + " peakFrame=" + r.peakFrame + " inFrac=" + F(r.peakInFrac) + " vis15=" + r.peakVis + " in15n=" + r.peakIn
-                                   + " in15=" + F(r.in15Frac) + " in33=" + F(r.in33Frac) + " after05 alive=" + r.after05Alive + " high=" + F(r.after05HighFrac)
+                                   + " in15=" + F(r.in15Frac) + " in33=" + F(r.in33Frac) + " bloodPx15=" + r.bloodPx15.ToString("0") + " after05 alive=" + r.after05Alive + " high=" + F(r.after05HighFrac)
                                    + " behind=" + F(r.after05BehindFrac)
                                    + " | plate seen=" + r.plateSeen + " glove=" + F(r.plateGloveFrac) + " contrastMin=" + F(r.plateContrastMin)
-                                   + " inSafe=" + r.plateInSafe + " hud=" + F(r.plateHudFrac) + " hudBottom=" + F(r.hudBottom) + " combo=" + F(r.plateComboFrac)
+                                   + " hit=(" + F(r.hitN.x) + "," + F(r.hitN.y) + ") dist=" + F(r.plateDist) + " glovePx=" + F(r.plateGlovePx) + " gpx=" + RectS(r.glovePxN) + " ringOverText=" + F(r.ringOverText) + " inSafe=" + r.plateInSafe + " hud=" + F(r.plateHudFrac) + " hudBottom=" + F(r.hudBottom) + " combo=" + F(r.plateComboFrac)
                                    + " plate=" + RectS(r.plateN) + " safe=" + RectS(r.safeN) + " g0=" + RectS(r.gloveN0) + " g1=" + RectS(r.gloveN1));
                 }
             HitFx2Log = log.ToString();
@@ -98,6 +98,7 @@ namespace VoxGame.Editor
                     if (f == PeakAt)
                     {
                         res.peakVis = vis; res.peakIn = inside; res.in15Frac = vis > 0 ? (float)inside / vis : 0f;
+                        res.bloodPx15 = ParticlePx(cam, ui, w, h, fx);
                         if (dir != null) HF2Shot(cam, ui, w, h, tmpPeak);
                     }
                     // 0,27 с: перчатка ушла с лица, облако крови открыто (дополнительный снимок, портрет)
@@ -205,6 +206,13 @@ namespace VoxGame.Editor
             var sa = ui.transform.Find("SafeArea") as RectTransform;
             res.safeN = sa != null ? UiRectN(cam, sa) : new Rect(0f, 0f, 1f, 1f);
             res.plateInSafe = Inside(res.plateN, res.safeN, 0.001f);
+            // расстояние от центра плашки до экранной точки удара, в долях меньшей стороны кадра (портрет — ширины, ландшафт — высоты)
+            {
+                Vector3 hp = cam.WorldToViewportPoint(d.Fx.LastHitPoint);
+                float dx = (res.plateN.center.x - hp.x) * w, dy = (res.plateN.center.y - hp.y) * h;
+                res.plateDist = Mathf.Sqrt(dx * dx + dy * dy) / Mathf.Min(w, h);
+                res.hitN = new Vector2(hp.x, hp.y);
+            }
             res.gloveN0 = GloveRectN(cam, 0); res.gloveN1 = GloveRectN(cam, 1);
             float a = Area(res.plateN);
             float g = Area(Inter(res.plateN, res.gloveN0)) + Area(Inter(res.plateN, res.gloveN1))
@@ -232,6 +240,26 @@ namespace VoxGame.Editor
                 res.plateComboFrac = a > 0f ? Area(Inter(res.plateN, cr)) / a : 0f;
             }
 
+            // перчатки по пикселям: кадр с перчатками и без них (плашка спрятана), доля пикселей плашки, где видна перчатка
+            {
+                pop.gameObject.SetActive(false);
+                var on = HF2Render(cam, w, h);
+                var gs = new[] { cam.transform.Find("playerArms/playerGlove0"), cam.transform.Find("playerArms/playerGlove1") };
+                foreach (var gt in gs) if (gt != null) gt.gameObject.SetActive(false);
+                var off = HF2Render(cam, w, h);
+                foreach (var gt in gs) if (gt != null) gt.gameObject.SetActive(true);
+                pop.gameObject.SetActive(true);
+                res.plateGlovePx = DiffFrac(on, off, w, h, res.plateN);
+                res.glovePxN = DiffBox(on, off, w, h);
+            }
+            // кольцо над текстом: пиксели плашки с кольцами и без них (доля изменившихся)
+            {
+                var on = HF2Render(cam, w, h);
+                d.Fx.Rings.SetDrawn(false);
+                var off = HF2Render(cam, w, h);
+                d.Fx.Rings.SetDrawn(true);
+                res.ringOverText = DiffFrac(on, off, w, h, res.plateN);
+            }
             // фон без плашки
             pop.gameObject.SetActive(false);
             var bg = HF2Render(cam, w, h);
@@ -263,6 +291,46 @@ namespace VoxGame.Editor
                 Object.DestroyImmediate(tex);
             }
             ui.RestoreAfterShot();
+        }
+
+        // Пиксели кадра, которые закрывают частицы: снимок с частицами и без них, разница больше 0,06 по любому каналу.
+        static float ParticlePx(Camera cam, UIRoot ui, int w, int h, FxDirector fx)
+        {
+            HF2Begin(cam, ui, w, h);
+            var on = HF2Render(cam, w, h);
+            fx.Particles.SetDrawn(false);
+            var off = HF2Render(cam, w, h);
+            fx.Particles.SetDrawn(true);
+            ui.RestoreAfterShot();
+            return DiffFrac(on, off, w, h, new Rect(0f, 0f, 1f, 1f)) * w * h;
+        }
+
+        static Rect DiffBox(Color[] a, Color[] b, int w, int h)
+        {
+            int x0 = w, y0 = h, x1 = -1, y1 = -1;
+            for (int y = 0; y < h; y += 2)
+            for (int x = 0; x < w; x += 2)
+            {
+                Color p = a[x + y * w], q = b[x + y * w];
+                if (Mathf.Abs(p.r - q.r) > 0.06f || Mathf.Abs(p.g - q.g) > 0.06f || Mathf.Abs(p.b - q.b) > 0.06f)
+                { x0 = Mathf.Min(x0, x); x1 = Mathf.Max(x1, x); y0 = Mathf.Min(y0, y); y1 = Mathf.Max(y1, y); }
+            }
+            return x1 < 0 ? Rect.zero : Rect.MinMaxRect((float)x0 / w, (float)y0 / h, (float)x1 / w, (float)y1 / h);
+        }
+
+        static float DiffFrac(Color[] a, Color[] b, int w, int h, Rect n)
+        {
+            int x0 = Mathf.Clamp((int)(n.xMin * w), 0, w - 1), x1 = Mathf.Clamp((int)(n.xMax * w), 0, w - 1);
+            int y0 = Mathf.Clamp((int)(n.yMin * h), 0, h - 1), y1 = Mathf.Clamp((int)(n.yMax * h), 0, h - 1);
+            int all = 0, diff = 0;
+            for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++)
+            {
+                Color p = a[x + y * w], q = b[x + y * w];
+                all++;
+                if (Mathf.Abs(p.r - q.r) > 0.06f || Mathf.Abs(p.g - q.g) > 0.06f || Mathf.Abs(p.b - q.b) > 0.06f) diff++;
+            }
+            return all > 0 ? (float)diff / all : 0f;
         }
 
         static float Lum(Color l) => 0.2126f * l.r + 0.7152f * l.g + 0.0722f * l.b;
