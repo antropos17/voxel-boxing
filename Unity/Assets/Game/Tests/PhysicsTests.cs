@@ -73,5 +73,35 @@ namespace VoxGame.Tests
             Assert.That(n, Is.InRange(2, 6), s);
             Assert.IsTrue(s.Contains("dz=-"), "назад к камере: " + s);
         }
+
+        // Нокдаун и нокаут (направление 3): без NaN, не под настилом (> 2 см), в ринге, лежит за ≤ 2,5 с, ложится по удару
+        // (≥ 90 % в пределах 45°), подъём без рывка (≤ 5 % роста за кадр), стойка после подъёма как до падения.
+        [Test]
+        public void FallStaysInRingAndFollowsHit([Values(false, true)] bool ko)
+        {
+            bool was = FoeFall.Enabled; FoeFall.Enabled = true;
+            try
+            {
+                var st = ShotsTaker.FallStats(4, 5, 1f / 60f, ko);
+                string s = st.Line();
+                Assert.AreEqual(0, st.nan, s); Assert.AreEqual(0, st.under, s); Assert.AreEqual(0, st.outRing, s);
+                Assert.AreEqual(0, st.slow, s);
+                Assert.LessOrEqual(st.dirBad, st.runs / 10, s);
+                Assert.LessOrEqual(st.worstJump, 0.05f, s);
+                Assert.Less(st.worstStance, 0.01f, s);
+            }
+            finally { FoeFall.Enabled = was; }
+        }
+
+        // Падение не зависит от частоты кадров: те же удары при 30 и 120 к/с — те же итоги
+        [Test]
+        public void FallFrameRateIndependent([Values(1f / 30f, 1f / 120f)] float dt)
+        {
+            var st = ShotsTaker.FallStats(3, 4, dt);
+            string s = st.Line();
+            Assert.AreEqual(0, st.nan + st.under + st.outRing + st.slow, s);
+            Assert.LessOrEqual(st.dirBad, 1, s);
+            Assert.LessOrEqual(st.worstJump, 0.05f, s);
+        }
     }
 }

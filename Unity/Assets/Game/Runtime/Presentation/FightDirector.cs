@@ -194,6 +194,7 @@ namespace VoxGame
             var ringCenter = corner + new Vector3(Mathf.Sin(diag), 0f, Mathf.Cos(diag)) * cornerR;
             _ring = new RingBuilder();
             _ring.Build(_sceneRoot, ringCenter, 45f + CornerDiag, LightForward);
+            _foeBody.SetArena(ringCenter, 45f + CornerDiag, RingBuilder.RopeHalf);   // падение не выходит за канаты
             _crowd = new CrowdView();
             _crowd.Build(_sceneRoot, CrowdStands.Default(ringCenter, 45f + CornerDiag));
 
@@ -961,6 +962,7 @@ namespace VoxGame
             AnatSkin.Reset();
             _foeBody.ResetGear();
             _foeBody.spring.Reset();
+            _foeBody.ResetFall();
             // «Заново» — тот же бой с нуля: мега-шкала не переносится
             var prms = _sim.State.fightParams;
             _sim = new FightSim(_foeDef.level, _foeDef.seed + (uint)(_restartCount + 1), prms);

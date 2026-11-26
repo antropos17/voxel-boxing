@@ -200,6 +200,144 @@ namespace VoxGame.Editor
             PhysLog = log.ToString();
         }
 
+        // Падение одного тела без боя: dir — удар (оси корня), лог узлов в покое
+        public static string FallDebug(Vector3 dir, bool ko, bool arena = false, Vector3 at = default, uint gen = 42u, int lvl = 1)
+        {
+            var go = new GameObject("fall");
+            var mat = new Material(Shader.Find("Hidden/InternalErrorShader"));
+            var b = new FoeBody(go.transform, FighterGen.Generate(gen, lvl), mat);
+            if (arena) b.SetArena(RingCenter(), RingYaw, RingBuilder.RopeHalf);
+            b.root.localPosition = at;
+            const float dt = 1f / 60f; var sb = new StringBuilder();
+            for (int i = 0; i < 30; i++) b.Tick(new AICommand { newPhase = FightPhase.Idle }, dt, Vector3.forward);
+            b.AddHit(b.headMount.position + b.root.rotation * JabArm, b.root.rotation * dir, 1, 1.25f);
+            var cmd = new AICommand { newPhase = ko ? FightPhase.KO : FightPhase.Down };
+            for (int i = 0; i < 180; i++)
+            {
+                b.Tick(cmd, dt, Vector3.forward);
+                if (i % 15 == 14 || i == 5)
+                {
+                    sb.Append("t=" + F((i + 1) * dt) + " asleep=" + b.fall.asleep + " v=" + F(b.fall.MaxSpeed));
+                    for (int k = 0; k < FoeFall.N; k++) sb.Append(" " + k + V(b.fall.x[k]));
+                    sb.AppendLine();
+                }
+            }
+            var parts = FoeParts(b); float low = LowestOverFloor(b, parts, out string w);
+            sb.AppendLine("lowest=" + F(low * 100f) + "cm " + w + " knee=" + V(b.root.Find("FoeBody") != null ? Vector3.zero : Vector3.zero));
+            b.Dispose(); Object.DestroyImmediate(go); Object.DestroyImmediate(mat);
+            return sb.ToString();
+        }
+
+        // Ринг как в FightDirector.Init: красный угол в 3 м за глазом (9,5°), диагональ 12°, канаты — квадрат 4,2 м
+        public static Vector3 RingCenter()
+        {
+            float off = 9.5f * Mathf.Deg2Rad, diag = 12f * Mathf.Deg2Rad;
+            var corner = new Vector3(-Mathf.Sin(off) * 3f, 0f, 1.40f - Mathf.Cos(off) * 3f);
+            return corner + new Vector3(Mathf.Sin(diag), 0f, Mathf.Cos(diag)) * (RingBuilder.RopeHalf * 1.41421356f);
+        }
+        public const float RingYaw = 57f;
+
+        public sealed class FallStat
+        {
+            public int runs, nan, under, outRing, slow, dirBad; public string meshWhat = ""; public float worstUnder, worstSettle, worstAngle, worstJump, worstStance, worstMesh;
+            public string Line() => "FALL runs=" + runs + " NaN=" + nan + " under2cm=" + under + " (worst " + F(worstUnder * 100f) + "cm) outRing=" + outRing
+                + " settle>2.5s=" + slow + " (worst " + F(worstSettle) + "s) dir>45=" + dirBad + " (" + F(100f * (runs - dirBad) / Mathf.Max(1, runs)) + "% ok, worst " + F(worstAngle)
+                + ") riseJump=" + F(worstJump * 100f) + "%H stanceErr=" + F(worstStance * 100f) + "cm meshLowest=" + F(worstMesh * 100f) + "cm(" + meshWhat + ")";
+        }
+
+        // Нокдауны без боя: seeds × per падений с разными добивающими ударами (джеб, хуки, апперкоты, мега) и местом в ринге;
+        // падение, счёт (лежит), подъём, стойка. dt — шаг кадра.
+        public static FallStat FallStats(int seeds = 20, int per = 10, float dt = 1f / 60f, bool ko = false, StringBuilder log = null, bool near = false)
+        {
+            var st = new FallStat();
+            var go = new GameObject("falls");
+            var mat = new Material(Shader.Find("Hidden/InternalErrorShader"));
+            Vector3[] dirs = { JabDir, HookDir, new Vector3(-HookDir.x, HookDir.y, HookDir.z), UpperDir, new Vector3(0.45f, 0.1f, -0.89f), new Vector3(-0.45f, 0.1f, -0.89f) };
+            for (int sd = 0; sd < seeds; sd++)
+            {
+                var b = new FoeBody(go.transform, FighterGen.Generate((uint)(1000 + sd * 31), 1 + sd % 8), mat);
+                b.SetArena(RingCenter(), RingYaw, RingBuilder.RopeHalf);
+                var parts = FoeParts(b);
+                uint rng = (uint)(sd * 2654435761u + 7u);
+                float Rnd() { rng = rng * 1664525u + 1013904223u; return (rng >> 8) / 16777216f; }
+                var idle = new AICommand { newPhase = FightPhase.Idle };
+                for (int i = 0; i < 30; i++) b.Tick(idle, dt, Vector3.forward);
+                Vector3 stance = b.root.InverseTransformPoint(b.headMount.position);
+                float height = stance.y + 0.12f;
+                for (int k = 0; k < per; k++)
+                {
+                    st.runs++;
+                    Vector3 dir = dirs[(int)(Rnd() * dirs.Length) % dirs.Length];
+                    dir = (dir + new Vector3(Rnd() - 0.5f, (Rnd() - 0.5f) * 0.3f, 0f) * 0.4f).normalized;
+                    int strength = Rnd() < 0.5f ? 1 : (Rnd() < 0.5f ? 0 : 2);
+                    // корень соперника — как в бою (в начале координат, 1–1,2 м до канатов за спиной); near — сдвиг до 0,4 м к углу
+                    b.root.localPosition = near ? new Vector3(Rnd() * 0.3f, 0f, -Rnd() * 0.3f) : Vector3.zero;
+                    for (int i = 0; i < 10; i++) b.Tick(idle, dt, Vector3.forward);
+                    b.AddHit(b.headMount.position + b.root.rotation * JabArm, b.root.rotation * dir, strength, 0.8f + Rnd());
+                    Vector3 h0 = b.headMount.position;
+                    var down = new AICommand { newPhase = ko ? FightPhase.KO : FightPhase.Down };
+                    float settle = -1f; bool nan = false; float under = 0f, mesh = 0f; bool outR = false;
+                    for (float t = 0f; t < 3.5f; t += dt)
+                    {
+                        b.Tick(down, dt, Vector3.forward);
+                        for (int n = 0; n < FoeFall.N; n++)
+                        {
+                            Vector3 x = b.fall.x[n];
+                            if (float.IsNaN(x.x + x.y + x.z)) nan = true;
+                            under = Mathf.Max(under, b.fall.floorY - (x.y - FoeFall.Radius(n)));
+                            if (!b.fall.InRing(n)) outR = true;
+                        }
+                        float lw = LowestOverFloor(b, parts, out string lwhat);
+                        if (lw < mesh) { mesh = lw; if (lw < st.worstMesh) st.meshWhat = lwhat; }
+                        if (settle < 0f && b.fall.asleep) settle = t + dt;
+                    }
+                    // направление падения — ось лежащего тела: таз -> голова (у канатов тело сползает, но лежит по удару)
+                    Vector3 fall = b.fall.x[FoeFall.Head] - b.fall.x[FoeFall.Pelvis]; fall.y = 0f;
+                    if (ko == false && fall.magnitude < 0.3f) fall = b.headMount.position - h0;
+                    fall.y = 0f; Vector3 dw = b.root.rotation * dir; dw.y = 0f;
+                    float ang = Vector3.Angle(fall, dw);
+                    if (nan) st.nan++;
+                    if (under > 0.02f) st.under++;
+                    if (outR) st.outRing++;
+                    if (settle < 0f || settle > 2.5f) st.slow++;
+                    if (settle < 0f && log != null && st.slow < 6) { int mi = 0; for (int n = 1; n < FoeFall.N; n++) if (b.fall.v[n].magnitude > b.fall.v[mi].magnitude) mi = n; log.AppendLine(" awake seed=" + sd + " k=" + k + " node=" + mi + " v=" + V(b.fall.v[mi]) + " y=" + F((b.fall.x[mi].y - b.fall.floorY) * 100f)); }
+                    if (ang > 45f) st.dirBad++;
+                    st.worstUnder = Mathf.Max(st.worstUnder, under); st.worstSettle = Mathf.Max(st.worstSettle, settle < 0f ? 99f : settle);
+                    st.worstAngle = Mathf.Max(st.worstAngle, ang); st.worstMesh = Mathf.Min(st.worstMesh, mesh);
+                    if (log != null && (ang > 45f || under > 0.02f || outR || nan)) log.AppendLine(" bad seed=" + sd + " k=" + k + " dir=" + V(dir) + " ang=" + F(ang) + " under=" + F(under * 100f) + " out=" + outR + " fall=" + V(fall));
+                    if (ko) { b.ResetFall(); continue; }
+                    // подъём (Rise 1,9 с) и пауза стойки (1,1 с): скачок между кадрами, поза в конце
+                    var rise = new AICommand { newPhase = FightPhase.Rise };
+                    Vector3 ph = b.headMount.position, pt = b.Torso.position;
+                    for (float t = 0f; t < 3f; t += dt)
+                    {
+                        b.Tick(t < 1.9f ? rise : idle, dt, Vector3.forward);
+                        // рывок на 1/60 с: при 30 к/с кадр вдвое длиннее, та же скорость даёт вдвое больший сдвиг
+                        float j = Mathf.Max((b.headMount.position - ph).magnitude, (b.Torso.position - pt).magnitude) / (dt * 60f);
+                        if (j / height > st.worstJump && log != null && j / height > 0.05f) log.AppendLine(" jump seed=" + sd + " k=" + k + " t=" + F(t) + " j=" + F(j * 100f) + " settle=" + F(settle) + " w=" + F(b.FallWeight));
+                        st.worstJump = Mathf.Max(st.worstJump, j / height);
+                        ph = b.headMount.position; pt = b.Torso.position;
+                        if (float.IsNaN(ph.x)) nan = true;
+                    }
+                    st.worstStance = Mathf.Max(st.worstStance, (b.root.InverseTransformPoint(b.headMount.position) - stance).magnitude);
+                }
+                b.Dispose();
+            }
+            Object.DestroyImmediate(go); Object.DestroyImmediate(mat);
+            return st;
+        }
+
+        public static void PhysFalls()
+        {
+            var log = new StringBuilder();
+            log.AppendLine(FallStats(20, 10, 1f / 60f, false, log).Line() + " (60)");
+            log.AppendLine(FallStats(5, 4, 1f / 30f).Line() + " (30)");
+            log.AppendLine(FallStats(5, 4, 1f / 120f).Line() + " (120)");
+            log.AppendLine(FallStats(5, 4, 1f / 60f, true).Line() + " (KO)");
+            log.AppendLine(FallStats(5, 4, 1f / 60f, false, null, true).Line() + " (near corner)");
+            PhysLog = log.ToString();
+        }
+
         // ---- Нокдаун и куски в настоящем бою --------------------------------------------------------------
 
         sealed class PartVerts { public Transform t; public Vector3[] v; }
@@ -233,7 +371,7 @@ namespace VoxGame.Editor
         // Прогон боя до нокдаунов: сколько раз, где тело ниже настила, как легло, скачки при подъёме.
         public static void PhysKO(int fights = 2, int seed0 = 1, bool shots = true)
         {
-            var log = new StringBuilder();
+            var log = new StringBuilder(); var koSide = new System.Collections.Generic.HashSet<string>();
             for (int f = 0; f < fights; f++)
             {
                 uint seed = (uint)(seed0 + f);
@@ -243,6 +381,7 @@ namespace VoxGame.Editor
                 var b = d.FoeFigure;
                 var parts = FoeParts(b);
                 var combo = new[] { PunchType.Hook, PunchType.Upper, PunchType.Jab, PunchType.Hook, PunchType.Jab };
+                log.AppendLine("KO fight=" + f + " stanceLowest=" + F(LowestOverFloor(b, parts, out string sw) * 100f) + "cm(" + sw + ")");
                 int punches = 0, downs = 0;
                 Vector3 lastDir = Vector3.zero; PunchType lastType = PunchType.Jab;
                 while (!d.Finished && punches < 300 && downs < 4)
@@ -263,7 +402,7 @@ namespace VoxGame.Editor
                         Vector3 head0 = b.root.InverseTransformPoint(b.headMount.position);
                         float minLow = float.MaxValue; string minWhat = ""; float maxJump = 0f, maxJumpRise = 0f;
                         Vector3 prevH = b.headMount.position, prevT = b.Torso.position; int frames = 0, stillAt = -1;
-                        bool shotRest = false;
+                        bool shotRest = false; int jumpAt = -1; string jumpWhat = ""; Vector3 restAx = Vector3.zero; float restAt = -1f;
                         for (int i = 0; i < (ko ? 300 : 900); i++)
                         {
                             run.Tick(); frames++;
@@ -272,20 +411,27 @@ namespace VoxGame.Editor
                             float jh = (b.headMount.position - prevH).magnitude, jt = (b.Torso.position - prevT).magnitude;
                             float j = Mathf.Max(jh, jt);
                             if (d.State.phase == FightPhase.Rise || (stillAt >= 0 && d.State.phase == FightPhase.Idle)) maxJumpRise = Mathf.Max(maxJumpRise, j);
-                            else maxJump = Mathf.Max(maxJump, j);
+                            else { if (j > maxJump) { jumpAt = i; jumpWhat = (jh > jt ? "head" : "torso") + " fw=" + F(b.FallWeight) + " ph=" + d.State.phase + " asleep=" + b.fall.asleep; } maxJump = Mathf.Max(maxJump, j); }
                             if (stillAt < 0 && i > 5 && j < 0.05f / 60f) stillAt = i;
                             if (shots && f == 0 && downs == 1 && i == 0) PShot(d, cam, ui, "ko-f0");
                             if (shots && f == 0 && downs == 1 && i == 10) PShot(d, cam, ui, "ko-f10");
                             if (shots && f == 0 && downs == 1 && i == 25) PShot(d, cam, ui, "ko-f25");
                             if (shots && f == 0 && downs == 1 && !shotRest && i == 150) { PShot(d, cam, ui, "ko-rest"); PShot(d, cam, ui, "ko-rest-land", true); shotRest = true; }
+                            if (restAt < 0f && (b.fall.asleep || i == 150))
+                            {
+                                restAt = i / 60f; restAx = b.root.InverseTransformDirection(b.fall.x[FoeFall.Head] - b.fall.x[FoeFall.Pelvis]); restAx.y = 0f;
+                                Vector3 ld = lastDir; ld.y = 0f; bool side = Mathf.Abs(ld.x) > 0.25f;
+                                string nm = ld.x > 0f ? "ko-left-rest" : "ko-right-rest";
+                                if (shots && side && !koSide.Contains(nm)) { koSide.Add(nm); PShot(d, cam, ui, nm); }
+                            }
                             prevH = b.headMount.position; prevT = b.Torso.position;
                             if (!ko && d.State.phase == FightPhase.Idle && i > 60) { if (shots && f == 0 && downs == 1) PShot(d, cam, ui, "ko-getup"); break; }
                         }
                         Vector3 head1 = b.root.InverseTransformPoint(b.headMount.position);
                         Vector3 fall = head1 - head0; fall.y = 0f; Vector3 hd = lastDir; hd.y = 0f;
                         log.AppendLine("KO fight=" + f + " n=" + downs + (ko ? " KO" : " down") + " last=" + lastType + " frames=" + frames
-                                       + " lowest=" + F(minLow * 100f) + "cm(" + minWhat + ") fallAngle=" + F(Vector3.Angle(fall, hd))
-                                       + " fall=" + V(fall) + " still@" + stillAt + " jump=" + F(maxJump * 100f) + "cm jumpRise=" + F(maxJumpRise * 100f) + "cm");
+                                       + " lowest=" + F(minLow * 100f) + "cm(" + minWhat + ") fallAngle=" + F(Vector3.Angle(fall, hd)) + " restAngle=" + F(Vector3.Angle(restAx, hd)) + " rest@" + F(restAt) + "s"
+                                       + " fall=" + V(fall) + " still@" + stillAt + " jump=" + F(maxJump * 100f) + "cm@" + jumpAt + "(" + jumpWhat + ") jumpRise=" + F(maxJumpRise * 100f) + "cm");
                         if (ko) break;
                     }
                 }
