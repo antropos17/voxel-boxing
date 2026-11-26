@@ -1,6 +1,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using VoxGame.Editor;
+using VoxProbe;
 
 namespace VoxGame.Tests
 {
@@ -92,6 +93,28 @@ namespace VoxGame.Tests
             }
             finally { FoeFall.Enabled = was; }
         }
+
+        // Куски (направление 4): в бою мегой и силовыми куски падают на настил ринга, через 3 с не под ним и не в воздухе,
+        // ≥ 90 % уснули за ≤ 3 с; пределы кусков, капель и подтёков не превышены.
+        [Test]
+        public void PiecesLieOnRingFloor()
+        {
+            ShotsTaker.PhysPieces(2, 1, false);
+            int alive = 0, asleep = 0;
+            foreach (var l in ShotsTaker.PhysLog.Split((char)10))
+            {
+                if (!l.StartsWith("PIECES")) continue;
+                StringAssert.Contains("under=0 hang=0", l);
+                alive += Num(l, "alive="); asleep += Num(l, "asleep=");
+                Assert.LessOrEqual(Num(l, " peak="), AnatPieces.MaxPieces, l);
+                Assert.LessOrEqual(Num(l, "dripsPeak="), AnatDamage.MaxDrips, l);
+                Assert.LessOrEqual(Num(l, "dropsPeak="), AnatDamage.MaxDrops, l);
+            }
+            Assert.Greater(alive, 0, "куски есть");
+            Assert.GreaterOrEqual(asleep, alive * 0.9f, ShotsTaker.PhysLog);
+        }
+
+        static int Num(string l, string k) { int i = l.IndexOf(k) + k.Length, j = i; while (j < l.Length && char.IsDigit(l[j])) j++; return int.Parse(l.Substring(i, j - i)); }
 
         // Падение не зависит от частоты кадров: те же удары при 30 и 120 к/с — те же итоги
         [Test]
