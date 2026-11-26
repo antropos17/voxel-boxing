@@ -20,7 +20,8 @@ namespace VoxGame
         const float HeadZ   = 0.02f;
         const float NeckLen = 0.1995f; // от начала координат головы до низа её шеи
         const float ShoulderX = 0.195f, ShoulderY = 0.415f;
-        const float TorsoCell = 0.7f;  // см
+        const float TorsoCell = 0.7f;  // см (0.57 давал расхождение габаритов до 3 %, ARMS-BODY.md, доработка 2)
+        const float LegsCell  = 0.7f;  // см, голени и боксёрки
         const float StretchFrom = 10f; // см от пояса: выше корпус растягивается по длине (torsoLen), трусы — нет
 
         // ---- Пропорции под анатомическую голову (подгоняются по снимкам) -----------------------------
@@ -46,9 +47,10 @@ namespace VoxGame
         static readonly Vector3 GuardGloveOff = new Vector3(0.155f, -0.070f, 0.19f);
 
         // Номера цветов торса
-        const byte CSkin = 1, CTrunks = 2, CBelt = 3, CTrunksDark = 4, CStripe = 5, CInk = 6, CScar = 7, CBodyHair = 8;
+        const byte CSkin = 1, CTrunks = 2, CBelt = 3, CTrunksDark = 4, CStripe = 5, CInk = 6, CScar = 7, CBodyHair = 8,
+                   CShade = 9, CLight = 10;
         // Номера цветов голеней
-        const byte LSkin = 1, LBoot = 2, LSole = 3, LSock = 4;
+        const byte LSkin = 1, LBoot = 2, LSole = 3, LSock = 4, LShade = 5;
         const float KneeY = -44f, SoleY = -WaistY * 100f;   // колено и настил от пояса, см
 
         // ---- Объекты -----------------------------------------------------------------------------
@@ -132,9 +134,11 @@ namespace VoxGame
 
             // татуировка-браслет — только на одном плече (рука 0 — сторона +X)
             int bandArm = mark == BodyMark.ArmBand ? (markSide > 0f ? 0 : 1) : -1;
-            var upperPlain = BoxerParts.UpperArmMesh(skin, armK);
-            var upperBand  = bandArm >= 0 ? BoxerParts.UpperArmMesh(skin, armK, true) : null;
-            var foreMesh   = BoxerParts.ForeArmMesh(skin, Mathf.Lerp(1f, armK, 0.8f), def.colors.handWraps, def.colors.wraps);
+            // рельеф мышц рук по телосложению: у худого (armMult мал) слабее, у мощного сильнее
+            float rel = Mathf.Lerp(0.6f, 1.2f, Mathf.InverseLerp(0.88f, 1.22f, armK));
+            var upperPlain = BoxerParts.UpperArmMesh(skin, armK, false, rel);
+            var upperBand  = bandArm >= 0 ? BoxerParts.UpperArmMesh(skin, armK, true, rel) : null;
+            var foreMesh   = BoxerParts.ForeArmMesh(skin, Mathf.Lerp(1f, armK, 0.8f), def.colors.handWraps, def.colors.wraps, rel);
             var gloveMeshes = new[]
             {
                 BoxerParts.GloveMesh(-1, def.colors.gloveA, def.colors.gloveB),
@@ -195,19 +199,32 @@ namespace VoxGame
             float ax = Mathf.Abs(x), d;
             d = VoxModel.Ell(x, y - 29, z + 1, 15.0f, 16.5f, 10.8f);
             d = VoxModel.Smin(d, Lower(x, y, z), 5);
-            d = VoxModel.Smin(d, VoxModel.Ell(ax - 7.4f, y - 33.8f, z - 6.0f, 8.8f, 5.8f, 3.0f), 2.2f);   // грудные
+            d = VoxModel.Smin(d, VoxModel.Ell(ax - 7.4f, y - 33.8f, z - 6.0f, 8.8f, 5.8f, 3.0f), 1.5f);   // грудные (нижний край чётче)
             d = VoxModel.Smin(d, VoxModel.Ell(ax - 10.5f, y - 27, z + 3.5f, 6.5f, 13, 7), 4);            // широчайшие
             d = VoxModel.Smin(d, VoxModel.Ell(x, y - 34, z + 4.5f, 15.5f, 13, 8.6f), 4);                 // спина
             d = VoxModel.Smin(d, VoxModel.Ell(x, y - 45.5f, z + 3.0f, 11.5f, 4.8f, 6.0f), 4);            // надплечья
             d = VoxModel.Smin(d, VoxModel.Ell(ax - 18.6f, y - 41.2f, z + 0.3f, 5.8f * armK, 6.8f, 5.9f * armK), 3);  // дельты
-            d = VoxModel.Smin(d, VoxModel.Cap(ax, y, z, 2, 45, 3.5f, 16, 46.5f, 0, 1.8f), 2);            // ключицы
+            d = VoxModel.Smin(d, VoxModel.Cap(ax, y, z, 2, 45, 3.5f, 16, 46.5f, 0, 1.6f), 1.1f);         // ключицы
             // основание шеи под шею головы (у головы низ шеи — эллипс 8.6 × 5.8 см) и скаты трапеций
             d = VoxModel.Smin(d, VoxModel.Ell(x, y - 47.0f, z + 0.3f, 9.4f * neckK, 5.2f, 6.6f * neckK), 3);
             d = VoxModel.Smin(d, VoxModel.Cap(ax, y, z, 4.0f, 50.5f, -1.4f, 14.5f, 46.8f, -0.8f, 3.3f * neckK, 3.0f * neckK), 3);
-            // пресс: три ряда выпуклостей на передней стенке живота (под брюшком не виден)
+            // косые над поясом (чуть внутрь контура таза)
+            d = VoxModel.Smin(d, VoxModel.Ell(ax - 10.6f, y - 15.5f, z - 1.2f, 2.9f, 6.0f, 5.6f), 2.4f);
+            float lean = 1f - belly;
+            // пресс: три ряда выпуклостей на передней стенке живота и белая линия посередине (под брюшком не виден)
             if (z > 3f && y > 10.5f && y < 27.9f && ax < 6.6f && belly < 0.99f)
-                d -= 0.6f * (1f - belly) * Mathf.Pow(Mathf.Sin(Mathf.PI * ax / 6.6f), 0.6f)
+            {
+                d -= 0.6f * lean * Mathf.Pow(Mathf.Sin(Mathf.PI * ax / 6.6f), 0.6f)
                           * Mathf.Pow(Mathf.Abs(Mathf.Sin(Mathf.PI * (y - 10.5f) / 5.8f)), 0.6f);
+                d += 0.3f * lean * BoxerParts.Bump(ax, 0f, 0.7f);
+            }
+            // зубчатые мышцы на рёбрах: пальцы наискось вниз-вперёд под широчайшими
+            if (ax > 9.0f && ax < 14.5f && y > 21f && y < 31.5f && z > -1.5f && belly < 0.6f)
+                d -= 0.35f * (1f - belly / 0.6f) * Mathf.Pow(Mathf.Max(0f, Mathf.Sin(Mathf.PI * (y - 21f + 0.45f * ax) / 2.5f)), 0.7f)
+                           * BoxerParts.Bump(ax, 11.8f, 2.8f);
+            // пупок: короткий ход внутрь от передней стенки живота
+            float nz = Mathf.Lerp(9.4f, 13.4f, belly);
+            d = Mathf.Max(d, -VoxModel.Cap(x, y, z, 0f, 17.3f, nz, 0f, 17.1f, nz + 4f, 0.72f));
             return d;
         }
 
@@ -216,6 +233,7 @@ namespace VoxGame
         {
             float ax = Mathf.Abs(x);
             float d = Lower(x, y, z) - (y > 8.2f ? 1.5f : 1.0f);
+            d -= 0.12f * BoxerParts.Bump(y, 11.9f, 0.6f) + 0.1f * BoxerParts.Bump(y, 8.6f, 0.5f);   // валики резинки по краям пояса
             d = VoxModel.Smin(d, VoxModel.Ell(x, y + 9, z, 17.2f, 12.5f, 11.8f), 4);
             d = VoxModel.Smin(d, VoxModel.Cap(ax, y, z, 9.0f, -8, 0, 10.6f, -26, 0.8f, 10.0f, 10.6f), 3);
             return Mathf.Max(d, Mathf.Max(y - 12.4f, -26f - y));
@@ -234,7 +252,12 @@ namespace VoxGame
         {
             Map(ref x, ref y, ref z);
             if (y > 12.4f || y < -26f || TrunksM(x, y, z) > 0.35f) return SkinPaint(x, y, z);
-            if (y > 8.2f) return CBelt;                                       // пояс
+            if (y > 8.2f)                                                     // пояс: резинка в рубчик, полоса посередине
+            {
+                if (y > 9.7f && y < 10.8f) return CStripe;
+                if (y > 11.7f || y < 8.75f) return CTrunksDark;
+                return Mathf.Repeat(Mathf.Atan2(x, z) * 18f / Mathf.PI, 1f) < 0.3f ? CTrunksDark : CBelt;
+            }
             if (y > 7.4f) return CTrunksDark;                                 // шов под поясом
             float ax = Mathf.Abs(x), az = Mathf.Abs(z);
             switch (pattern)
@@ -296,6 +319,28 @@ namespace VoxGame
                     }
                     break;
             }
+            return SkinTone(x, y, z);
+        }
+
+        // Тон кожи вокселями (оси шаблона): тень под грудными, в линиях пресса, между зубчатыми, у пупка;
+        // свет на ключицах и верху грудных.
+        byte SkinTone(float x, float y, float z)
+        {
+            float ax = Mathf.Abs(x);
+            float ex = (ax - 7.4f) / 8.8f, ey = (y - 33.8f) / 5.8f, e = ex * ex + ey * ey;
+            if (z > 2f && y < 33.8f && e > 0.8f && e < 1.15f && ax > 2.5f) return CShade;             // нижний край грудных
+            if (z > 3.5f && e < 0.45f && y > 33f) return CLight;                                       // верх грудных
+            if (z > 1f && y > 43f && Seg2(ax, y, 2f, 45f, 16f, 46.5f) < 1.0f && z > 0f) return CLight;  // ключицы
+            float nz = Mathf.Lerp(9.4f, 13.4f, belly);
+            if (Mathf.Abs(x) < 1.3f && Mathf.Abs(y - 17.2f) < 1.3f && z > nz - 1.5f) return CShade;     // пупок
+            if (belly < 0.6f)
+            {
+                if (z > 3f && ax < 0.45f && y > 11f && y < 28f) return CShade;                           // белая линия
+                if (z > 3f && ax < 6.2f && y > 10.5f && y < 27.9f
+                    && Mathf.Abs(Mathf.Sin(Mathf.PI * (y - 10.5f) / 5.8f)) < 0.16f) return CShade;      // перемычки пресса
+                if (ax > 9.5f && ax < 14f && y > 21f && y < 31.5f && z > -1f
+                    && Mathf.Sin(Mathf.PI * (y - 21f + 0.45f * ax) / 2.5f) < -0.75f) return CShade;     // между зубчатыми
+            }
             return CSkin;
         }
 
@@ -320,16 +365,17 @@ namespace VoxGame
         {
             var mn = new Vector3(-30f, -36.4f, -18f);
             var mx = new Vector3(30f, StretchFrom + 46.5f * lenK, 20f);
-            var m = VoxModel.FromSdf(mn, mx, TorsoCell, TorsoSdf, TorsoPaint);
+            var m = VoxModel.FromSdf(mn, mx, TorsoCell, TorsoSdf, TorsoPaint, true);
             Color32 tr = def.colors.trunks, belt = def.colors.accent, stripe = def.colors.stripe;
             // чёрные трусы на тёмном фоне не читаются — приподнять до тёмно-серого
             if (tr.r + tr.g + tr.b < 90) tr = new Color32(44, 44, 52, 255);
             Color32 dark = Color.Lerp(tr, Color.black, 0.45f);
             Color32 scar = Color.Lerp(skin, new Color32(250, 214, 200, 255), 0.6f);
             Color32 bodyHair = Color.Lerp(def.head.hairColor, new Color(0.16f, 0.11f, 0.08f), 0.55f);
-            var pal = new[] { default, skin, tr, belt, dark, stripe, BoxerParts.Ink, scar, bodyHair };
+            var pal = new[] { default, skin, tr, belt, dark, stripe, BoxerParts.Ink, scar, bodyHair,
+                              BoxerParts.Tone(skin, BoxerParts.ShadeK), BoxerParts.Tone(skin, BoxerParts.LightK) };
             return m.BuildMesh("torso", pal, mn * 0.01f, TorsoCell * 0.01f, 0.3f,
-                               new[] { 1f, 1f, 0.35f, 0.5f, 0.5f, 0.35f, 1f, 1f, 1f });
+                               new[] { 1f, 1f, 0.35f, 0.5f, 0.5f, 0.35f, 1f, 1f, 1f, 1f, 1f });
         }
 
         // ---- Голени и боксёрки (см; начало — пояс, оси уже без шаблона) --------------------------------
@@ -347,6 +393,7 @@ namespace VoxGame
             float b = VoxModel.Cap(ax, y, z, 0.8f, SoleY + 3f, 0.8f, 0.8f, SoleY + 21f, -0.3f, 5.0f, 4.6f);
             b = VoxModel.Smin(b, VoxModel.Ell(ax - 0.8f, y - SoleY - 4.2f, z - 4.5f, 5.0f, 4.4f, 12.0f), 2f);
             d = VoxModel.Smin(d, b, 1.5f);
+            d = VoxModel.Smin(d, VoxModel.Ell(ax, y - KneeY + 1.0f, z - 6.6f, 3.0f, 3.4f, 2.0f), 1.2f);     // надколенник
             return Mathf.Max(d, SoleY - y);
         }
 
@@ -355,6 +402,7 @@ namespace VoxGame
             if (y < SoleY + 1.6f) return LSole;
             if (y < SoleY + 21.5f) return LBoot;
             if (y < SoleY + 24.5f) return LSock;
+            if (y > KneeY - 5.4f && y < KneeY - 4.4f && z > 4f) return LShade;   // складка под коленом
             return LSkin;
         }
 
@@ -363,11 +411,12 @@ namespace VoxGame
             float kx = KneeX;
             var mn = new Vector3(-kx - 8f, SoleY - 0.4f, -9f);
             var mx = new Vector3(kx + 8f, -38f, 18f);
-            var m = VoxModel.FromSdf(mn, mx, TorsoCell, LegsSdf, LegsPaint);
+            var m = VoxModel.FromSdf(mn, mx, LegsCell, LegsSdf, LegsPaint, true);
             // боксёрки — тёмный тон трусов, подошва и носки светлые
             Color32 boot = Color.Lerp(def.colors.trunks, new Color(0.08f, 0.08f, 0.1f), 0.45f);
-            var pal = new[] { default, skin, boot, new Color32(226, 222, 214, 255), new Color32(238, 236, 230, 255) };
-            return m.BuildMesh("legs", pal, mn * 0.01f, TorsoCell * 0.01f, 0.3f);
+            var pal = new[] { default, skin, boot, new Color32(226, 222, 214, 255), new Color32(238, 236, 230, 255),
+                              BoxerParts.Tone(skin, BoxerParts.ShadeK) };
+            return m.BuildMesh("legs", pal, mn * 0.01f, LegsCell * 0.01f, 0.3f);
         }
 
         // ---- Позы (в осях корня, метры; z — к игроку) -----------------------------------------------
