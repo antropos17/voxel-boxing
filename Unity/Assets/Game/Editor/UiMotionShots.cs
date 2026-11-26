@@ -88,6 +88,7 @@ namespace VoxGame.Editor
         // ------------------------------------------------------------------ Проверка вёрстки
 
         public static int LayoutProblems;
+        static string _headInfo = "";
 
         public static void LayoutAudit()
         {
@@ -160,7 +161,8 @@ namespace VoxGame.Editor
             if (screen == "fight" && _app.Fight != null) AuditHud(sb, root, c, w, h);
             string issues = sb.ToString();
             if (issues.Length > 0) LayoutProblems++;
-            _log.AppendLine("UI_LAYOUT " + screen + " " + w + "x" + h + " buttons=" + buttons + " texts=" + texts + (issues.Length > 0 ? issues : " ok"));
+            _log.AppendLine("UI_LAYOUT " + screen + " " + w + "x" + h + " buttons=" + buttons + " texts=" + texts + (issues.Length > 0 ? issues : " ok") + _headInfo);
+            _headInfo = "";
             ui.RestoreAfterShot();
         }
 
@@ -168,6 +170,7 @@ namespace VoxGame.Editor
         static void AuditHud(StringBuilder sb, RectTransform root, Vector3[] c, int w, int h)
         {
             Rect head = HeadRectPx(w, h);
+            _headInfo = " face=" + Mathf.RoundToInt(head.xMin) + ".." + Mathf.RoundToInt(head.xMax) + "x" + Mathf.RoundToInt(head.yMin) + ".." + Mathf.RoundToInt(head.yMax);
             bool land = w > h;
             float popTop = (1f - (land ? FxPops.PopTopL : FxPops.PopTopP)) * h;   // y вниз
             float popSide = land ? FxPops.PopSideL * w : 0f;
@@ -197,8 +200,15 @@ namespace VoxGame.Editor
             bool any = false; var bb = new Bounds();
             foreach (var r in v.root.GetComponentsInChildren<Renderer>(false))
             {
-                if (!r.enabled) continue;
-                if (!any) { bb = r.bounds; any = true; } else bb.Encapsulate(r.bounds);
+                if (!r.enabled || r.transform.parent == null || r.transform.parent.name != "head") continue;   // только чанки головы, не глаза и не капли
+                // границы чанка — весь чанк, а не воксели: короб считаем по вершинам сетки
+                var mf = r.GetComponent<MeshFilter>(); if (mf == null || mf.sharedMesh == null) continue;
+                var vs = mf.sharedMesh.vertices; var m = r.transform.localToWorldMatrix;
+                for (int k = 0; k < vs.Length; k += 3)
+                {
+                    var p = m.MultiplyPoint3x4(vs[k]);
+                    if (!any) { bb = new Bounds(p, Vector3.zero); any = true; } else bb.Encapsulate(p);
+                }
             }
             if (!any) return Rect.zero;
             float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;

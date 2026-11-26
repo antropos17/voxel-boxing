@@ -5,6 +5,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace VoxGame.Editor
 {
@@ -100,47 +101,60 @@ namespace VoxGame.Editor
 
         // ------------------------------------------------------------------ Замер
 
-        // Установившийся бой: N кадров с ударами каждые 20 кадров. Время — только HUD (Refresh+Tick) и UIMotion.Tick;
-        // выделения — счётчик GC.GetAllocatedBytesForCurrentThread вокруг этих вызовов.
-        public static void HudPerf(int frames = 600)
+        // Установившийся бой без сцены боя: только холст и HUD, синтетические данные — урон каждые 20 кадров,
+        // выносливость тратится и копится, мега растёт. Время — Refresh+Tick HUD и UIMotion.Tick;
+        // выделения — GC.GetAllocatedBytesForCurrentThread вокруг этих вызовов (после прогрева).
+        public static void HudPerf(int frames = 1200)
         {
             _log = new System.Text.StringBuilder();
             UIMotion.ForceAnimate = true;
+            var camGo = new GameObject("PerfCam"); var cam = camGo.AddComponent<Camera>();
+            var rootGo = new GameObject("PerfUI"); var root = rootGo.AddComponent<UIRoot>(); root.Init(cam);
             try
             {
-                ToFight();
-                Ticks(120);
-                var hud = _app.Fight.Hud;
-                var d = new HudData();
-                var sw = new Stopwatch();
-                double total = 0, worst = 0; long alloc = 0;
-                var st = _app.Fight.State;
-                d.playerHpMax = 100f; d.foeHpMax = st.hpMax; d.foeName = "Кирпич"; d.playerName = "Игрок"; d.staminaHitCost = 12f;
-                d.playerHp = 100f; d.foeHp = st.hpMax; d.playerStamina = 100f; d.foeKnockdowns = 0;
-                // прогрев: первые кадры создают строки таблиц и пулы
-                for (int i = 0; i < 120; i++) Step(hud, ref d, i, null);
-                for (int i = 0; i < frames; i++)
-                {
-                    long a0 = GC.GetAllocatedBytesForCurrentThread();
-                    sw.Restart();
-                    Step(hud, ref d, i, null);
-                    sw.Stop();
-                    alloc += GC.GetAllocatedBytesForCurrentThread() - a0;
-                    double ms = sw.Elapsed.TotalMilliseconds;
-                    total += ms; if (ms > worst) worst = ms;
-                }
-                _log.AppendLine("UI_HUD_PERF frames=" + frames + " avgMs=" + total / frames + " worstMs=" + worst + " allocBytes=" + alloc
-                                + " floaters=" + hud.LiveFloaters + " sparks=" + hud.LiveSparks);
+                var hud = new GameObject("FightHUD").AddComponent<FightHUD>();
+                hud.Init(root);
+                root.ShowScreen(ScreenId.Fight);
+                _log.AppendLine(Measure("new", frames, d => hud.Refresh(d), () => hud.Tick(DT, DT)));
+                _log.AppendLine("UI_HUD_PERF new floaters=" + hud.LiveFloaters + " sparks=" + hud.LiveSparks);
+                if (ExtraPerf != null) _log.AppendLine(ExtraPerf(root, frames));
             }
             finally
             {
                 UIMotion.ForceAnimate = false;
-                Close();
+                UIMotion.CompleteAll();
+                Object.DestroyImmediate(rootGo); Object.DestroyImmediate(camGo);
+                LastLog = _log.ToString().TrimEnd();
             }
         }
 
+        // Для замера «до»: временный файл со старым HUD подставляет сюда свой прогон.
+        public static Func<UIRoot, int, string> ExtraPerf;
+
+        public static string Measure(string tag, int frames, Action<HudData> refresh, Action tick)
+        {
+            var d = new HudData { playerHpMax = 100f, foeHpMax = 200f, foeName = "Кирпич", playerName = "Игрок", staminaHitCost = 12f,
+                                  playerHp = 100f, foeHp = 200f, playerStamina = 100f };
+            for (int i = 0; i < 240; i++) Step(ref d, i, refresh, tick);   // прогрев: пулы, таблицы строк, JIT
+            var sw = new Stopwatch();
+            double total = 0, worst = 0; long alloc = 0;
+            for (int i = 0; i < frames; i++)
+            {
+                long a0 = GC.GetAllocatedBytesForCurrentThread();
+                sw.Restart();
+                Step(ref d, 240 + i, refresh, tick);
+                Canvas.ForceUpdateCanvases();
+                sw.Stop();
+                alloc += GC.GetAllocatedBytesForCurrentThread() - a0;
+                double ms = sw.Elapsed.TotalMilliseconds;
+                total += ms; if (ms > worst) worst = ms;
+            }
+            return "UI_HUD_PERF " + tag + " frames=" + frames + " avgMs=" + (total / frames).ToString("0.0000") + " worstMs=" + worst.ToString("0.000")
+                   + " allocBytes=" + alloc + " (время включает перестройку холста Canvas.ForceUpdateCanvases)";
+        }
+
         // Кадр HUD с синтетическими данными: урон каждые 20 кадров, выносливость тратится и копится, мега растёт.
-        static void Step(FightHUD hud, ref HudData d, int i, object _)
+        static void Step(ref HudData d, int i, Action<HudData> refresh, Action tick)
         {
             if (i % 20 == 0) { d.foeHp = Mathf.Max(5f, d.foeHp - 7f); d.playerStamina = Mathf.Max(0f, d.playerStamina - 12f); }
             if (i % 50 == 25) d.playerHp = Mathf.Max(10f, d.playerHp - 9f);
@@ -150,8 +164,8 @@ namespace VoxGame.Editor
             d.megaMeter = (i * 0.25f) % 100f;
             d.foeStun01 = (i % 300) / 300f;
             d.fightTime = 30f + i / 60f;
-            hud.Refresh(d);
-            hud.Tick(DT, DT);
+            refresh(d);
+            tick();
             UIMotion.Tick(DT);
         }
     }

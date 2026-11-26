@@ -245,7 +245,7 @@ namespace VoxGame {
             }
 
             // Счёт рефери: крупная цифра и подпись «НОКДАУН»
-            _countCap = UIKit.Label(transform, "CountCap", UIKit.FontMd, Hot, semiBold: true);
+            _countCap = UIKit.Label(transform, "CountCap", UIKit.FontLg, Hot, semiBold: true);
             _countCap.text = "НОКДАУН";
             var cco = _countCap.GetComponent<Outline>();
             cco.effectColor = new Color(0f, 0f, 0f, 0.95f); cco.effectDistance = new Vector2(2f, -2f);
@@ -872,12 +872,12 @@ namespace VoxGame {
                 Place(_mid,       0.395f, 0.900f, 0.560f, 0.995f);
                 Place(_megaReadyLbl, 0.020f, 0.835f, 0.375f, 0.862f);
                 _megaReadyLbl.alignment = TextAnchor.MiddleLeft;
-                UIKit.SetCorner(_pauseBtn.GetComponent<RectTransform>(), 1f, 1f, 1f, 1f, 84f, 84f, -6f, -6f);
+                Place(_pauseBtn, 0.930f, 0.855f, 0.995f, 0.995f);   // угол справа сверху, ≥ 88 px на 1080
                 Place(_telBgL, 0.150f, 0.440f, 0.230f, 0.660f);
                 Place(_telBgR, 0.770f, 0.440f, 0.850f, 0.660f);
                 Place(_hintBg,     0.190f, 0.025f, 0.810f, 0.230f);   // ниже «СЕРИЯ ×N» (центр 0.30)
-                Place(_countCap,   0.350f, 0.800f, 0.650f, 0.880f);
-                Place(_countLbl,   0.350f, 0.440f, 0.650f, 0.800f);
+                Place(_countCap,   0.300f, 0.730f, 0.700f, 0.820f);
+                Place(_countLbl,   0.350f, 0.400f, 0.650f, 0.740f);
                 Place(_bannerLbl,  0.200f, 0.280f, 0.800f, 0.440f);
                 // Кнопки под большими пальцами по углам, середина низа свободна; «БЛОК» над «◄»,
                 // чтобы перчатки игрока (от ~0.25 ширины) их не перекрывали. Высота ≥ 100 опорных px.
@@ -895,8 +895,8 @@ namespace VoxGame {
                 Place(_telBgL, 0.025f, 0.560f, 0.185f, 0.660f);
                 Place(_telBgR, 0.815f, 0.560f, 0.975f, 0.660f);
                 Place(_hintBg,     0.030f, 0.125f, 0.970f, 0.235f);
-                Place(_countCap,   0.200f, 0.790f, 0.800f, 0.830f);
-                Place(_countLbl,   0.200f, 0.560f, 0.800f, 0.790f);
+                Place(_countCap,   0.150f, 0.735f, 0.850f, 0.785f);
+                Place(_countLbl,   0.200f, 0.540f, 0.800f, 0.745f);
                 Place(_bannerLbl,  0.040f, 0.390f, 0.960f, 0.470f);
                 // кнопки раздельно по низу (высота ~105 опорных px): между ними видно соперника
                 Place(_dodgeL,   0.025f, 0.012f, 0.235f, 0.108f);
