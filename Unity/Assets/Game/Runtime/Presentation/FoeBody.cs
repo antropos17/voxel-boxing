@@ -648,39 +648,103 @@ namespace VoxGame
                 }
                 float near = fw > 0f ? Mathf.Lerp(0.12f, ElbowNear, Mathf.InverseLerp(0f, 0.5f, fw)) : 0.12f;   // лёжа локоть сгибается не больше ~144°
                 BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale, near);
-                if (fw > 0f)
-                {
-                    // лёжа: предплечье и перчатка не входят в корпус и голову — цель отодвигается на глубину, рука решается заново
-                    for (int pi = 0; pi < 3; pi++)
-                    {
-                        Vector3 A = FallPoint(FoeFall.Pelvis), B = FallPoint(FoeFall.Chest), H = headMount.TransformPoint(new Vector3(0f, 0.02f, 0.01f));
-                        Vector3 E = fore[s].position, W = E + fore[s].up * (BoxerParts.ForeLen * scale), G = glove[s].position;
-                        Vector3 push = Vector3.zero;
-                        void Seg(Vector3 p, Vector3 q, Vector3 a2, Vector3 b2, float rr)
-                        {
-                            FoeFall.Closest(p, q, a2, b2, out float ps, out float pt);
-                            Vector3 d = Vector3.Lerp(p, q, ps) - Vector3.Lerp(a2, b2, pt); float l = d.magnitude, dep = rr * scale - l;
-                            if (dep <= 0f) return;
-                            Vector3 n = l > 1e-5f ? d / l : Vector3.up;
-                            if (n.y < -0.3f) { n.y = 0f; n = n.sqrMagnitude > 1e-4f ? n.normalized : torsoJoint.right * sg; }
-                            if (dep > Vector3.Dot(push, n)) push += n * (dep - Vector3.Dot(push, n));
-                        }
-                        Seg(E, W, A, B, 0.13f + 0.045f + 0.003f); Seg(G, G, A, B, 0.13f + 0.07f + 0.003f);
-                        Seg(E, W, H, H, 0.11f + 0.045f + 0.003f); Seg(G, G, H, H, 0.11f + 0.07f + 0.003f);
-                        if (push.sqrMagnitude < 1e-6f) break;
-                        gt += push; BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale, near);
-                    }
-                    // лёжа: перчатка (по углам её габарита) не ниже настила — цель выше на недостачу, рука решается ещё раз
-                    if (gloveB == null) { gloveB = new Bounds[2]; for (int k = 0; k < 2; k++) gloveB[k] = glove[k].GetComponent<MeshFilter>().sharedMesh.bounds; }
-                    float gl = float.MaxValue; Bounds gb = gloveB[s];
-                    for (int c = 0; c < 8; c++)
-                        gl = Mathf.Min(gl, glove[s].TransformPoint(gb.center + Vector3.Scale(gb.extents, new Vector3((c & 1) == 0 ? -1 : 1, (c & 2) == 0 ? -1 : 1, (c & 4) == 0 ? -1 : 1))).y);
-                    float lack = root.position.y - gl;
-                    if (lack > 0f) { gt.y += lack; BoxerParts.SolveArm(upper[s], fore[s], glove[s], sh, gt, kn, pole, back, scale, near); }
-                }
+                if (fw > 0f) { _ash[s] = sh; _ag[s] = gt; _ak[s] = kn; _ap[s] = pole; _ab[s] = back; _an[s] = near; }
             }
+            if (fw > 0f) ArmsApart();
         }
         Bounds[] gloveB;
+        readonly Vector3[] _ash = new Vector3[2], _ag = new Vector3[2], _ak = new Vector3[2], _ap = new Vector3[2], _ab = new Vector3[2]; readonly float[] _an = new float[2];
+
+        // Лёжа и на подъёме: руки не входят в корпус, голову, голени и друг в друга (капсулы как в отчёте PhysicsProbe.Limbs).
+        // Каждый проход: глубина каждой пары -> желаемые локоть и запястье (звенья постоянной длины, плечо в конусе ShCone),
+        // IK повторяет эту позу; чужая рука делит сдвиг пополам. Перчатка не ниже настила.
+        void ArmsApart()
+        {
+            float sc = scale, l1 = BoxerParts.UpperLen * sc, lf = BoxerParts.ForeLen * sc, go = BoxerParts.GloveOff * sc;
+            Vector3 A = FallPoint(FoeFall.Pelvis), B = FallPoint(FoeFall.Chest), H = headMount.TransformPoint(new Vector3(0f, 0.02f, 0.01f));
+            Vector3 K0 = FallPoint(FoeFall.Knee0), K1 = FallPoint(FoeFall.Knee1), F0 = FootPoint(0), F1 = FootPoint(1);
+            Quaternion tq = torsoJoint.rotation;
+            if (gloveB == null) { gloveB = new Bounds[2]; for (int k = 0; k < 2; k++) gloveB[k] = glove[k].GetComponent<MeshFilter>().sharedMesh.bounds; }
+            const float m = 0.004f;
+            void Acc(ref Vector3 acc, Vector3 n, float dep) { float d0 = Vector3.Dot(acc, n); if (dep > d0) acc += n * (dep - d0); }
+            // глубина капсулы p–q (радиус r1) в капсуле a–b (r2); n — наружу от a–b, ps — место на p–q
+            float Dep(Vector3 p, Vector3 q, Vector3 a, Vector3 b, float rr, out Vector3 n, out float ps)
+            {
+                FoeFall.Closest(p, q, a, b, out ps, out float pt);
+                Vector3 d = Vector3.Lerp(p, q, ps) - Vector3.Lerp(a, b, pt); float l = d.magnitude, dep = (rr + m) * sc - l;
+                n = l > 1e-5f ? d / l : tq * Vector3.right;
+                if (dep > 0f && n.y < -0.3f) { n.y = 0f; n = n.sqrMagnitude > 1e-4f ? n.normalized : tq * Vector3.right; }
+                return dep;
+            }
+            // локоть ed и запястье wd -> на сферы звеньев, плечо в конусе; цель перчатки и полюс локтя под эту позу
+            void Pose(int s, Vector3 ed, Vector3 wd)
+            {
+                Vector3 S = _ash[s], ax = tq * new Vector3(ArmSign(s), -1f, 0f).normalized, u = ed - S;
+                if (u.sqrMagnitude < 1e-8f) u = upper[s].up;
+                float ca = Vector3.Angle(ax, u);
+                if (ca > FoeFall.ShCone) u = Vector3.Slerp(ax, u.normalized, FoeFall.ShCone / ca);
+                _ab[s] = Quaternion.FromToRotation(upper[s].up, u) * _ab[s];   // тыльная сторона — поворотом плеча, без скручивания
+                ed = S + u.normalized * l1;
+                Vector3 f = wd - ed; if (f.sqrMagnitude < 1e-8f) f = fore[s].up;
+                Vector3 w = ed + f.normalized * lf;
+                _ag[s] = w + _ak[s].normalized * go; _ap[s] = ed - (S + w) * 0.5f;
+                BoxerParts.SolveArm(upper[s], fore[s], glove[s], S, _ag[s], _ak[s], _ap[s], _ab[s], sc, _an[s]);
+            }
+            void Solve(int s, Vector3 ed, Vector3 wd)
+            {
+                Pose(s, ed, wd);
+                float gl = float.MaxValue; Bounds gb = gloveB[s];
+                for (int c = 0; c < 8; c++)
+                    gl = Mathf.Min(gl, glove[s].TransformPoint(gb.center + Vector3.Scale(gb.extents, new Vector3((c & 1) == 0 ? -1 : 1, (c & 2) == 0 ? -1 : 1, (c & 4) == 0 ? -1 : 1))).y);
+                float lack = root.position.y - gl;
+                if (lack > 0f) { Vector3 e = fore[s].position, w = e + fore[s].up * lf; e.y += lack * 0.5f; w.y += lack; Pose(s, e, w); }
+            }
+            // рука о руку: сдвигается та, что дальше от корпуса (наружу), ближняя — нет; бок о бок — пополам
+            float Share(Vector3 p, Vector3 n, float w)
+            {
+                if (w >= 1f) return 1f;
+                FoeFall.Closest(p, p, A, B, out _, out float pt); Vector3 o2 = p - Vector3.Lerp(A, B, pt);
+                float c = o2.sqrMagnitude > 1e-8f ? Vector3.Dot(n, o2.normalized) : 0f;
+                return c < -0.2f ? 0f : c > 0.2f ? 1f : 0.5f;
+            }
+            for (int it = 0; it < 8; it++)
+            {
+                bool moved = false;
+                for (int s = 0; s < 2; s++)
+                {
+                    if (s == holdArm && holdW > 0f) continue;
+                    int o = 1 - s;
+                    Vector3 S = _ash[s], E = fore[s].position, W = E + fore[s].up * lf, G = glove[s].position;
+                    Vector3 oS = upper[o].position, oE = fore[o].position, oW = oE + fore[o].up * lf, oG = glove[o].position;
+                    Vector3 pe = Vector3.zero, pw = Vector3.zero, n; float d, ps;
+                    float sh2 = (o == holdArm && holdW > 0f) ? 1f : 0.5f;
+                    // плечо S–E: голова, чужая рука, голени -> локоть (рычаг от плеча, не больше 2) и предплечье за ним
+                    void Up(Vector3 a, Vector3 b, float rr, float w)
+                    { d = Dep(S, E, a, b, rr, out n, out ps); if (d > 0f) { float k = d * Share(Vector3.Lerp(S, E, ps), n, w) / Mathf.Max(ps, 0.5f); Acc(ref pe, n, k); Acc(ref pw, n, k); } }
+                    Up(H, H, 0.05f + 0.11f, 1f); Up(oS, oE, 0.1f, sh2); Up(oE, oW, 0.095f, sh2); Up(oG, oG, 0.12f, sh2);
+                    Up(K0, F0, 0.105f, 1f); Up(K1, F1, 0.105f, 1f);
+                    // предплечье E–W — сдвигается целиком; перчатка — запястье и половина локтя
+                    void Lo(Vector3 a, Vector3 b, float rf, float rg, float w)
+                    {
+                        d = Dep(E, W, a, b, rf, out n, out ps); if (d > 0f) { float k = d * Share(Vector3.Lerp(E, W, ps), n, w); Acc(ref pe, n, k); Acc(ref pw, n, k); }
+                        d = Dep(G, G, a, b, rg, out n, out ps); if (d > 0f) { float k = d * Share(G, n, w); Acc(ref pw, n, k); Acc(ref pe, n, k * 0.5f); }
+                    }
+                    Lo(A, B, 0.175f, 0.2f, 1f); Lo(H, H, 0.155f, 0.18f, 1f);
+                    Lo(oS, oE, 0.095f, 0.12f, sh2); Lo(oE, oW, 0.09f, 0.115f, sh2); Lo(oG, oG, 0.115f, 0.14f, sh2);
+                    Lo(K0, F0, 0.1f, 0.125f, 1f); Lo(K1, F1, 0.1f, 0.125f, 1f);
+                    if (pe.sqrMagnitude + pw.sqrMagnitude < 1e-8f) continue;
+                    moved = true; Solve(s, E + pe, W + pw);
+                }
+                if (!moved) break;
+            }
+            for (int s = 0; s < 2; s++)
+            {
+                if (s == holdArm && holdW > 0f) continue;
+                Vector3 ax = tq * new Vector3(ArmSign(s), -1f, 0f).normalized;
+                if (Vector3.Angle(ax, upper[s].up) > FoeFall.ShCone + 0.5f) { Vector3 e = fore[s].position; Solve(s, e, e + fore[s].up * lf); }
+            }
+        }
+
 
         // Костяшки и локоть бьющей руки по виду удара (как в вебе, poseArms): прямой — локоть вниз за кулаком,
         // хук — локоть вверх и наружу, кулак поперёк; в замахе — то же заранее. Смена плавная (30/с), без рывка локтя.

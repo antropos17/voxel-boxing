@@ -98,7 +98,8 @@ namespace VoxGame.Tests
 
         // Суставы при падении (дополнение к направлению 3), счёт по кадрам: ни один сустав не выходит за предел больше чем на 3°,
         // колено и локоть не переразгибаются (> 5°), ноги лёжа не «книжкой» (бедро–голень ≥ 35°, бедро–корпус ≥ 30°), голени не
-        // в одном объёме. Взаимопроникновение капсул критерию (≤ 1,5 / 0,5 см) пока не отвечает — здесь только защита от ухудшения.
+        // в одном объёме. Взаимопроникновение: в покое ≤ 1 см, в кадре ≤ 7 см (на 20 падениях сейчас 0,68 / 5,9 см; критерий 1,5 / 0,5 см
+        // на 200 падениях пока не выполнен в редких кадрах — PHYSICS.md, «Не сделано»).
         [Test]
         public void FallKeepsJointLimits([Values(false, true)] bool ko)
         {
@@ -110,7 +111,7 @@ namespace VoxGame.Tests
                 Assert.Greater(l.frames, 0, s);
                 Assert.AreEqual(0, l.framesOver, s); Assert.AreEqual(0, l.framesHyper, s); Assert.AreEqual(0, l.legsSame, s);
                 Assert.GreaterOrEqual(l.minKneeRest, 35f, s); Assert.GreaterOrEqual(l.minHipRest, 30f, s);
-                Assert.LessOrEqual(l.worstPenRest, 0.07f, s); Assert.LessOrEqual(l.worstPen, 0.22f, s);
+                Assert.LessOrEqual(l.worstPenRest, 0.01f, s); Assert.LessOrEqual(l.worstPen, 0.07f, s);
             }
             finally { FoeFall.Enabled = was; }
         }

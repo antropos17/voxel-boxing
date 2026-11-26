@@ -59,6 +59,7 @@ namespace VoxGame
             floorY = floor;
             for (int i = 0; i < N; i++) { x[i] = pos[i]; v[i] = Vector3.zero; }
             for (int k = 0; k < 15; k++) clusterD[k] = (x[PA[k]] - x[PB[k]]).magnitude;
+            { _rq = Frame(out Vector3 c); for (int i = 0; i < 6; i++) rel[i] = Quaternion.Inverse(_rq) * (x[i] - c); }
             shin0 = (x[Foot0] - x[Knee0]).magnitude; shin1 = (x[Foot1] - x[Knee1]).magnitude;
             neckD = (x[Head] - x[Chest]).magnitude;
             for (int k = 0; k < 2; k++)
@@ -111,7 +112,7 @@ namespace VoxGame
                 Dist(Knee0, Foot0, shin0, 0.5f, 0.5f, false); Dist(Knee1, Foot1, shin1, 0.5f, 0.5f, false);
                 Dist(Chest, Head, neckD, 0.3f, 0.7f, false);
                 Cone();
-                for (int ai = 0; ai < 3; ai++)   // руки лёгкие: длины, выталкивание из тела и настил сходятся за несколько проходов
+                for (int ai = 0; ai < 4; ai++)   // руки лёгкие: длины, выталкивание из тела и настил сходятся за несколько проходов
                 {
                     Arm(0); Arm(1);
                     if (HandCollide) { Limb(0); Limb(1); }
@@ -119,6 +120,7 @@ namespace VoxGame
                 }
                 Arm(0); Arm(1);
                 for (int i = 0; i < N; i++) Bounds(i);
+                Rigid(); for (int i = 0; i < 6; i++) Bounds(i);
             }
             // сдвиг узла за подшаг не больше VMax·h: связи у канатов и в углу не выбрасывают тело (между p и x — внутри ринга и над настилом)
             float dmax = VMax * h;
@@ -145,9 +147,9 @@ namespace VoxGame
             }
             // лежит: средняя скорость узлов < SleepV и ни один не быстрее 3·SleepV (голова на пределе шеи дрожит на мм);
             // после 1,6 с порог в 2,5 раза мягче — остаточная дрожь связей не держит тело «живым»
-            float sv = time > 1.6f ? 2.5f * SleepV : SleepV;
+            float sv = time > 1.9f ? 4f * SleepV : time > 1.6f ? 2.5f * SleepV : SleepV;
             _still = v2 < sv * sv * N && vmax < 3f * sv ? _still + h : 0f;
-            if (_still >= SleepT && time > 0.3f) { asleep = true; for (int i = 0; i < N; i++) v[i] = Vector3.zero; }
+            if (_still >= SleepT && time > 0.3f && contacts >= 3) { asleep = true; for (int i = 0; i < N; i++) v[i] = Vector3.zero; }
         }
 
         // Расстояние a–b: равно d (или не больше d при maxOnly), доли сдвига wa и wb
@@ -177,23 +179,28 @@ namespace VoxGame
         }
 
         // Рука не входит в корпус, голову, голени и другую руку (капсулы и шары; двигается рука — она лёгкая)
+        const float LM = 0.008f;   // запас рук в физике: модель повторяет узлы с ошибкой до ~1 см
         void Limb(int k)
         {
             int sh = Sh0 + k, el = El0 + k, hd = Hand0 + k, o = 1 - k;
             float rh = Rad[hd];
-            PushOut(el, x[Pelvis], x[Chest], TorsoR + UpperR, Pelvis, Chest);   // локоть снаружи корпуса: плечо не проходит сквозь грудь
-            PushOut(el, x[Head], x[Head], Rad[Head] + UpperR, Head, Head);
-            PushOut(hd, x[Pelvis], x[Chest], TorsoR + rh, Pelvis, Chest);
-            PushOut(hd, x[Head], x[Head], Rad[Head] + rh, Head, Head);
-            PushOut(hd, x[Knee0], x[Foot0], ShinR + rh); PushOut(hd, x[Knee1], x[Foot1], ShinR + rh);
-            PushOut(hd, x[Hand0 + o], x[Hand0 + o], Rad[Hand0 + o] + rh);
-            SegPush(el, hd, x[Pelvis], x[Chest], TorsoR + ForeR, false, Pelvis, Chest);
-            SegPush(el, hd, x[Head], x[Head], Rad[Head] + ForeR, false, Head, Head);
-            SegPush(el, hd, x[Knee0], x[Foot0], ShinR + ForeR, false); SegPush(el, hd, x[Knee1], x[Foot1], ShinR + ForeR, false);
-            SegPush(el, hd, x[El0 + o], x[Hand0 + o], 2f * ForeR, false);
-            SegPush(el, hd, x[Sh0 + o], x[El0 + o], UpperR + ForeR, false);
-            SegPush(sh, el, x[Head], x[Head], Rad[Head] + UpperR, true, Head, Head);
-            SegPush(sh, el, x[Knee0], x[Foot0], ShinR + UpperR, true); SegPush(sh, el, x[Knee1], x[Foot1], ShinR + UpperR, true);
+            PushOut(Head, x[sh], x[el], Rad[Head] + UpperR + LM);   // голова не входит в плечо у самого сустава (рука туда не уйдёт)
+            PushOut(el, x[Pelvis], x[Chest], TorsoR + UpperR + LM, Pelvis, Chest);   // локоть снаружи корпуса: плечо не проходит сквозь грудь
+            PushOut(el, x[Head], x[Head], Rad[Head] + UpperR + LM, Head, Head);
+            PushOut(hd, x[Pelvis], x[Chest], TorsoR + rh + LM, Pelvis, Chest);
+            PushOut(hd, x[Head], x[Head], Rad[Head] + rh + LM, Head, Head);
+            PushOut(hd, x[Knee0], x[Foot0], ShinR + rh + LM); PushOut(hd, x[Knee1], x[Foot1], ShinR + rh + LM);
+            PushOut(hd, x[Hand0 + o], x[Hand0 + o], Rad[Hand0 + o] + rh + LM);
+            PushOut(hd, x[Sh0 + o], x[El0 + o], UpperR + rh + LM, El0 + o, El0 + o);   // кулак не входит в чужое плечо
+            PushOut(hd, x[El0 + o], x[Hand0 + o], ForeR + rh + LM, El0 + o, Hand0 + o);   // и в чужое предплечье
+            SegPush(el, hd, x[Pelvis], x[Chest], TorsoR + ForeR + LM, false, Pelvis, Chest);
+            SegPush(el, hd, x[Head], x[Head], Rad[Head] + ForeR + LM, false, Head, Head);
+            SegPush(el, hd, x[Knee0], x[Foot0], ShinR + ForeR + LM, false); SegPush(el, hd, x[Knee1], x[Foot1], ShinR + ForeR + LM, false);
+            SegPush(el, hd, x[El0 + o], x[Hand0 + o], 2f * ForeR + LM, false);
+            SegPush(el, hd, x[Sh0 + o], x[El0 + o], UpperR + ForeR + LM, false);
+            SegPush(sh, el, x[Head], x[Head], Rad[Head] + UpperR + LM, true, Head, Head);
+            if (k == 0) SegPush(sh, el, x[Sh1], x[El1], 2f * UpperR + LM, true);   // плечо о плечо (поперёк груди)
+            SegPush(sh, el, x[Knee0], x[Foot0], ShinR + UpperR + LM, true); SegPush(sh, el, x[Knee1], x[Foot1], ShinR + UpperR + LM, true);
         }
 
         // Отрезок i–j не ближе d к отрезку a–b: сдвиг по ближайшим точкам (lockI — двигается только j: плечевой узел — часть корпуса)
@@ -248,12 +255,53 @@ namespace VoxGame
         bool Lift(Vector3 e, float depth, float t, int na, int nb)
         {
             if (na < 0 || e.y >= -0.3f) return false;
+            if (na == Pelvis)
+            {
+                // корпус твёрдый: рука под ним поднимает его не выше, чем рука под корпусом помещается (иначе плечо тянет
+                // руку вверх вслед за корпусом и тело «всплывает» на метры); выше — рука уходит вбок
+                float cap = floorY + TorsoR + 0.13f;
+                if (Mathf.Max(x[Pelvis].y, x[Chest].y) >= cap) return false;
+                x[Pelvis].y = Mathf.Min(x[Pelvis].y + depth * (1f - t) * 1.5f, Mathf.Max(x[Pelvis].y, cap));
+                x[Chest].y = Mathf.Min(x[Chest].y + depth * t * 1.5f, Mathf.Max(x[Chest].y, cap));
+                return true;
+            }
             if (na == nb) x[na].y += depth;
             else { x[na].y += depth * (1f - t) * 1.5f; x[nb].y += depth * t * 1.5f; }
             return true;
         }
 
         // Голова не дальше NeckCone от оси корпуса (таз → грудь)
+        // корпус (таз, грудь, плечи, колени) — твёрдое тело: узлы на свои места в осях таз->грудь, плечо->плечо.
+        // Рисованное плечо стоит на корпусе модели; без этого узел плеча уходит от него на см, и развод рук в физике
+        // не совпадает с моделью (PHYSICS.md, проникновение рук)
+        readonly Vector3[] rel = new Vector3[6];
+        Quaternion Frame(out Vector3 c)
+        {
+            c = Vector3.zero; for (int i = 0; i < 6; i++) c += x[i] / 6f;
+            Vector3 up = (x[Chest] - x[Pelvis]).normalized, rt = (x[Sh0] - x[Sh1]).normalized;
+            return Quaternion.LookRotation(Vector3.Cross(rt, up), up);
+        }
+        Quaternion _rq = Quaternion.identity;
+        // поворот — лучшее совпадение формы по всем шести узлам (вращательная часть деформации, Müller 2016), не по четырём:
+        // упор колен в настил поворачивает корпус, а не теряется
+        void Rigid()
+        {
+            Vector3 c = Vector3.zero; for (int i = 0; i < 6; i++) c += x[i] / 6f;
+            Vector3 a0 = Vector3.zero, a1 = Vector3.zero, a2 = Vector3.zero;
+            for (int i = 0; i < 6; i++) { Vector3 d = x[i] - c; a0 += d * rel[i].x; a1 += d * rel[i].y; a2 += d * rel[i].z; }
+            Quaternion q = _rq;
+            for (int k = 0; k < 8; k++)
+            {
+                Vector3 r0 = q * Vector3.right, r1 = q * Vector3.up, r2 = q * Vector3.forward;
+                Vector3 w = (Vector3.Cross(r0, a0) + Vector3.Cross(r1, a1) + Vector3.Cross(r2, a2))
+                          / (Mathf.Abs(Vector3.Dot(r0, a0) + Vector3.Dot(r1, a1) + Vector3.Dot(r2, a2)) + 1e-9f);
+                float wl = w.magnitude; if (wl < 1e-6f) break;
+                q = Quaternion.AngleAxis(wl * Mathf.Rad2Deg, w / wl) * q; q.Normalize();
+            }
+            _rq = q;
+            for (int i = 0; i < 6; i++) x[i] = c + q * rel[i];
+        }
+
         void Cone()
         {
             Vector3 ax = (x[Chest] - x[Pelvis]).normalized, nk = x[Head] - x[Chest];
