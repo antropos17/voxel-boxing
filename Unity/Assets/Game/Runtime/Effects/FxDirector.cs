@@ -499,7 +499,7 @@ namespace VoxGame
 
         void AddShake(float s) { if (s > _shake) _shake = s; }
 
-        // Перчатки игрока (дети камеры playerGlove0/1, PlayerGloves) → экранные прямоугольники для места плашки удара.
+        // Перчатки игрока (PlayerGloves: камера/playerArms/playerGlove0..1) → экранные прямоугольники для места плашки удара.
         readonly MeshFilter[] _gloveMf = new MeshFilter[2];
         void SyncAvoid()
         {
@@ -508,11 +508,12 @@ namespace VoxGame
         }
 
         static readonly string[] GloveNames = { "playerGlove0", "playerGlove1" };
+        static readonly string[] GloveRigNames = { "playerArms/playerGlove0", "playerArms/playerGlove1" };   // руки в своей оснастке (поле зрения рук)
         Rect GloveRect(int s)
         {
             if (_gloveMf[s] == null)
             {
-                var t = _cam.transform.Find(GloveNames[s]);
+                var t = _cam.transform.Find(GloveRigNames[s]) ?? _cam.transform.Find(GloveNames[s]);
                 if (t == null) return Rect.zero;
                 _gloveMf[s] = t.GetComponent<MeshFilter>();
                 if (_gloveMf[s] == null) return Rect.zero;

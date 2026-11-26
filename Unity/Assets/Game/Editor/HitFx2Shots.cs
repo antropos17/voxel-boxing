@@ -284,7 +284,7 @@ namespace VoxGame.Editor
         // Экранный прямоугольник перчатки игрока s: углы ориентированного короба сетки (localBounds) в кадре.
         public static Rect GloveRectN(Camera cam, int s)
         {
-            var g = cam.transform.Find("playerGlove" + s);
+            var g = cam.transform.Find("playerArms/playerGlove" + s) ?? cam.transform.Find("playerGlove" + s);
             if (g == null || !g.gameObject.activeInHierarchy) return Rect.zero;
             var mf = g.GetComponent<MeshFilter>();
             if (mf == null || mf.sharedMesh == null) return Rect.zero;
