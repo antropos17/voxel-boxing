@@ -69,7 +69,7 @@ namespace VoxGame
         public const float WebFaceDist = 0.7f;      // м: лицо соперника от камеры веба; масштаб вида = расстояние / это
         public const float ViewKMin = 1f, ViewKMax = 2.5f;
         public const float WhiteFlash = 0.15f;      // ×FlashMax 0,7 ≈ 0,1: в линейном цвете Unity это та же яркость, что 0,36 #white веба
-        public const int BloodJab = 36, BloodPower = 84, BloodPowerPerPw = 10, BloodMega = 180, BloodFracture = 30;
+        public const int BloodJab = 56, BloodPower = 130, BloodPowerPerPw = 10, BloodMega = 280, BloodFracture = 30;
         public const int BloodHeadBurst = 100, BloodCounter = 8, ChunksPower = 3, ChunksMega = 10, ChunksFracture = 6;
         public const int FireMega = 40, SweatJab = 4;
         public const float SpdJab = 0.9f, SpdPower = 1.2f, SpdMega = 1.5f;

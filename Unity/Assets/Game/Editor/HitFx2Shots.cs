@@ -25,6 +25,8 @@ namespace VoxGame.Editor
             public float in15Frac, in33Frac;                // то же через 0,15 и 0,33 с
             public int after05Alive; public float after05HighFrac, after05BehindFrac;   // через 0,5 с: выше точки на 0,25·H
             public bool plateSeen; public float hudBottom, plateGloveFrac, plateContrastMin, plateHudFrac, plateComboFrac;
+            public float sizeMax, sizeMed, streakMax; public int sizeN;   // доработка 3: толщина частиц на 0,15 с, доли ширины
+            public Color bloodCol, gloveCol; public float bloodLum, bloodGloveContrast;   // средние цвета пикселей (sRGB) и яркость, контраст
             public Vector2 hitN; public float bloodPx15, plateDist, ringOverText, plateGlovePx; public Rect glovePxN; public bool plateInSafe; public Rect plateN, safeN, gloveN0, gloveN1;
         }
 
@@ -98,7 +100,8 @@ namespace VoxGame.Editor
                     if (f == PeakAt)
                     {
                         res.peakVis = vis; res.peakIn = inside; res.in15Frac = vis > 0 ? (float)inside / vis : 0f;
-                        res.bloodPx15 = ParticlePx(cam, ui, w, h, fx);
+                        res.bloodPx15 = ParticlePx(cam, ui, w, h, fx, ref res);
+                        SizeStats(cam, fx, born, w, ref res);
                         if (dir != null) HF2Shot(cam, ui, w, h, tmpPeak);
                     }
                     // 0,27 с: перчатка ушла с лица, облако крови открыто (дополнительный снимок, портрет)
@@ -294,15 +297,56 @@ namespace VoxGame.Editor
         }
 
         // Пиксели кадра, которые закрывают частицы: снимок с частицами и без них, разница больше 0,06 по любому каналу.
-        static float ParticlePx(Camera cam, UIRoot ui, int w, int h, FxDirector fx)
+        // Заодно средний цвет пикселей частиц и пикселей перчаток игрока на том же кадре (перчатки — разница с кадром без них).
+        static float ParticlePx(Camera cam, UIRoot ui, int w, int h, FxDirector fx, ref HitFx2Res res)
         {
             HF2Begin(cam, ui, w, h);
             var on = HF2Render(cam, w, h);
             fx.Particles.SetDrawn(false);
             var off = HF2Render(cam, w, h);
             fx.Particles.SetDrawn(true);
+            var gs = new[] { cam.transform.Find("playerArms/playerGlove0"), cam.transform.Find("playerArms/playerGlove1") };
+            foreach (var gt in gs) if (gt != null) gt.gameObject.SetActive(false);
+            var ng = HF2Render(cam, w, h);
+            foreach (var gt in gs) if (gt != null) gt.gameObject.SetActive(true);
             ui.RestoreAfterShot();
+            Color sb = Color.clear, sg = Color.clear; int nb = 0, ngl = 0;
+            for (int i = 0; i < on.Length; i++)
+            {
+                bool part = Differs(on[i], off[i]);
+                if (part) { sb += on[i]; nb++; }
+                else if (Differs(on[i], ng[i])) { sg += on[i]; ngl++; }
+            }
+            res.bloodCol = nb > 0 ? sb / nb : Color.black; res.gloveCol = ngl > 0 ? sg / ngl : Color.black;
+            float lb = Lum(res.bloodCol.linear), lg = Lum(res.gloveCol.linear);
+            res.bloodLum = lb;
+            res.bloodGloveContrast = (Mathf.Max(lb, lg) + 0.05f) / (Mathf.Min(lb, lg) + 0.05f);
             return DiffFrac(on, off, w, h, new Rect(0f, 0f, 1f, 1f)) * w * h;
+        }
+
+        static bool Differs(Color p, Color q) => Mathf.Abs(p.r - q.r) > 0.06f || Mathf.Abs(p.g - q.g) > 0.06f || Mathf.Abs(p.b - q.b) > 0.06f;
+
+        // Экранная толщина частиц крови этого удара (наибольшая сторона куба, у штриха — поперёк движения), доли ширины кадра.
+        static void SizeStats(Camera cam, FxDirector fx, uint born, int w, ref HitFx2Res res)
+        {
+            int m = FxParticles.MaxParticles;
+            var pos = new Vector3[m]; var th = new float[m]; var st = new bool[m];
+            int n = fx.Particles.CopyBloodDims(born, pos, th, st);
+            var l = new List<float>(n);
+            float tv = 2f * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad), asp = cam.aspect;
+            res.streakMax = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 v = cam.WorldToViewportPoint(pos[i]);
+                if (v.z <= 0.01f || v.x < 0f || v.x > 1f || v.y < 0f || v.y > 1f) continue;
+                float f = th[i] / (v.z * tv * asp);   // доля ширины
+                l.Add(f);
+                if (st[i]) res.streakMax = Mathf.Max(res.streakMax, f);
+            }
+            l.Sort();
+            res.sizeN = l.Count;
+            res.sizeMax = l.Count > 0 ? l[l.Count - 1] : 0f;
+            res.sizeMed = l.Count > 0 ? l[l.Count / 2] : 0f;
         }
 
         static Rect DiffBox(Color[] a, Color[] b, int w, int h)

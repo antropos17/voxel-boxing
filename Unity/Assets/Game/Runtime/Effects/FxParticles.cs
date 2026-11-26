@@ -25,8 +25,9 @@ namespace VoxGame
         public const float SparkSize    = 0.011f;  // м, средний размер искры
         public const float SpawnLead    = 0.03f;   // м: рождение перед поверхностью, со стороны удара
         // Кровь (веб: капля 2,2–5,5 мм, морось 1,2–2,2 мм, штрих до ×5,5 длины и не длиннее 2,6 % расстояния до камеры)
-        public const float DropMin = 0.0022f, DropMax = 0.0055f, MistMin = 0.0012f, MistMax = 0.0022f;
-        public const float StreakMax = 4.5f, StreakScreen = 0.026f, StreakK = 0.011f;
+        public const float DropMin = 0.0022f, DropMax = 0.0055f, MistMin = 0.0015f, MistMax = 0.0035f;
+        public const float StreakMax = 6f, StreakScreen = 0.04f, StreakK = 0.016f;
+        public const float StreakThick = 0.006f;   // толщина штриха ≤ доли расстояния до камеры (≈1,15 % ширины кадра в портрете)
         public const float DropLifeMin = 1.6f, DropLifeMax = 2.4f, StainLife = 2.0f;
         public const float Near0 = 0.2f, Near1 = 0.6f;   // у объектива капля сжимается до нуля: не закрывает бой
 
@@ -44,7 +45,8 @@ namespace VoxGame
 
         static readonly Color32[] BloodCol =
         {
-            new Color32(178, 12, 12, 255), new Color32(150, 10, 10, 255), new Color32(205, 26, 20, 255), new Color32(120, 8, 9, 255),
+            // тёмно-бордовая (доработка 3): на красной перчатке и полосе здоровья кровь читается отдельно
+            new Color32(92, 6, 10, 255), new Color32(74, 4, 8, 255), new Color32(110, 10, 14, 255), new Color32(60, 3, 7, 255),
         };
 
         // Частицы
@@ -58,6 +60,8 @@ namespace VoxGame
         readonly float[]   _spinV = new float[MaxParticles];
         readonly FxKind[]  _kind = new FxKind[MaxParticles];
         readonly Color32[] _col = new Color32[MaxParticles];
+        readonly float[]   _dThick = new float[MaxParticles];     // замер: толщина нарисованного куба (м; 0 — не нарисован)
+        readonly bool[]    _dStreak = new bool[MaxParticles];     // замер: нарисован штрихом
         readonly uint[]    _seq = new uint[MaxParticles];         // порядковый номер рождения
         int  _next;
         uint _born;
@@ -146,7 +150,9 @@ namespace VoxGame
         public const float BloodSpeed = 1.25f;   // м/с: основная скорость при spd = 1, k = 1
         public const float ToCamMax = 0.9f;      // м/с: предел скорости к камере
         public const float UpMax = 2.2f;         // м/с: предел подъёма (апперкот)
-        public const float DropK = 2.4f, BigDrop = 1.8f;   // размер капли ×масштаб вида ×DropK; каждая шестая ×BigDrop
+        // размер капли ×масштаб вида: мелкие чаще (квадрат случайного), каждая восьмая ×BigDrop — разброс без крупных кубов
+        public const float DropK = 2.0f, BigDrop = 1.5f;
+        public const float ThickScreen = 0.0125f;   // толщина капли, мороси и кубика мяса ≤ доли расстояния до камеры (≈2,4 % ширины кадра в портрете)
 
         public void BloodBurst(Vector3 at, Vector3 dir, Vector3 toCam, int n, int kind, float spd, float k)
         {
@@ -169,7 +175,7 @@ namespace VoxGame
                 switch (kind)
                 {
                     case BurstHook:
-                        v = side * m + rx * R(-0.15f, 0.15f) + Vector3.up * R(-0.1f, 0.45f) * m + cf * R(-0.1f, 0.35f) * m;
+                        v = side * m + rx * R(-0.15f, 0.15f) + Vector3.up * R(-0.55f, 0.6f) * m + cf * R(-0.1f, 0.35f) * m;   // веер шире перчатки по вертикали
                         break;
                     case BurstUpper:
                         v = Vector3.up * (0.15f + m) + rx * R(-0.3f, 0.3f) * m + cf * R(-0.1f, 0.3f) * m;
@@ -189,9 +195,9 @@ namespace VoxGame
                 if (vc > ToCamMax) v -= c * (vc - ToCamMax);
                 if (v.y > UpMax) v.y = UpMax;
                 // размеры вразброс (доработка 2): каждая шестая капля крупная, морось тоже крупнее — всплеск читается на телефоне
-                float big = i % 6 == 0 ? BigDrop : 1f;
+                float big = i % 8 == 0 ? BigDrop : 1f, q = Rand01();
                 if (mist) Spawn(FxKind.Mist, from, v, R(MistMin, MistMax) * k * DropK, R(0.25f, 0.6f), col);
-                else Spawn(FxKind.Blood, from + RandSphere() * 0.01f, v, R(DropMin, DropMax) * k * DropK * big, R(DropLifeMin, DropLifeMax), col);
+                else Spawn(FxKind.Blood, from + RandSphere() * 0.01f, v, Mathf.Lerp(DropMin, DropMax, q * q) * k * DropK * big, R(DropLifeMin, DropLifeMax), col);
             }
         }
 
@@ -209,9 +215,9 @@ namespace VoxGame
             {
                 // подъём и полёт к камере ограничены, как у крови (HIT-FX-2): кубики не улетают за верхний край
                 Vector3 v = side * R(0.6f, 2f) + RandSphere() * 0.8f + Vector3.up * R(0.2f, 1f) + c * R(0f, 0.6f);
-                Color32 col = Rand01() < 0.6f ? new Color32((byte)R(140, 190), (byte)R(18, 40), (byte)R(20, 36), 255)
-                                              : new Color32((byte)R(200, 230), (byte)R(120, 150), (byte)R(110, 130), 255);
-                Spawn(FxKind.Chunk, at + c * SpawnLead + RandSphere() * 0.015f, v * spd * Mathf.Sqrt(k), R(0.006f, 0.011f) * k,
+                // мелкие и тёмные (доработка 3): крупные красные кубики читались как кровь-кубы
+                Color32 col = new Color32((byte)R(70, 115), (byte)R(6, 18), (byte)R(9, 20), 255);
+                Spawn(FxKind.Chunk, at + c * SpawnLead + RandSphere() * 0.015f, v * spd * Mathf.Sqrt(k), R(0.003f, 0.005f) * k,
                       R(1.4f, 2.2f), col);
             }
         }
@@ -375,6 +381,17 @@ namespace VoxGame
         // Показать или спрятать меш частиц (замер: площадь крови на снимке).
         public void SetDrawn(bool on) { if (_go != null) _go.SetActive(on); }
 
+        // Замер: нарисованные капли, морось и кубики мяса этого удара — положение, толщина (м), штрих ли.
+        public int CopyBloodDims(uint fromSeq, Vector3[] pos, float[] thick, bool[] streak)
+        {
+            int n = 0;
+            for (int i = 0; i < MaxParticles && n < pos.Length; i++)
+                if (_life[i] > 0f && _seq[i] >= fromSeq && _dThick[i] > 0f
+                    && (_kind[i] == FxKind.Blood || _kind[i] == FxKind.Mist || _kind[i] == FxKind.Chunk))
+                { pos[n] = _pos[i]; thick[n] = _dThick[i]; streak[n] = _dStreak[i]; n++; }
+            return n;
+        }
+
         public int CopyBlood(uint fromSeq, Vector3[] dst)
         {
             int n = 0;
@@ -424,9 +441,10 @@ namespace VoxGame
                 if (_hasCam)
                 {
                     cd = Vector3.Distance(_pos[i], _camPos);
-                    if (cd < Near1) { if (cd <= Near0) continue; s *= (cd - Near0) / (Near1 - Near0); }
+                    if (cd < Near1) { if (cd <= Near0) { _dThick[i] = 0f; continue; } s *= (cd - Near0) / (Near1 - Near0); }
                 }
-                if (s <= 1e-5f) continue;
+                if (s <= 1e-5f) { _dThick[i] = 0f; continue; }
+                if (kind == FxKind.Blood || kind == FxKind.Mist || kind == FxKind.Chunk) s = Mathf.Min(s, cd * ThickScreen);
 
                 Vector3 u, v, w;
                 float su = s, sv = s, sw = s;
@@ -441,7 +459,7 @@ namespace VoxGame
                     if (kind == FxKind.Blood)
                     {
                         float l = Mathf.Max(s, Mathf.Min(s * (1f + Mathf.Min(StreakMax, sp * StreakK / s)), cd * StreakScreen));
-                        sw = l; su = sv = s * Mathf.Sqrt(s / l);
+                        sw = l; su = sv = Mathf.Min(s * Mathf.Sqrt(s / l), cd * StreakThick);
                     }
                     else sw = s * (1f + Mathf.Min(sp * 1.6f, 2.2f));
                 }
@@ -456,6 +474,8 @@ namespace VoxGame
                     u = new Vector3(ca, sa, 0f); v = new Vector3(-sa * 0.8f, ca * 0.8f, 0.6f).normalized;
                     w = Vector3.Cross(u, v);
                 }
+                _dThick[i] = Mathf.Max(su, sv); _dStreak[i] = sw > Mathf.Max(su, sv) * 1.5f;
+                if (!_dStreak[i]) _dThick[i] = Mathf.Max(_dThick[i], sw);
                 WriteCube(j * VertsPer, w2l.MultiplyPoint3x4(_pos[i]), w2l.MultiplyVector(u * (su * 0.5f)),
                           w2l.MultiplyVector(v * (sv * 0.5f)), w2l.MultiplyVector(w * (sw * 0.5f)), _col[i]);
                 j++;
@@ -469,25 +489,27 @@ namespace VoxGame
         // Шесть граней по полуосям hu, hv, hw; обход по часовой снаружи (как у VoxModel).
         void WriteCube(int b, Vector3 c, Vector3 hu, Vector3 hv, Vector3 hw, Color32 col)
         {
-            Face(b,      c, hu,  hv,  hw, col);   // +u
-            Face(b + 4,  c, -hu, hw,  hv, col);   // -u
-            Face(b + 8,  c, hv,  hw,  hu, col);   // +v
-            Face(b + 12, c, -hv, hu,  hw, col);   // -v
-            Face(b + 16, c, hw,  hu,  hv, col);   // +w
-            Face(b + 20, c, -hw, hv,  hu, col);   // -w
+            // у всех шести граней ориентация обхода одна (смешанное произведение hu, hv, hw): проверка и нормали — раз на куб
+            bool sw = Vector3.Dot(Vector3.Cross(hv, hw), hu) > 0f;
+            Vector3 nu = hu.normalized, nv = hv.normalized, nw = hw.normalized;
+            Face(b,      c + hu, nu,  hv, hw, sw, col);   // +u
+            Face(b + 4,  c - hu, -nu, hw, hv, sw, col);   // -u
+            Face(b + 8,  c + hv, nv,  hw, hu, sw, col);   // +v
+            Face(b + 12, c - hv, -nv, hu, hw, sw, col);   // -v
+            Face(b + 16, c + hw, nw,  hu, hv, sw, col);   // +w
+            Face(b + 20, c - hw, -nw, hv, hu, sw, col);   // -w
         }
 
-        // Грань с нормалью вдоль n (полуось), стороны a, b.
-        void Face(int i, Vector3 c, Vector3 n, Vector3 a, Vector3 b, Color32 col)
+        // Грань с центром o, нормалью nn и сторонами a, b; лицевая сторона Unity: cross(v1−v0, v2−v0) = −4·cross(a, b)
+        // должен смотреть по нормали, иначе стороны меняются местами (sw).
+        void Face(int i, Vector3 o, Vector3 nn, Vector3 a, Vector3 b, bool sw, Color32 col)
         {
-            Vector3 o = c + n;
-            Vector3 nn = n.normalized;
-            // лицевая сторона Unity: cross(v1−v0, v2−v0) = −4·cross(a, b) должен смотреть по n
-            if (Vector3.Dot(Vector3.Cross(a, b), n) > 0f) { Vector3 t = a; a = b; b = t; }
-            _vb[i]     = new Vtx { p = o - a - b, n = nn, c = col };
-            _vb[i + 1] = new Vtx { p = o - a + b, n = nn, c = col };
-            _vb[i + 2] = new Vtx { p = o + a + b, n = nn, c = col };
-            _vb[i + 3] = new Vtx { p = o + a - b, n = nn, c = col };
+            if (sw) { Vector3 t = a; a = b; b = t; }
+            Vector3 p = a + b, m = a - b;
+            _vb[i]     = new Vtx { p = o - p, n = nn, c = col };
+            _vb[i + 1] = new Vtx { p = o - m, n = nn, c = col };
+            _vb[i + 2] = new Vtx { p = o + p, n = nn, c = col };
+            _vb[i + 3] = new Vtx { p = o + m, n = nn, c = col };
         }
 
         // ---- Случайные числа (свой генератор: порядок случайных чисел боя не трогается) ---------------

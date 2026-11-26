@@ -530,10 +530,21 @@ namespace VoxGame.Tests
                 Assert.LessOrEqual(r.plateGlovePx, 0.05f, w + ": плашка под перчаткой (по пикселям перчаток)");
                 Assert.LessOrEqual(r.plateDist, 0.22f, w + ": плашка дальше 0,22 меньшей стороны от точки удара");
                 Assert.AreEqual(0f, r.ringOverText, 1e-4f, w + ": кольцо поверх текста плашки");
-                // доработка 2: крови на 0,15 с больше; до неё (a8d7ad5) в портрете видимых 12 / 34 / 34, пикселей 93 / 5455 / 18766
-                if (!r.land && r.punch == PunchType.Jab)  { Assert.GreaterOrEqual(r.peakVis, 30, w); Assert.GreaterOrEqual(r.bloodPx15, 279f, w); }
-                if (!r.land && r.punch == PunchType.Hook) { Assert.GreaterOrEqual(r.peakVis, 85, w); Assert.GreaterOrEqual(r.bloodPx15, 16365f, w); }
-                if (!r.land && r.punch == PunchType.Upper) { Assert.GreaterOrEqual(r.peakVis, 34, w); Assert.GreaterOrEqual(r.bloodPx15, 18766f, w); }
+                // доработка 3: мелкие тёмные капли и полосы, много (портрет 1080×2400, 0,15 с)
+                if (!r.land)
+                {
+                    Assert.LessOrEqual(r.sizeMax, 0.025f, w + ": наибольшая частица");
+                    Assert.LessOrEqual(r.sizeMed, 0.012f, w + ": медианная частица");
+                    Assert.LessOrEqual(r.streakMax, 0.012f, w + ": толщина полосы");
+                    Assert.GreaterOrEqual(r.peakVis, r.punch == PunchType.Jab ? 50 : 120, w + ": видимых частиц");
+                    if (r.punch == PunchType.Jab) Assert.GreaterOrEqual(r.bloodPx15, 8000f, w + ": пикселей крови");
+                    if (r.punch == PunchType.Hook)
+                    {
+                        Assert.GreaterOrEqual(r.bloodPx15, 12000f, w + ": пикселей крови");
+                        Assert.LessOrEqual(r.bloodLum, 0.10f, w + ": яркость крови");
+                        Assert.GreaterOrEqual(r.bloodGloveContrast, 2.0f, w + ": контраст крови к перчатке");
+                    }
+                }
                 Assert.GreaterOrEqual(r.plateContrastMin, 4.5f, w + ": контраст плашки");
                 Assert.IsTrue(r.plateInSafe, w + ": плашка в safe-area");
                 Assert.AreEqual(0f, r.plateHudFrac, 1e-4f, w + ": плашка на полосах HUD");
