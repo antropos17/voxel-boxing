@@ -12,6 +12,8 @@ namespace VoxGame
         public readonly Transform root;       // корень соперника (масштаб тела = FighterDef.scale)
         public readonly Transform headMount;  // сюда ставится начало координат головы (уровень ушей)
         public readonly HeadGear  gear;       // причёска, борода, головной убор и мелочи головы
+        public Transform Torso => torsoJoint;  // корпус (замеры PHYSICS.md)
+        public Vector3 GloveWorld(int s) => glove[s].position;
 
         // ---- Размеры (метры, от корня при масштабе 1) -------------------------------------------
         const float WaistY  = 0.98f;   // пояс: начало координат формы торса
@@ -423,7 +425,14 @@ namespace VoxGame
                 case FightPhase.Open:
                     t0 = Abs(0.27f, 1.24f, 0.26f); t1 = Abs(-0.26f, 1.20f, 0.25f); leanT = 12f; lungeT = 0.08f; break;
                 case FightPhase.Stagger:
-                    t0 = Abs(0.23f, 1.34f, 0.20f); t1 = Abs(-0.23f, 1.34f, 0.20f); leanT = -7f; break;
+                    t0 = Abs(0.23f, 1.34f, 0.20f); t1 = Abs(-0.23f, 1.34f, 0.20f); leanT = -7f;
+                    if (FoeSpring.Enabled)
+                    {
+                        // оглушён: руки провисают и раскачиваются в такт шатанию головы
+                        float sw = Mathf.Sin(anim * 2.3f);
+                        t0 += new Vector3(0.02f * sw, -0.05f - 0.02f * sw, -0.03f); t1 += new Vector3(0.02f * sw, -0.05f + 0.02f * sw, -0.03f);
+                    }
+                    break;
                 case FightPhase.Down:
                     // на коленях, руки упёрты в настил по бокам корпуса: перед коленями их закрывали перчатки игрока,
                     // и у нижнего края кадра торчали одни перчатки соперника, будто оторванные
@@ -465,7 +474,7 @@ namespace VoxGame
             }
             if (FoeSpring.Enabled)
             {
-                spring.Step(sdt);
+                spring.Step(sdt, phase == FightPhase.Stagger);   // оглушён: руки обмякли, сильнее отстают
                 if (phase == FightPhase.Strike) spring.HoldGlove(hand);   // бьющая рука идёт точно в цель
             }
             poseDt = sdt;
@@ -498,12 +507,12 @@ namespace VoxGame
             torsoJoint.localPosition = new Vector3(0f, WaistY - HipDrop, 0f) + offset;
             float il = Mathf.Clamp(impLean, -14f, 14f), it = Mathf.Clamp(impTwist, -18f, 18f);
             if (sp) { il += spring.lean; it += spring.twist; }
-            torsoJoint.localRotation = Quaternion.Euler(lean + il, twist + it, 0f);
+            torsoJoint.localRotation = Quaternion.Euler(lean + il, twist + it, sp ? spring.roll : 0f);
             // голова стоит на шее корпуса, но поворот у неё свой (в осях корня): корпус качается, голова ровная
             headMount.localPosition = HeadLocal();
             if (sp) headMount.localPosition += Quaternion.Inverse(torsoJoint.localRotation) * spring.head / scale;
             headMount.localRotation = Quaternion.Inverse(torsoJoint.localRotation)
-                                    * Quaternion.Euler(headPitch + il * 0.5f, headYaw + it * 0.5f, headRoll - it * 0.4f);
+                                    * Quaternion.Euler(headPitch + il * 0.5f, headYaw + it * 0.5f + (sp ? spring.yaw : 0f), headRoll - it * 0.4f);
 
             bool low = phase == FightPhase.Down || phase == FightPhase.KO;
             float sk = 1f - Mathf.Exp(-30f * poseDt);
@@ -586,7 +595,13 @@ namespace VoxGame
             }
             Vector3 neck = headMount.position - root.up * (0.12f * scale);
             spring.Kick(root.InverseTransformDirection(dir), root.InverseTransformDirection(point - neck),
-                        FoeSpring.Impulse(strength, pw));
+                        FoeSpring.Impulse(strength, pw), phase == FightPhase.Guard);
+        }
+
+        // Удар соперника остановлен блоком игрока: бьющая перчатка отскакивает и возвращается пружиной
+        public void StrikeBlocked(int side)
+        {
+            if (FoeSpring.Enabled) spring.Bounce(side < 0 ? 0 : 1, 1.6f);
         }
 
         // Импульс от удара игрока (мир): корпус отклоняется назад и скручивается.

@@ -793,7 +793,7 @@ namespace VoxGame
             st.OnPlayerHurt();
             float power = dmgBase / 15f;
             _fx.OnFoeHit(power, blocked);
-            if (blocked) _sound.Play(SoundId.Block);
+            if (blocked) { _sound.Play(SoundId.Block); _foeBody.StrikeBlocked(_strikeCmd.side); }   // перчатка отскакивает от блока
             else
             {
                 if (broken) _sound.Play(SoundId.GuardBreak);

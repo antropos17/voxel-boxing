@@ -123,6 +123,12 @@ namespace VoxGame
         const float SqK = 620f, SqC = 24f, SqMin = -0.18f, SqMax = 0.34f, SqH = 1f / 240f;
         static readonly float[] SqKick = { 5.5f, 9f, 13f };   // джеб, силовой, мега
         readonly float[] _sq = new float[2], _sqv = new float[2];
+        // Отдача перчатки после попадания (PHYSICS.md): пружина вдоль пути удара назад к плечу, тот же шаг SqH.
+        // Пик ~3 кадра, назад за ~8 кадров; время между ударами не меняется (перезарядка в FightDirector).
+        public static bool Recoil = true;
+        public const float RcK = 1200f, RcC = 55f, RcMax = 0.07f;
+        static readonly float[] RcKick = { 4.0f, 4.6f, 5.4f };   // м/с: джеб, силовой, мега
+        readonly float[] _rc = new float[2], _rcv = new float[2];
         readonly bool[] _landed = new bool[2];
         float _sqAcc;
         Vector3 _shP = ShoulderP;
@@ -352,7 +358,11 @@ namespace VoxGame
                     _ext[s] = Mathf.Min(1f, _ext[s] + dt / _outT[s]);
                     // касание: перчатка сплющивается и пружинит
                     if (FoeSpring.Enabled && _landed[s] && e0 < 1f && _ext[s] >= 1f)
-                        _sqv[s] += SqKick[_kind[s] == PunchType.Mega ? 2 : _kind[s] == PunchType.Jab ? 0 : 1];
+                    {
+                        int ki = _kind[s] == PunchType.Mega ? 2 : _kind[s] == PunchType.Jab ? 0 : 1;
+                        _sqv[s] += SqKick[ki];
+                        if (Recoil) _rcv[s] += RcKick[ki];
+                    }
                 }
                 else if (_ext[s] > 0f) _ext[s] = Mathf.Max(0f, _ext[s] - dt / ReturnT);
 
@@ -391,6 +401,8 @@ namespace VoxGame
                     }
                     if (FoeSpring.Enabled) bow *= 0.5f;   // плечо уже ведёт дугу: прибавка по дуге меньше
                     pos  = Vector3.Lerp(pos, _goal[s], e) + bow * arc;
+                    // отдача после попадания: назад по линии удара к плечу
+                    if (_rc[s] != 0f) pos += (RealShoulder(s, 1f) - _goal[s]).normalized * _rc[s];
                     kn   = Vector3.Lerp(kn, pk, e);
                     back = Vector3.Lerp(back, pb, e);
                     au   = Mathf.Lerp(au, sg * pu, e);
@@ -567,6 +579,8 @@ namespace VoxGame
                 {
                     _sqv[s] += (-SqK * _sq[s] - SqC * _sqv[s]) * SqH;
                     _sq[s] = Mathf.Clamp(_sq[s] + _sqv[s] * SqH, SqMin, SqMax);
+                    _rcv[s] += (-RcK * _rc[s] - RcC * _rcv[s]) * SqH;
+                    _rc[s] = Mathf.Clamp(_rc[s] + _rcv[s] * SqH, -RcMax * 0.3f, RcMax);
                 }
             }
         }
