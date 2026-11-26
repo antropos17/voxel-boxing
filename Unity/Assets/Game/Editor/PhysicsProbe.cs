@@ -142,13 +142,15 @@ namespace VoxGame.Editor
                 run.Tick();
                 if (d.hitFrameSeq == seq) { log.AppendLine("SHOT " + name + " miss"); continue; }
                 var b = d.FoeFigure; Vector3 h0 = b.headMount.position;
+                while (d.lastSdt <= 0f) run.Tick();   // стоп-кадр удара
                 for (int f = 0; f <= 20; f++)
                 {
                     if (!onlyHook8 && (name == "weak" || name == "strong") && f == 9) PShot(d, cam, ui, name + "-peak");
                     if ((name != "weak" && name != "strong") && (f == 0 || f == 3 || f == 8 || f == 20) && (!onlyHook8 || f == 8))
                         PShot(d, cam, ui, name + "-f" + f);
                     log.AppendLine("SHOT " + name + " f" + f + " head=" + F((b.headMount.position - h0).magnitude * 100f) + "cm lean=" + F(b.spring.lean) + " twist=" + F(b.spring.twist));
-                    run.Tick();
+                    // кадры — игрового времени (1/60 с): стоп-кадр и слоу-мо удара их растягивают
+                    for (float gt = 0f; gt < 1f / 60f - 1e-5f; ) { run.Tick(); gt += d.lastSdt; }
                 }
             }
             EndFight(d);

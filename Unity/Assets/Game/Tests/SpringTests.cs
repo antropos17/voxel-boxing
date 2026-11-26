@@ -32,8 +32,9 @@ namespace VoxGame.Tests
             s.Kick(Dir, Arm, FoeSpring.Impulse(2, 1.3f));
             Run(s, 1f / 60f, 0.05f);
             Assert.Greater(s.head.magnitude, 0.005f, "отдача головы есть");
+            Run(s, 1f / 60f, 0.2f);   // отшаг идёт за корпусом (цепочка голова → корпус → корень, PHYSICS.md)
             Assert.Greater(s.root.magnitude, 0.01f, "отшаг есть");
-            Run(s, 1f / 60f, 1f);
+            Run(s, 1f / 60f, 1.2f);
             Assert.Less(s.head.magnitude, 0.001f, "голова");
             Assert.Less(s.root.magnitude, 0.001f, "корень");
             Assert.Less(Mathf.Abs(s.lean) + Mathf.Abs(s.twist), 0.1f, "корпус");
