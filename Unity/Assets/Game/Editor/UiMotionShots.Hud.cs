@@ -137,7 +137,7 @@ namespace VoxGame.Editor
                                   playerHp = 100f, foeHp = 200f, playerStamina = 100f };
             for (int i = 0; i < 240; i++) Step(ref d, i, refresh, tick);   // прогрев: пулы, таблицы строк, JIT
             var sw = new Stopwatch();
-            double total = 0, worst = 0; long alloc = 0;
+            double total = 0, worst = 0; long alloc = 0; var all = new double[frames];
             for (int i = 0; i < frames; i++)
             {
                 long a0 = GC.GetAllocatedBytesForCurrentThread();
@@ -147,9 +147,11 @@ namespace VoxGame.Editor
                 sw.Stop();
                 alloc += GC.GetAllocatedBytesForCurrentThread() - a0;
                 double ms = sw.Elapsed.TotalMilliseconds;
-                total += ms; if (ms > worst) worst = ms;
+                total += ms; if (ms > worst) worst = ms; all[i] = ms;
             }
-            return "UI_HUD_PERF " + tag + " frames=" + frames + " avgMs=" + (total / frames).ToString("0.0000") + " worstMs=" + worst.ToString("0.000")
+            Array.Sort(all);
+            return "UI_HUD_PERF " + tag + " frames=" + frames + " avgMs=" + (total / frames).ToString("0.0000") + " medianMs=" + all[frames / 2].ToString("0.0000")
+                   + " p95Ms=" + all[frames * 95 / 100].ToString("0.0000") + " worstMs=" + worst.ToString("0.000")
                    + " allocBytes=" + alloc + " (время включает перестройку холста Canvas.ForceUpdateCanvases)";
         }
 
