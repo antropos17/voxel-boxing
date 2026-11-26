@@ -240,5 +240,82 @@ namespace VoxGame.Editor
             EmotionsLog = log.ToString().TrimEnd();
             Debug.Log(EmotionsLog);
         }
+
+        // Замер A/B «без мимики | с мимикой» с чередованием (как ARMS-BODY.md): 6 боёв в порядке без, с, с, без, без, с,
+        // по 40 ударов; кадр удара — lastHitFrameMs, кадр боя — d.Tick без удара, отрисовка 1080×2400 с ожиданием GPU каждый 5-й кадр.
+        // Отдельно — своё время мимики (FoeFace.Tick + Apply) и выделения памяти на него за 3000 кадров.
+        public static void EmotionBench(int hits = 40)
+        {
+            bool wasA = AnatFace.Enabled, wasF = FoeFace.Enabled;
+            var log = new StringBuilder();
+            var hit = new Dictionary<bool, List<double>> { { false, new List<double>() }, { true, new List<double>() } };
+            var frame = new Dictionary<bool, List<double>> { { false, new List<double>() }, { true, new List<double>() } };
+            var rend = new Dictionary<bool, List<double>> { { false, new List<double>() }, { true, new List<double>() } };
+            var tris = new Dictionary<bool, int> { { false, 0 }, { true, 0 } };
+            try
+            {
+                int r = 0;
+                foreach (bool on in new[] { false, true, true, false, false, true })
+                {
+                    AnatFace.Enabled = on; FoeFace.Enabled = on;
+                    var h1 = new List<double>(); var f1 = new List<double>(); var r1 = new List<double>();
+                    var d = NewFight(out var bcam, out _, 6f, 4f);
+                    d.SetViewSize(1080, 2400);
+                    var rt = new RenderTexture(1080, 2400, 24, RenderTextureFormat.ARGB32);
+                    var px = new Texture2D(1, 1, TextureFormat.RGB24, false);
+                    var run = new Run { d = d };
+                    run.Ticks(90);
+                    tris[on] = d.Head.Triangles;
+                    var combo = new[] { PunchType.Hook, PunchType.Jab, PunchType.Upper, PunchType.Jab };
+                    int got = 0, tries = 0;
+                    var tsw = new System.Diagnostics.Stopwatch();
+                    while (got < hits + WarmHits && tries < hits * 4 && !d.Finished)
+                    {
+                        tries++;
+                        run.WaitOpen(150);
+                        int seq = d.hitFrameSeq;
+                        run.Punch(combo[tries % combo.Length], tries % 2 == 0 ? 1 : -1);
+                        run.Tick();
+                        if (d.hitFrameSeq != seq) { if (got >= WarmHits) h1.Add(d.lastHitFrameMs); got++; }
+                        for (int i = 0; i < 20; i++)
+                        {
+                            int s2 = d.hitFrameSeq;
+                            tsw.Restart(); d.Tick(DT); tsw.Stop();
+                            if (d.hitFrameSeq == s2 && got > WarmHits) f1.Add(tsw.Elapsed.TotalMilliseconds);
+                            if (i % 5 == 0 && got > WarmHits)
+                            {
+                                bcam.targetTexture = rt; RenderTexture.active = rt;
+                                tsw.Restart(); bcam.Render(); px.ReadPixels(new Rect(0, 0, 1, 1), 0, 0); tsw.Stop();
+                                bcam.targetTexture = null; RenderTexture.active = null;
+                                r1.Add(tsw.Elapsed.TotalMilliseconds);
+                            }
+                        }
+                    }
+                    log.AppendLine("EMO_BENCH run=" + (r++) + " on=" + on + " hits=" + h1.Count + " hitFrame " + Dist(h1) + " | fightFrame " + Dist(f1) + " | render " + Dist(r1));
+                    hit[on].AddRange(h1); frame[on].AddRange(f1); rend[on].AddRange(r1);
+                    // своё время мимики в этом же бою (только «с»)
+                    if (on && r == 2)
+                    {
+                        var ff = d.FoeMimic; var st = d.State;
+                        for (int i = 0; i < 200; i++) { ff.Tick(DT, st); ff.Apply(d.Head); }
+                        long b0 = System.GC.GetAllocatedBytesForCurrentThread();
+                        tsw.Restart();
+                        for (int i = 0; i < 3000; i++) { if (i % 90 == 0) ff.OnHit(i % 3, false, (int)AnatZone.Cheek, false, false, 1); ff.Tick(DT, st); ff.Apply(d.Head); }
+                        tsw.Stop();
+                        long b1 = System.GC.GetAllocatedBytesForCurrentThread();
+                        log.AppendLine("EMO_BENCH face Tick+Apply " + (tsw.Elapsed.TotalMilliseconds / 3000).ToString("0.0000") + " ms/frame, alloc " + (b1 - b0) + " B / 3000 frames");
+                    }
+                    rt.Release(); Object.DestroyImmediate(rt); Object.DestroyImmediate(px);
+                    EndFight(d);
+                }
+            }
+            finally { AnatFace.Enabled = wasA; FoeFace.Enabled = wasF; AnatFace.Off(); }
+            foreach (bool on in new[] { false, true })
+                log.AppendLine("EMO_BENCH on=" + on + " headTris=" + tris[on] + " hitFrame " + Dist(hit[on]) + " | fightFrame " + Dist(frame[on]) + " | render " + Dist(rend[on]));
+            EmotionsLog = log.ToString().TrimEnd();
+            var p = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Logs", "emo-bench.txt"));
+            File.WriteAllText(p, EmotionsLog);
+            Debug.Log(EmotionsLog);
+        }
     }
 }
