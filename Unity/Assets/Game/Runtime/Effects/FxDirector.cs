@@ -513,8 +513,9 @@ namespace VoxGame
         public const int ArmHistN = 21, ArmHistRecent = 9, ArmHistStep = 4, ArmHistStride = 4, ArmSweepN = 6;   // история 0,35 с; недавние 0,15 с — каждая 4-я поза, каждая 4-я точка
         static readonly string[] ArmRigNames = { "playerArms/playerGlove0", "playerArms/playerGlove1", "playerArms/playerForeArm0", "playerArms/playerForeArm1" };
         readonly MeshFilter[] _armMf = new MeshFilter[4];
-        // Отдача перчатки игрока после касания (PlayerGloves.RecoilReach): сдвиг руки s в мире, ноль — нет удара
-        public System.Func<int, Vector3> ArmReach;
+        // Поза руки игрока в отдаче после касания (PlayerGloves.RecoilGhost): g — половина и вся отдача, part — как ArmRigNames
+        public delegate bool GhostFn(int g, int part, out Matrix4x4 world);
+        public GhostFn ArmGhost;
         readonly Matrix4x4[] _armHist = new Matrix4x4[ArmHistN * 4];   // поза части в осях камеры; [кадр·4 + часть]
         readonly bool[] _armHistOn = new bool[ArmHistN * 4];
         int _armHead;
@@ -551,17 +552,14 @@ namespace VoxGame
                 for (int s = 0; s < 4; s++)
                     if (_armHistOn[f * 4 + s]) ArmSplat(s, _armHist[f * 4 + s], ago == 0 ? 1 : ArmHistStride, ago / ArmHistStep, ago == 0 ? 1f : ArmHistPad, tv);
             }
-            // отдача: рука сейчас, сдвинутая к плечу на половину и на весь наибольший сдвиг и от плеча на перелёт (плашка стоит весь показ)
-            if (ArmReach != null)
-                for (int s = 0; s < 4; s++)
-                {
-                    if (!_armHistOn[_armHead * 4 + s]) continue;
-                    Vector3 r = _cam.transform.InverseTransformVector(ArmReach(s & 1));
-                    if (r.sqrMagnitude < 1e-8f) continue;
-                    Matrix4x4 a = _armHist[_armHead * 4 + s];
-                    for (int k = -1; k <= 2; k++)   // −1: перелёт пружины вперёд (до 0,3 наибольшего сдвига)
-                        if (k != 0) ArmSplat(s, Matrix4x4.Translate(r * (k < 0 ? -0.3f : k * 0.5f)) * a, k == 2 ? 1 : ArmHistStride, k + 1, ArmHistPad, tv);
-                }
+            // отдача: рука в позах отдачи со сплющенной перчаткой (плашка стоит весь показ, рука туда ещё уйдёт)
+            if (ArmGhost != null)
+            {
+                Matrix4x4 c = _cam.transform.worldToLocalMatrix;
+                for (int g = 0; g < PlayerGloves.GhostN; g++)
+                    for (int s = 0; s < 4; s++)
+                        if (_armMf[s] != null && ArmGhost(g, s, out Matrix4x4 m)) ArmSplat(s, c * m, 1, g, ArmHistPad, tv);
+            }
             int fo = (_armHead + 1) % ArmHistN;   // самая старая поза
             for (int s = 0; s < 4; s++)
             {

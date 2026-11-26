@@ -257,7 +257,7 @@ namespace VoxGame
             // Эффекты поверх экранов (последний ребёнок холста) и звук; слушатель — на камере боя
             _fx = new FxDirector();
             _fx.Build(_sceneRoot, _uiRoot.transform, cam);
-            _fx.ArmReach = s => _playerGloves != null ? _playerGloves.RecoilReach(s) : Vector3.zero;   // плашка обходит руку и после отдачи
+            _fx.ArmGhost = (int g, int part, out Matrix4x4 m) => { m = default; return _playerGloves != null && _playerGloves.RecoilGhost(g, part, out m); };   // плашка обходит руку и в отдаче
             _sound = new SoundPlayer();
             _sound.Init(transform);
             _sound.Mute(!profile.soundEnabled);

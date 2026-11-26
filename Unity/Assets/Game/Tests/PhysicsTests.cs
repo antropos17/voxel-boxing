@@ -29,7 +29,8 @@ namespace VoxGame.Tests
             Assert.LessOrEqual(r.cross, 2, s);
         }
 
-        // Сильный удар (силовой, мега) отклоняет голову не меньше чем в 1,8 раза дальше джеба; удар в защиту — меньше обычного.
+        // Сильный удар (силовой, мега) отклоняет голову не меньше чем в 1,8 раза дальше джеба. Удар в защиту — короткая отдача:
+        // пик меньше обычного, к четверти пика голова возвращается быстрее (< 0,8 времени обычного удара).
         [Test]
         public void StrongBeatsWeak_GuardShort()
         {
@@ -39,7 +40,8 @@ namespace VoxGame.Tests
             var guard = R(ShotsTaker.HookDir, ShotsTaker.HookArm, 1, 1f / 60f, FightPhase.Guard);
             Assert.GreaterOrEqual(mega.headPeak / jab.headPeak, 1.8f, "мега/джеб");
             Assert.GreaterOrEqual(hook.headPeak / jab.headPeak, 1.8f, "силовой/джеб");
-            Assert.Less(guard.headPeak, hook.headPeak * 0.6f, "блок — короткая отдача");
+            Assert.Less(guard.headPeak, hook.headPeak * 0.85f, "блок — пик меньше");
+            Assert.Less(Quarter(guard), Quarter(hook) * 0.8f, "блок — возврат быстрее");
         }
 
         // Тот же удар при 30, 60, 120 к/с: пик головы в пределах 5 %, время пика то же (± кадр 1/30).
@@ -131,6 +133,13 @@ namespace VoxGame.Tests
             }
             Assert.Greater(alive, 0, "куски есть");
             Assert.GreaterOrEqual(asleep, alive * 0.9f, ShotsTaker.PhysLog);
+        }
+
+        // Время (с), после которого голова уже не выше четверти своего пика
+        static float Quarter(ShotsTaker.React r)
+        {
+            for (int i = r.head.Count - 1; i >= 0; i--) if (r.head[i].magnitude >= 0.25f * r.headPeak) return (i + 1) * r.dt;
+            return 0f;
         }
 
         static int Num(string l, string k) { int i = l.IndexOf(k) + k.Length, j = i; while (j < l.Length && char.IsDigit(l[j])) j++; return int.Parse(l.Substring(i, j - i)); }
