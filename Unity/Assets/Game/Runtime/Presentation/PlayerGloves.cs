@@ -129,6 +129,11 @@ namespace VoxGame
         public const float RcK = 1200f, RcC = 55f, RcMax = 0.07f;
         static readonly float[] RcKick = { 4.0f, 4.6f, 5.4f };   // м/с: джеб, силовой, мега
         readonly float[] _rc = new float[2], _rcv = new float[2];
+        readonly Vector3[] _rcDir = new Vector3[2];
+
+        // Куда отдача может унести руку s (мир, м): во время удара — наибольший сдвиг по линии к плечу, иначе ноль.
+        // По нему плашка удара обходит руку и после отдачи (FxDirector.ArmMask).
+        public Vector3 RecoilReach(int s) => Recoil && _ext[s] > 0f ? _rig.TransformVector(_rcDir[s] * RcMax) : Vector3.zero;
         readonly bool[] _landed = new bool[2];
         float _sqAcc;
         Vector3 _shP = ShoulderP;
@@ -402,7 +407,8 @@ namespace VoxGame
                     if (FoeSpring.Enabled) bow *= 0.5f;   // плечо уже ведёт дугу: прибавка по дуге меньше
                     pos  = Vector3.Lerp(pos, _goal[s], e) + bow * arc;
                     // отдача после попадания: назад по линии удара к плечу
-                    if (_rc[s] != 0f) pos += (RealShoulder(s, 1f) - _goal[s]).normalized * _rc[s];
+                    _rcDir[s] = (RealShoulder(s, 1f) - _goal[s]).normalized;
+                    if (_rc[s] != 0f) pos += _rcDir[s] * _rc[s];
                     kn   = Vector3.Lerp(kn, pk, e);
                     back = Vector3.Lerp(back, pb, e);
                     au   = Mathf.Lerp(au, sg * pu, e);
