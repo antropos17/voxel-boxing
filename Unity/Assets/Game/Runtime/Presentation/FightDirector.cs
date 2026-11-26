@@ -202,6 +202,11 @@ namespace VoxGame
             AnatSkin.on = true;
             AnatSkin.Reset();
             _v = new AnatView(_sceneRoot, _foeBody.headMount.position, _anatMat, FighterGen.AnatLookOf(foe));   // тон кожи и причёска бойца
+            // оторванные куски живут в рамке ринга: падают на настил, упираются в канаты, не следуют за головой
+            var anatWorld = new GameObject("anatWorld").transform;
+            anatWorld.SetParent(_sceneRoot, false);
+            anatWorld.SetPositionAndRotation(new Vector3(ringCenter.x, _foeBody.root.position.y, ringCenter.z), Quaternion.Euler(0f, 45f + CornerDiag, 0f));
+            _v.pieces.space = anatWorld; _v.pieces.spaceHalf = RingBuilder.RopeHalf * 100f - 4f;
 
             // Руки игрока
             var glove = GlovesCatalog.Get(profile.equippedGloveId);

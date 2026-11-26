@@ -453,7 +453,7 @@ namespace VoxGame.Editor
                 run.Ticks(60);
                 var v = d.Head; var b = d.FoeFigure;
                 var born = new Dictionary<AnatPiece, int>();
-                int frame = 0, peakP = 0, peakD = 0, under = 0, hang = 0, settled = 0, total = 0;
+                int frame = 0, peakP = 0, peakD = 0, peakR = 0, peakW = 0, peakT = 0; bool dripShot = false; int under = 0, hang = 0, settled = 0, total = 0;
                 bool flyShot = false;
                 var combo = new[] { PunchType.Hook, PunchType.Upper, PunchType.Hook, PunchType.Jab };
                 for (int k = 0; k < 60 && !d.Finished; k++)
@@ -465,7 +465,8 @@ namespace VoxGame.Editor
                     {
                         run.Tick(); frame++;
                         foreach (var p in v.pieces.list) if (!born.ContainsKey(p)) born[p] = frame;
-                        peakP = Mathf.Max(peakP, v.pieces.list.Count); peakD = Mathf.Max(peakD, v.sim.drops.Count);
+                        peakP = Mathf.Max(peakP, v.pieces.list.Count); peakD = Mathf.Max(peakD, v.sim.drops.Count); int dk = 0; foreach (var dr in v.sim.drips) if (!dr.kid) dk++; peakR = Mathf.Max(peakR, dk); peakW = Mathf.Max(peakW, v.sim.wounds.Count); peakT = Mathf.Max(peakT, v.pieces.tethered);   // подтёки без веток (kid): ветки в предел не входят
+                        if (shots && f == 0 && !dripShot && v.sim.drops.Count >= 10) { PShot(d, cam, ui, "drips"); dripShot = true; }
                         if (shots && f == 0 && !flyShot && v.pieces.list.Count > 0)
                             foreach (var p in v.pieces.list) if (p.ready && !p.asleep && p.age > 0.05f && p.age < 0.25f) { PShot(d, cam, ui, "pieces-fly"); flyShot = true; break; }
                     }
@@ -479,15 +480,16 @@ namespace VoxGame.Editor
                     float y = wp.y - floor;
                     if (y < -0.02f) under++;
                     if (p.asleep && y > 0.15f) hang++;
-                    if (p.asleep) settled++;
-                    if (total <= 30) log.AppendLine("PIECE " + p.what + " cells=" + p.cells + " y=" + F(y * 100f) + "cm asleep=" + p.asleep + " age=" + F(p.age));
+                    if (p.asleep && p.sleptAt <= 3f) settled++;
+                    if (total <= 30) log.AppendLine("PIECE " + p.what + " cells=" + p.cells + " y=" + F(y * 100f) + "cm asleep=" + p.asleep + " age=" + F(p.age) + " slept@" + F(p.sleptAt) + " v=" + F(math.length(p.v)) + " w=" + F(math.length(p.w)));
                 }
                 if (shots && f == 0) PShot(d, cam, ui, "pieces-rest");
                 log.AppendLine("PIECES fight=" + f + " made=" + v.pieces.made + " alive=" + total + " peak=" + peakP + "/" + AnatPieces.MaxPieces
-                               + " under=" + under + " hang=" + hang + " asleep=" + settled + " dropsPeak=" + peakD + "/" + AnatDamage.MaxDrops);
+                               + " under=" + under + " hang=" + hang + " asleep=" + settled + " dripsPeak=" + peakR + "/" + AnatDamage.MaxDrips + " woundsPeak=" + peakW + "/" + AnatDamage.MaxWounds + " tetheredPeak=" + peakT + "/" + AnatPieces.MaxTethered + " dropsPeak=" + peakD + "/" + AnatDamage.MaxDrops);
                 EndFight(d);
             }
             PhysLog = log.ToString();
+            System.IO.File.WriteAllText("Logs/phys-pieces.txt", PhysLog);
         }
 
         static Vector3 PieceWorld(AnatView v, AnatPiece p) => p.body != null && p.body.root != null

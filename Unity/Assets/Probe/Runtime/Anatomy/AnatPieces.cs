@@ -16,7 +16,7 @@ namespace VoxProbe
         public float3 com;                 // центр масс в рамке решётки куска (см)
         public float3 x, v, w;             // положение центра масс в рамке корня (см), скорость (см/с), угловая скорость (рад/с)
         public quaternion q = quaternion.identity;
-        public float age, still; public bool asleep, ready; public int cells; public string what; public int id;
+        public float age, still, sleptAt = -1f; public bool asleep, ready; public int cells; public string what; public int id;
         public float3 ext;                 // полуразмер решётки, см
         public int3 lo; public float3 sum;  // сборка по частям: угол рамки в ячейках источника, сумма центров ячеек
         // висит на упругой нити от места отрыва (покой головы, см): длина, срок до разрыва
@@ -37,6 +37,13 @@ namespace VoxProbe
         readonly Transform root; readonly Material material;
         readonly AnatSpare spare;          // объекты и сетки чанков убранных кусков: новый кусок берёт их, а не создаёт
         public int made, trimmed, crumbs, peak; int nextId = 100;
+        // Мир боя (игра, PHYSICS.md направление 4): если задан space — оторванный кусок переходит в эту рамку (см, без масштаба;
+        // настил y = 0, канаты — квадрат |x|, |z| ≤ spaceHalf) и больше не следует за головой. Без space — как в стенде: рамка головы, пол Floor.
+        public Transform space; public float spaceHalf = 1e6f;
+        float FloorY => space != null ? 0f : Floor;
+        // рамка головы (см) -> рамка space (см): обе без масштаба
+        float3 ToSpace(float3 cm) => (float3)space.InverseTransformPoint(root.TransformPoint((Vector3)(cm * 0.01f))) * 100f;
+        float3 DirToSpace(float3 d) => (float3)space.InverseTransformDirection(root.TransformDirection((Vector3)d));
         public int Cells { get { int c = 0; foreach (var p in list) c += p.cells; return c; } }
 
         public AnatPieces(Transform root, Material material) { this.root = root; this.material = material; if (root != null) spare = new AnatSpare(root); }
@@ -96,9 +103,14 @@ namespace VoxProbe
                 p.tethLen = math.clamp(math.length(p.ext) * 0.6f, 0.8f, 3f);
                 p.tethLife = math.lerp(0.6f, 1.6f, rnd.NextFloat());
             }
+            if (space != null && root != null)
+            {
+                p.x = ToSpace(p.x); p.v = DirToSpace(p.v); p.w = DirToSpace(p.w);
+                p.q = math.mul((quaternion)(Quaternion.Inverse(space.rotation) * root.rotation), p.q);
+            }
             if (root != null)
             {
-                p.body = new AnatBody(g, root, material, p.id, spare) { cull = false, st = p.st };
+                p.body = new AnatBody(g, space != null ? space : root, material, p.id, spare) { cull = false, st = p.st };
                 Place(p);
             }
             list.Add(p); made++;
@@ -139,7 +151,7 @@ namespace VoxProbe
                 if (p.teth)
                 {
                     if (!Tethers || p.age > p.tethLife) p.teth = false;
-                    else { anc = AnatSkin.on ? AnatSkin.Skin(p.anchor, out _) : p.anchor; tethered++; }
+                    else { anc = AnatSkin.on ? AnatSkin.Skin(p.anchor, out _) : p.anchor; if (space != null) anc = ToSpace(anc); tethered++; }
                 }
                 for (int s = 0; s < sub; s++)
                 {
@@ -170,19 +182,31 @@ namespace VoxProbe
                     for (int k = 0; k < 8; k++)
                     {
                         float3 arm = math.mul(R, new float3((k & 1) != 0 ? c1.x : c0.x, (k & 2) != 0 ? c1.y : c0.y, (k & 4) != 0 ? c1.z : c0.z));
-                        float y = p.x.y + arm.y - Floor; if (y < low) { low = y; lowArm = arm; }
+                        float y = p.x.y + arm.y - FloorY; if (y < low) { low = y; lowArm = arm; }
+                    }
+                    if (space != null)
+                    {
+                        // канаты: центр масс куска не дальше spaceHalf − r; удар о канат гасит и разворачивает скорость
+                        float r = math.min(math.length(p.ext), 12f), lim = spaceHalf - r;
+                        for (int ax = 0; ax < 3; ax += 2)
+                            if (math.abs(p.x[ax]) > lim) { p.x[ax] = math.sign(p.x[ax]) * lim; if (p.v[ax] * p.x[ax] > 0) { p.v[ax] = -p.v[ax] * 0.3f; p.w *= 0.7f; } }
                     }
                     if (low < 0)
                     {
                         p.x.y -= low * 0.8f;   // выталкивание (оболочка решётки шире самого куска — оставить немного утопленным)
                         float3 vc = p.v + math.cross(p.w, lowArm);
-                        if (vc.y < 0) { p.v.y = -p.v.y * 0.25f; p.v.xz *= 0.6f; p.w *= 0.6f; p.w += math.cross(lowArm, new float3(0, -vc.y, 0)) / math.max(1, math.lengthsq(lowArm)) * 0.3f; }
+                        if (space != null && vc.y > -30f && math.lengthsq(p.v) < 900f)
+                        {
+                            // настил ринга, медленное касание: без отскока, качание на ребре гаснет — кусок ложится и засыпает
+                            if (p.v.y < 0) p.v.y = 0; p.v.xz *= math.exp(-10 * h); p.w *= math.exp(-14 * h);
+                        }
+                        else if (vc.y < 0) { p.v.y = -p.v.y * 0.25f; p.v.xz *= 0.6f; p.w *= 0.6f; p.w += math.cross(lowArm, new float3(0, -vc.y, 0)) / math.max(1, math.lengthsq(lowArm)) * 0.3f; }
                         else { p.v.xz *= math.exp(-6 * h); p.w *= math.exp(-6 * h); }
                     }
                 }
                 bool slow = !p.teth && math.lengthsq(p.v) < 25 && math.lengthsq(p.w) < 0.04f;
                 p.still = slow ? p.still + dt : 0;
-                if (p.still > 0.6f || p.age > 12) { p.asleep = true; p.v = 0; p.w = 0; }
+                if (p.still > (space != null ? 0.3f : 0.6f) || p.age > 12) { p.asleep = true; p.v = 0; p.w = 0; p.sleptAt = p.age; }
                 Place(p);
             }
         }
