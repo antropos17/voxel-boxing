@@ -26,6 +26,7 @@ namespace VoxGame {
             // Полупрозрачные затемнения сверху и снизу: ринг за ними виден, текст и кнопки читаются
             _topShade = UIKit.Panel(transform, "TopShade", new Color(UIKit.BgDark.r, UIKit.BgDark.g, UIKit.BgDark.b, 0.62f));
             _bottomShade = UIKit.Panel(transform, "BottomShade", new Color(UIKit.BgDark.r, UIKit.BgDark.g, UIKit.BgDark.b, 0.70f));
+            _topShade.gameObject.AddComponent<NoCascade>(); _bottomShade.gameObject.AddComponent<NoCascade>();
 
             _title = UIKit.Label(transform, "Title", 64, UIKit.Accent, semiBold: true);
             _title.text = "ВОКСЕЛЬ БОКС";
@@ -120,6 +121,7 @@ namespace VoxGame {
             UIKit.SetAnchors(bg, 0f, 0f, 1f, 1f);
             bg.offsetMin = new Vector2(-400f, -400f);
             bg.offsetMax = new Vector2(400f, 400f);
+            bg.gameObject.AddComponent<NoCascade>();   // фон стоит, пока содержимое всплывает
             return bg;
         }
 

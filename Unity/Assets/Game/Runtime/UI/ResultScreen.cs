@@ -42,6 +42,7 @@ namespace VoxGame {
             // фон шире safe-area: закрывает экран до краёв, под вырезом и полосой жестов
             bg.offsetMin = new Vector2(-400f, -400f);
             bg.offsetMax = new Vector2(400f, 400f);
+            bg.gameObject.AddComponent<NoCascade>();
 
             // Декоративная горизонтальная линия под заголовком
             _line = UIKit.Panel(transform, "Line", UIKit.AccentDim);
@@ -107,9 +108,11 @@ namespace VoxGame {
             int tMin = (int)(time / 60f);
             int tSec = (int)(time % 60f);
             _timeLbl.text   = "Время: " + tMin + ":" + (tSec < 10 ? "0" : "") + tSec;
-            _kdLbl.text     = "Нокдауны: " + knockdowns;
-            _accLbl.text    = "Точность: " + Mathf.RoundToInt(accuracy * 100f) + "%";
-            _rewardLbl.text = "Награда: " + reward + " монет";
+            // цифры итогов набегают от нуля (UIMotion.Count; без анимации — сразу конечная строка)
+            UIMotion.Count(_kdLbl, 0, knockdowns, "Нокдауны: ", "", UIMotion.CountUp, 0.10f);
+            UIMotion.Count(_accLbl, 0, Mathf.RoundToInt(accuracy * 100f), "Точность: ", "%", UIMotion.CountUp, 0.16f);
+            UIMotion.Count(_rewardLbl, 0, reward, "Награда: ", " монет", UIMotion.CountUp, 0.22f);
+            UIMotion.Stamp(_headerLbl.rectTransform, 0.04f);
 
             // Кнопка «ДАЛЕЕ» доступна только при победе
             _nextBtn.gameObject.SetActive(victory);
@@ -126,7 +129,7 @@ namespace VoxGame {
         }
 
         // Строка награды по начислению GameFlow (утешительный приз и опыт).
-        public void SetRewardLine(string text) => _rewardLbl.text = text;
+        public void SetRewardLine(string text) { UIMotion.Complete(_rewardLbl); _rewardLbl.text = text; }
 
         public string HeaderText => _headerLbl.text;
         public string RewardText => _rewardLbl.text;

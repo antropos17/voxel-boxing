@@ -106,6 +106,7 @@ namespace VoxGame {
 
             var btn = rt.gameObject.AddComponent<Button>();
             btn.onClick.AddListener(Click);
+            rt.gameObject.AddComponent<UIPress>();   // сжатие под пальцем (UIMotion), нажатие не задерживает
             var c = btn.colors;
             c.normalColor      = Color.white;
             c.highlightedColor = new Color(1.3f, 1.3f, 1.1f, 1f);
