@@ -580,6 +580,39 @@ namespace VoxGame.Editor
             PhysLog = log.ToString(); File.WriteAllText("Logs/phys-limbshots-" + prefix.TrimEnd('-') + ".txt", PhysLog);
         }
 
+        // Время физики тела за кадр (FoeBody.Tick: пружины, падение, поза), мс: 20 серий «удар, 40 кадров, падение 3 с, подъём».
+        // on=false — как до правок (без пружин и без падения). Первый кадр падения (нокдаун) — отдельно.
+        public static string PhysTiming(bool on)
+        {
+            bool ws = FoeSpring.Enabled, wf = FoeFall.Enabled; FoeSpring.Enabled = on; FoeFall.Enabled = on;
+            var go = new GameObject("timing"); var mat = new Material(Shader.Find("Hidden/InternalErrorShader"));
+            var all = new List<double>(); var kd = new List<double>(); var sw = new System.Diagnostics.Stopwatch(); float dt = 1f / 60f;
+            try
+            {
+                var b = new FoeBody(go.transform, FighterGen.Generate(1000u, 1), mat);
+                b.SetArena(RingCenter(), RingYaw, RingBuilder.RopeHalf);
+                var idle = new AICommand { newPhase = FightPhase.Idle };
+                void T(AICommand c, List<double> extra = null) { sw.Restart(); b.Tick(c, dt, Vector3.forward); sw.Stop(); double ms = sw.Elapsed.TotalMilliseconds; all.Add(ms); extra?.Add(ms); }
+                for (int i = 0; i < 120; i++) b.Tick(idle, dt, Vector3.forward);
+                all.Clear();
+                for (int r = 0; r < 20; r++)
+                {
+                    for (int h = 0; h < 4; h++) { b.AddHit(b.headMount.position + b.root.rotation * JabArm, b.root.rotation * (h % 2 == 0 ? JabDir : HookDir), h % 3, 1f); for (int i = 0; i < 10; i++) T(idle); }
+                    var down = new AICommand { newPhase = FightPhase.Down };
+                    T(down, kd);
+                    for (int i = 0; i < 180; i++) T(down);
+                    var rise = new AICommand { newPhase = FightPhase.Rise };
+                    for (int i = 0; i < 180; i++) T(i < 114 ? rise : idle);
+                }
+                b.Dispose();
+            }
+            finally { Object.DestroyImmediate(go); Object.DestroyImmediate(mat); FoeSpring.Enabled = ws; FoeFall.Enabled = wf; }
+            all.Sort(); kd.Sort();
+            return "TIMING on=" + on + " frames=" + all.Count + " median=" + all[all.Count / 2].ToString("0.000") + " p90=" + all[(int)(all.Count * 0.9)].ToString("0.000")
+                   + " p99=" + all[(int)(all.Count * 0.99)].ToString("0.000") + " max=" + all[all.Count - 1].ToString("0.000")
+                   + " knockdownFrame median=" + kd[kd.Count / 2].ToString("0.000") + " max=" + kd[kd.Count - 1].ToString("0.000");
+        }
+
         // ---- Нокдаун и куски в настоящем бою --------------------------------------------------------------
 
         sealed class PartVerts { public Transform t; public Vector3[] v; }
