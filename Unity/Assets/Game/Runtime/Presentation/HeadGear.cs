@@ -287,26 +287,49 @@ namespace VoxGame
             Color32 hc = look.hairColor;
             var pal = new Color32[] { default, hc, Color.Lerp(hc, Color.black, 0.35f), Color.Lerp(hc, Color.white, 0.15f) };
             var ao = new[] { 1f, 0.5f, 0.5f, 0.5f };
-            // мимика (EMOTIONS.md): борода в две части — выше шва губ (усы, щёки) и ниже (подбородок), нижняя ходит с челюстью (SetJaw)
-            var root = new GameObject("beard").transform;
-            root.SetParent(fit, false);
-            float cut = VoxProbe.AnatFace.YL;
-            Part("beardTop", new Vector3(-8.5f, cut, -3f), new Vector3(8.5f, 2f, 12.5f), BeardCell, (x, y, z) => BeardSdf(s, x, y, z), BeardPaint, pal, ao, root);
-            beardJaw = Part("beardJaw", new Vector3(-8.5f, -14.5f, -3f), new Vector3(8.5f, cut, 12.5f), BeardCell, (x, y, z) => BeardSdf(s, x, y, z), BeardPaint, pal, ao, root);
+            // мимика (EMOTIONS.md, «Вторая итерация»): борода одним мешем, каждая вершина поворачивается с челюстью на долю своей точки
+            // кожи (AnatFace.JawWeight в uv1.x) — в шейдере, вариант _VOX_JAW. Раньше борода резалась по шву губ на две жёсткие части,
+            // а кожа к скулам поворачивается плавно — на щеках разрез раскрывался клином.
+            var root = Part("beard", new Vector3(-8.5f, -14.5f, -3f), new Vector3(8.5f, 2f, 12.5f), BeardCell, (x, y, z) => BeardSdf(s, x, y, z), BeardPaint, pal, ao);
+            if (root == null) return null;
+            var mesh = meshes[meshes.Count - 1];
+            var vs = mesh.vertices; var w = new List<Vector2>(vs.Length);
+            for (int i = 0; i < vs.Length; i++) w.Add(new Vector2(BeardJawWeight(vs[i] * 100f), 0f));
+            mesh.SetUVs(1, w);
+            beardMat = new Material(mat) { name = "beardJaw" }; beardMat.EnableKeyword("_VOX_JAW");
+            beardMat.SetVector(JawId, Vector4.zero);
+            root.GetComponent<MeshRenderer>().sharedMaterial = beardMat;
             return root;
         }
 
-        Transform beardJaw;
+        Material beardMat;
+        static readonly int JawId = Shader.PropertyToID("_VoxJaw");
         static byte BeardPaint(float x, float y, float z) { float n = Hash3(x, y, z, 0.6f); return n < 0.3f ? PDark : n > 0.85f ? PLight : PMain; }
 
-        // Нижняя часть бороды за челюстью: угол открывания (рад) вокруг оси суставов и сдвиг вбок (см) — как AnatFace.Deform для челюсти.
+        /// Доля поворота челюсти для вершины бороды (см головы): поле кожи AnatFace.JawWeight в точке самой вершины — оно гладкое,
+        /// поэтому соседние ячейки бороды не рвутся (по проекции на кожу веса прыгают в складке подбородок — шея). Кожа за z = 3 см
+        /// мимикой не двигается (AnatFace.Deform) — там борода тоже стоит, переход на 1 см.
+        public static float BeardJawWeight(Vector3 p) => VoxProbe.AnatFace.JawWeight(p) * Smooth(2f, 3f, p.z);
+        /// Точка кожи под вершиной бороды (спуск по градиенту AnatGeo.Body) — для проверок шва.
+        public static Unity.Mathematics.float3 BeardAnchor(Vector3 p)
+        {
+            for (int k = 0; k < 3; k++)
+            {
+                const float e = 0.05f;
+                float d = Body(p.x, p.y, p.z);
+                var g = new Vector3(Body(p.x + e, p.y, p.z) - Body(p.x - e, p.y, p.z), Body(p.x, p.y + e, p.z) - Body(p.x, p.y - e, p.z),
+                                    Body(p.x, p.y, p.z + e) - Body(p.x, p.y, p.z - e));
+                if (g.sqrMagnitude < 1e-12f) break;
+                p -= g.normalized * d;
+            }
+            return p;
+        }
+
+        // Челюсть мимики для бороды: угол открывания (рад) вокруг оси суставов и сдвиг вбок (см) — как AnatFace.Deform для кожи.
         public void SetJaw(float angle, float side)
         {
-            if (beardJaw == null) return;
-            var r = Quaternion.AngleAxis(angle * Mathf.Rad2Deg, Vector3.right);
-            Vector3 pv = (Vector3)VoxProbe.AnatFace.JawPivot * 0.01f;
-            beardJaw.localRotation = r;
-            beardJaw.localPosition = pv - r * pv + new Vector3(side * 0.01f, 0f, 0f);
+            if (beardMat == null) return;
+            beardMat.SetVector(JawId, new Vector4(angle, side, 0f, 0f));
         }
 
         static float BeardSdf(BeardStyle s, float x, float y, float z)
@@ -582,7 +605,8 @@ namespace VoxGame
             foreach (var m in meshes) GameUtil.Destroy(m);
             meshes.Clear();
             if (holder != null) GameUtil.Destroy(holder.gameObject);
-            holder = skull = fit = hair = beard = wear = extras = beardJaw = null;
+            holder = skull = fit = hair = beard = wear = extras = null;
+            if (beardMat != null) { GameUtil.Destroy(beardMat); beardMat = null; }
         }
     }
 }

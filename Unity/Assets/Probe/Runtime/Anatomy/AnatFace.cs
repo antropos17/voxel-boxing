@@ -60,10 +60,13 @@ namespace VoxProbe
         static AnatFace()
         {
             P(AnatEmo.Calm, (LidUpL, 0.12f), (LidUpR, 0.12f), (CornerL, 0.05f), (CornerR, 0.05f));
-            P(AnatEmo.Focus, (BrowInL, -0.65f), (BrowInR, -0.65f), (BrowOutL, -0.15f), (BrowOutR, -0.15f), (Knit, 0.8f), (LidUpL, 0.25f), (LidUpR, 0.25f),
-                (LidLoL, 0.55f), (LidLoR, 0.55f), (GazeY, 0.12f), (Press, 0.8f), (CornerL, -0.3f), (CornerR, -0.3f));
-            P(AnatEmo.Anger, (BrowInL, -1f), (BrowInR, -1f), (BrowOutL, 0.25f), (BrowOutR, 0.25f), (Knit, 1f), (LidUpL, -0.2f), (LidUpR, -0.2f),
-                (LidLoL, 0.55f), (LidLoR, 0.55f), (Nose, 0.5f), (Press, 0.7f), (CornerL, -0.6f), (CornerR, -0.6f), (LipUp, 0.2f), (CheekL, 0.2f), (CheekR, 0.2f));
+            // сосредоточенное: брови ровно опущены, глаза сужены (прищур снизу), губы сжаты и чуть собраны, челюсть сомкнута
+            P(AnatEmo.Focus, (BrowInL, -1.1f), (BrowInR, -1.1f), (BrowOutL, -1f), (BrowOutR, -1f), (Knit, 0.6f), (LidUpL, 0.6f), (LidUpR, 0.6f),
+                (LidLoL, 1f), (LidLoR, 1f), (GazeY, 0.2f), (Press, 1.2f), (Wide, -0.3f), (CornerL, -0.15f), (CornerR, -0.15f));
+            // злость: брови «домиком вниз» (внутренние вниз, внешние вверх), взгляд в упор (верхнее веко поднято), ноздри и верхняя губа вверх,
+            // рот растянут квадратом, углы вниз; челюсть сомкнута — от оскала отличается закрытым ртом
+            P(AnatEmo.Anger, (BrowInL, -1.2f), (BrowInR, -1.2f), (BrowOutL, 0.9f), (BrowOutR, 0.9f), (Knit, 1.2f), (LidUpL, -0.6f), (LidUpR, -0.6f),
+                (LidLoL, 0.75f), (LidLoR, 0.75f), (Nose, 1.2f), (Press, 0.6f), (CornerL, -1.1f), (CornerR, -1.1f), (LipUp, 0.7f), (LipDown, 0.25f), (Wide, 0.6f), (CheekL, 0.4f), (CheekR, 0.4f), (GazeY, 0.1f));
             P(AnatEmo.Rage, (BrowInL, -1f), (BrowInR, -1f), (BrowOutL, 0.35f), (BrowOutR, 0.35f), (Knit, 1f), (LidUpL, -0.4f), (LidUpR, -0.4f),
                 (LidLoL, 0.4f), (LidLoR, 0.4f), (Nose, 1f), (LipUp, 1f), (LipDown, 0.9f), (Jaw, 0.3f), (Wide, 0.8f), (CornerL, -0.25f), (CornerR, -0.25f),
                 (CheekL, 0.6f), (CheekR, 0.6f));
@@ -123,7 +126,7 @@ namespace VoxProbe
         {
             if (ev >= 0 && (evLeft > 0 || hold) && prio < evPrio) return false;
             ev = e; evGain = gain; evLeft = dur; evPrio = prio; evSide = side; hold = holdIt;
-            if (prio >= 3) wv[e] += 6f * gain;   // сильное событие (удар) — быстрый старт; скорость, не положение: скачка нет
+            if (prio >= 3 || e == AnatEmo.Pain) wv[e] += 6f * gain;   // удар (и лёгкий тоже: боль — рывок) — быстрый старт; скорость, не положение: скачка нет
             return true;
         }
         public void Clear() { ev = -1; evLeft = 0; evPrio = 0; hold = false; }
@@ -287,6 +290,14 @@ namespace VoxProbe
         static float3 RotX(float3 v, float a) { float c = math.cos(a), s = math.sin(a); return new float3(v.x, v.y * c - v.z * s, v.y * s + v.z * c); }
         static float3 RotY(float3 v, float a) { float c = math.cos(a), s = math.sin(a); return new float3(v.x * c + v.z * s, v.y, -v.x * s + v.z * c); }
 
+        /// Доля поворота челюсти для точки покоя h мягкой головы (см): под швом губ у рта — резко, к скулам — плавно, у шеи — 0.
+        /// Ей же следует накладка бороды (HeadGear): вес вершины бороды — вес точки кожи под ней, поэтому шва между ними нет.
+        public static float JawWeight(float3 h)
+        {
+            float ax = math.abs(h.x), sharp = 1 - S(1.8f, 3.4f, ax), wdt = math.lerp(1.4f, 0.13f, sharp), yc = YL - (1 - sharp) * 0.6f;
+            return S(yc + wdt, yc - wdt, h.y) * S(-1.5f, 2.5f, h.z) * S(-11.0f, -8.8f, h.y);
+        }
+
         /// Точка покоя h (см головы) тела с ролью role → точка с мимикой c (каналы). seam — шов губ (0 верх, 1 низ), mouth — маска рта.
         public static float3 Deform(float3 h, int role, float[] c) => Deform(h, role, c, out _, out _);
         public static float3 Deform(float3 h, int role, float[] c, out float seam, out float mouth)
@@ -342,8 +353,7 @@ namespace VoxProbe
             d.z += 0.25f * math.max(-wd, 0) * lb - PressCm * math.max(c[Press], 0) * lb;
             q += d;
             // нижняя челюсть: под швом губ (у рта — резко, к скулам — плавно) поворот вокруг оси суставов
-            float sharp = 1 - S(1.8f, 3.4f, ax), wdt = math.lerp(1.4f, 0.13f, sharp), yc = YL - (1 - sharp) * 0.6f;
-            float wJ = S(yc + wdt, yc - wdt, h.y) * S(-1.5f, 2.5f, h.z) * S(-11.0f, -8.8f, h.y);
+            float wJ = JawWeight(h);
             if (jawA > 0 || c[JawSide] != 0) q = JawPivot + RotX(q - JawPivot, jawA * wJ) + new float3(c[JawSide] * JawSideCm * wJ, 0, 0);
             seam = S(0.13f, -0.13f, dyl); mouth = lipX * fm;
             return q;

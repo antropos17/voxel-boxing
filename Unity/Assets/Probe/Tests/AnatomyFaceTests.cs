@@ -82,6 +82,36 @@ namespace VoxProbe.Tests
             finally { a.Dispose(); }
         }
 
+        /// Сосредоточенное и злость различимы (вторая итерация, EMOTIONS.md): между собой не меньше 2,5 мм RMS (было 0,94 мм),
+        /// каждое от любого другого из 13 — не меньше 2 мм; метрика та же, что в EachExpressionDistinct. Все пары — в лог.
+        [Test]
+        public void FocusAngerApart()
+        {
+            var a = AnatomyBuilder.Build();
+            try
+            {
+                var pts = Sample(a);
+                var rest = Pose(pts, new float[AnatFace.NC]);
+                var poses = new float3[AnatEmo.Count][];
+                for (int e = 0; e < AnatEmo.Count; e++) poses[e] = Pose(pts, Channels(e));
+                float Rms(int e1, int e2)
+                {
+                    double s = 0; int n = 0;
+                    for (int i = 0; i < pts.Count; i++) { float d = math.distance(poses[e1][i], poses[e2][i]); if (math.distance(poses[e1][i], rest[i]) + math.distance(poses[e2][i], rest[i]) > 0.02f) { s += d * d; n++; } }
+                    return (float)math.sqrt(s / math.max(n, 1));
+                }
+                var sb = new System.Text.StringBuilder("ANAT_TEST face pairs, мм:");
+                for (int e1 = 0; e1 < AnatEmo.Count; e1++)
+                    for (int e2 = e1 + 1; e2 < AnatEmo.Count; e2++) sb.Append(" " + AnatEmo.Keys[e1] + "/" + AnatEmo.Keys[e2] + "=" + (Rms(e1, e2) * 10).ToString("0.00"));
+                Debug.Log(sb.ToString());
+                Assert.GreaterOrEqual(Rms(AnatEmo.Focus, AnatEmo.Anger), 0.25f, "сосредоточенное / злость");
+                foreach (int e in new[] { AnatEmo.Focus, AnatEmo.Anger })
+                    for (int o = 0; o < AnatEmo.Count; o++)
+                        if (o != e) Assert.GreaterOrEqual(Rms(e, o), 0.2f, AnatEmo.Names[e] + " / " + AnatEmo.Names[o]);
+            }
+            finally { a.Dispose(); }
+        }
+
         /// Переходы плавные: события сменяют друг друга без предупреждения (удар посреди ухмылки, оскал, удивление, нокдаун, скачок усталости).
         /// Непрерывность: тот же сценарий с кадром вдвое короче даёт вдвое меньший шаг (скачок не зависел бы от кадра);
         /// скорость: за кадр 1/60 ни одна точка лица не сдвигается больше чем на 4 мм (самое большое выражение — около 21 мм).
