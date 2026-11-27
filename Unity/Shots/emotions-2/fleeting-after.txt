@@ -1,0 +1,24 @@
+FLEET after foe=5 «Лёд» хладнокровный faceRect=218x311px
+FLEET after foe=5 windup event=windup expr=anger peakFrame=53 ampMm=1.30 hold70=0.82s pxDiff=8.113
+FLEET after foe=5 strike event=strike expr=rage peakFrame=22 ampMm=2.65 hold70=0.32s pxDiff=9.134
+FLEET after foe=5 jab event=jab expr=pain peakFrame=22 ampMm=0.84 hold70=0.30s pxDiff=6.808
+FLEET after foe=5 dodged event=dodged-anger expr=anger peakFrame=53 ampMm=1.30 hold70=0.82s pxDiff=8.113
+FLEET after foe=5 block event=landed-block expr=anger peakFrame=34 ampMm=1.09 hold70=0.50s pxDiff=7.156
+FLEET after foe=8 «Огонь» злой faceRect=217x306px
+FLEET after foe=8 windup event=windup expr=rage peakFrame=53 ampMm=2.77 hold70=0.83s pxDiff=5.999
+FLEET after foe=8 strike event=strike expr=rage peakFrame=22 ampMm=3.92 hold70=0.32s pxDiff=7.410
+FLEET after foe=8 jab event=jab expr=pain peakFrame=22 ampMm=1.50 hold70=0.32s pxDiff=6.822
+FLEET after foe=8 dodged event=dodged-anger expr=rage peakFrame=53 ampMm=3.95 hold70=0.83s pxDiff=7.508
+FLEET after foe=8 block event=landed-block expr=rage peakFrame=34 ampMm=2.35 hold70=0.52s pxDiff=5.322
+FLEET after foe=9 «Гром» задира faceRect=213x303px
+FLEET after foe=9 windup event=windup expr=anger peakFrame=53 ampMm=1.81 hold70=0.83s pxDiff=9.559
+FLEET after foe=9 strike event=strike expr=rage peakFrame=22 ampMm=4.09 hold70=0.32s pxDiff=13.329
+FLEET after foe=9 jab event=jab expr=pain peakFrame=22 ampMm=1.30 hold70=0.32s pxDiff=9.185
+FLEET after foe=9 dodged event=dodged-anger expr=anger peakFrame=53 ampMm=1.81 hold70=0.83s pxDiff=9.559
+FLEET after foe=9 block event=landed-block expr=anger peakFrame=34 ampMm=1.56 hold70=0.52s pxDiff=8.675
+FLEET after foe=7 «Лом» нервный faceRect=213x305px
+FLEET after foe=7 windup event=windup expr=anger peakFrame=53 ampMm=2.49 hold70=0.85s pxDiff=7.946
+FLEET after foe=7 strike event=strike expr=rage peakFrame=22 ampMm=3.59 hold70=0.32s pxDiff=10.487
+FLEET after foe=7 jab event=jab expr=pain peakFrame=22 ampMm=1.54 hold70=0.32s pxDiff=7.578
+FLEET after foe=7 dodged event=dodged-surprise expr=surprise peakFrame=40 ampMm=7.46 hold70=0.62s pxDiff=9.127
+FLEET after foe=7 block event=landed-block expr=anger peakFrame=26 ampMm=2.17 hold70=0.52s pxDiff=7.148

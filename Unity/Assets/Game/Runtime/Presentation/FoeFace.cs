@@ -5,7 +5,7 @@ namespace VoxGame
 {
     // Мимика соперника в бою (Unity/EMOTIONS.md): события боя → выражения AnatFace с приоритетом и длительностью,
     // настрой по здоровью (усталость, страх), характер бойца (FighterGen.TemperOf). Своя случайность — бой и анатомию не трогает.
-    // Приоритеты: 1 — замах и мелочи, 2 — насмешка, злость, торжество за удар, 3 — пропущенный удар, 4 — тяжёлый удар,
+    // Приоритеты: 1 — мелочи (удар в блок, «потом»), 2 — замах и выпад, насмешка, злость, торжество за удар, 3 — пропущенный удар, 4 — тяжёлый удар,
     // 5 — нокдаун, 6 — нокаут, 7 — развязка (победа или поражение).
     public sealed class FoeFace
     {
@@ -24,9 +24,9 @@ namespace VoxGame
 
         float Rand() { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return (rng & 0xFFFFFF) / 16777216f; }
 
-        void Play(string tag, int e, float gain, float dur, int prio, int side = 0, bool hold = false)
+        void Play(string tag, int e, float gain, float dur, int prio, int side = 0, bool hold = false, bool effort = false)
         {
-            if (prio <= 2) gain *= 1f - 0.5f * math.saturate(face.fatigue + face.fear);   // избитый и уставший меньше дразнится и злится
+            if (prio <= 2 && !effort) gain *= 1f - 0.5f * math.saturate(face.fatigue + face.fear);   // избитый и уставший меньше дразнится и злится
             if (face.Play(e, gain, dur, prio, side, hold)) { lastEvent = tag; nextE = -1; }
         }
         void Then(int e, float gain, float dur, int prio) { nextE = e; nextGain = gain; nextDur = dur; nextPrio = prio; }
@@ -49,7 +49,7 @@ namespace VoxGame
             }
             else
             {
-                Play("jab", AnatEmo.Pain, eye ? 0.75f : 0.5f, 0.35f, 2, side);
+                Play("jab", AnatEmo.Pain, eye ? 0.85f : 0.7f, 0.4f, 2, side);   // слабее силового (0,85–1), но с рывком (AnatFace.Play)
                 if (t.anger >= 0.6f) Then(AnatEmo.Anger, 0.7f, 0.8f, 1);
                 else if (t.smirk >= 0.7f && Rand() < 0.5f) Then(AnatEmo.Smirk, 0.7f, 0.8f, 1);
             }
@@ -68,7 +68,7 @@ namespace VoxGame
         public void OnFoeLanded(bool blocked, bool broken)
         {
             var t = face.temper;
-            if (blocked) { Play("landed-block", t.anger >= 0.5f ? AnatEmo.Anger : AnatEmo.Focus, 0.7f, 0.6f, 1); return; }
+            if (blocked) { int e = Tense(out float g); Play("landed-block", e, 0.85f * g, 0.6f, 1); return; }
             if (broken || Rand() < t.show) Play("landed-triumph", AnatEmo.Triumph, 1f, 1.1f, 2);
             else Play("landed-smirk", AnatEmo.Smirk, 1f, 1.1f, 2);
         }
@@ -76,12 +76,21 @@ namespace VoxGame
         {
             var t = face.temper;
             if (t.fear > t.anger) Play("dodged-surprise", AnatEmo.Surprise, 1f, 0.7f, 2);
-            else Play("dodged-anger", AnatEmo.Anger, 1f, 0.9f, 2);
+            else Play("dodged-anger", t.mood == AnatEmo.Anger ? AnatEmo.Rage : AnatEmo.Anger, 1f, 0.9f, 2);
         }
 
-        // Замах и выпад
-        public void OnWindup() { var t = face.temper; Play("windup", t.anger >= 0.5f ? AnatEmo.Anger : AnatEmo.Focus, 0.9f, 0.9f, 1); }
-        public void OnStrike() { var t = face.temper; Play("strike", t.anger >= 0.5f ? AnatEmo.Rage : AnatEmo.Focus, 1f, 0.4f, 1); }
+        // Напряжение перед ударом (замах, удар в блок): злость; у бойцов, чей настрой покоя — злость, оскал (иначе лицо не меняется
+        // и замах не виден). Сосредоточенное с боевой дистанции почти не отличить от покоя — для подсказки игроку его мало.
+        int Tense(out float gain)
+        {
+            gain = 1f; if (face.temper.mood != AnatEmo.Anger) return AnatEmo.Anger;
+            gain = 0.7f; return AnatEmo.Rage;
+        }
+
+        // Замах и выпад — подсказка игроку: приоритет как у насмешки (2), чтобы долгая ухмылка их не глушила; сила не падает
+        // с усталостью (это усилие, а не насмешка). Выпад — усилие у всех: оскал.
+        public void OnWindup() { int e = Tense(out float g); Play("windup", e, g, 0.9f, 2, 0, false, true); }
+        public void OnStrike() { Play("strike", AnatEmo.Rage, 1f, 0.4f, 2, 0, false, true); }
 
         public void OnKnockdown() => Play("knockdown", AnatEmo.Dazed, 1f, 0f, 5, 0, true);
         public void OnRise()

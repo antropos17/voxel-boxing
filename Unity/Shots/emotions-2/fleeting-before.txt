@@ -1,0 +1,24 @@
+FLEET before foe=5 «Лёд» хладнокровный faceRect=218x311px
+FLEET before foe=5 windup event=windup expr=focus peakFrame=53 ampMm=0.32 hold70=0.82s pxDiff=2.476
+FLEET before foe=5 strike event=strike expr=focus peakFrame=22 ampMm=0.35 hold70=0.32s pxDiff=2.628
+FLEET before foe=5 jab event=jab expr=pain peakFrame=19 ampMm=0.62 hold70=0.25s pxDiff=5.617
+FLEET before foe=5 dodged event=dodged-anger expr=anger peakFrame=53 ampMm=0.59 hold70=0.83s pxDiff=4.229
+FLEET before foe=5 block event=landed-block expr=focus peakFrame=34 ampMm=0.25 hold70=0.50s pxDiff=1.944
+FLEET before foe=8 «Огонь» злой faceRect=217x306px
+FLEET before foe=8 windup event=windup expr=anger peakFrame=53 ampMm=0.48 hold70=0.85s pxDiff=1.886
+FLEET before foe=8 strike event=strike expr=rage peakFrame=22 ampMm=4.00 hold70=0.32s pxDiff=8.451
+FLEET before foe=8 jab event=jab expr=pain peakFrame=19 ampMm=0.93 hold70=0.27s pxDiff=5.162
+FLEET before foe=8 dodged event=dodged-anger expr=anger peakFrame=48 ampMm=0.50 hold70=0.85s pxDiff=1.918
+FLEET before foe=8 block event=landed-block expr=anger peakFrame=34 ampMm=0.39 hold70=0.52s pxDiff=1.510
+FLEET before foe=9 «Гром» задира faceRect=213x303px
+FLEET before foe=9 windup event=windup expr=focus peakFrame=53 ampMm=1.00 hold70=0.85s pxDiff=5.934
+FLEET before foe=9 strike event=strike expr=focus peakFrame=22 ampMm=1.09 hold70=0.33s pxDiff=6.386
+FLEET before foe=9 jab event=jab expr=pain peakFrame=19 ampMm=0.93 hold70=0.27s pxDiff=8.428
+FLEET before foe=9 dodged event=dodged-anger expr=anger peakFrame=53 ampMm=1.28 hold70=0.83s pxDiff=6.223
+FLEET before foe=9 block event=landed-block expr=focus peakFrame=34 ampMm=0.79 hold70=0.52s pxDiff=4.927
+FLEET before foe=7 «Лом» нервный faceRect=213x305px
+FLEET before foe=7 windup event=windup expr=focus peakFrame=24 ampMm=1.70 hold70=0.83s pxDiff=5.898
+FLEET before foe=7 strike event=strike expr=focus peakFrame=22 ampMm=1.89 hold70=0.32s pxDiff=6.217
+FLEET before foe=7 jab event=jab expr=pain peakFrame=19 ampMm=1.05 hold70=0.27s pxDiff=6.259
+FLEET before foe=7 dodged event=dodged-surprise expr=surprise peakFrame=40 ampMm=7.46 hold70=0.62s pxDiff=10.183
+FLEET before foe=7 block event=landed-block expr=focus peakFrame=21 ampMm=1.32 hold70=0.52s pxDiff=5.133
