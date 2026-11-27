@@ -209,10 +209,10 @@ namespace VoxGame.Editor
             EmotionsLog = log.ToString().TrimEnd();
         }
 
-        public static void EmotionSheet(int who = 8, float dist = 0.6f)
+        public static void EmotionSheet(int who = 8, float dist = 0.6f, string outDir = null, string sheetName = "sheet.png", bool singles = true)
         {
             var log = new StringBuilder();
-            var dir = EmoDir();
+            var dir = outDir ?? EmoDir();
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var roster = new RosterDef(GameFlow.RosterSeed);
             var rig = new PortraitRig(Vector3.zero);
@@ -229,10 +229,10 @@ namespace VoxGame.Editor
                 EmoCam(rig, 0f, 3f, dist);
                 rig.Render(cell);
                 Blit(sheet, cell, px, (e % Cols) * CW, (rows - 1 - e / Cols) * CH);
-                RigShot(rig, Path.Combine(dir, "emo-" + AnatEmo.Keys[e] + ".png"), 540, 600);
+                if (singles) RigShot(rig, Path.Combine(dir, "emo-" + AnatEmo.Keys[e] + ".png"), 540, 600);
             }
             sheet.Apply();
-            File.WriteAllBytes(Path.Combine(dir, "sheet.png"), sheet.EncodeToPNG());
+            File.WriteAllBytes(Path.Combine(dir, sheetName), sheet.EncodeToPNG());
             Object.DestroyImmediate(sheet); Object.DestroyImmediate(px); cell.Release(); Object.DestroyImmediate(cell);
             AnatFace.Off();
             rig.Dispose();
@@ -303,6 +303,11 @@ namespace VoxGame.Editor
                         for (int i = 0; i < 3000; i++) { if (i % 90 == 0) ff.OnHit(i % 3, false, (int)AnatZone.Cheek, false, false, 1); ff.Tick(DT, st); ff.Apply(d.Head); }
                         tsw.Stop();
                         long b1 = System.GC.GetAllocatedBytesForCurrentThread();
+                        // борода за челюстью (вторая итерация): SetJaw — один SetVector материала бороды
+                        long g0 = System.GC.GetAllocatedBytesForCurrentThread(); var gsw = System.Diagnostics.Stopwatch.StartNew();
+                        for (int i = 0; i < 3000; i++) d.FoeFigure.gear.SetJaw(0.3f * (i % 60) / 60f, 0.1f);
+                        gsw.Stop(); long g1 = System.GC.GetAllocatedBytesForCurrentThread();
+                        log.AppendLine("EMO_BENCH gear SetJaw " + (gsw.Elapsed.TotalMilliseconds / 3000).ToString("0.0000") + " ms/frame, alloc " + (g1 - g0) + " B / 3000 frames");
                         log.AppendLine("EMO_BENCH face Tick+Apply " + (tsw.Elapsed.TotalMilliseconds / 3000).ToString("0.0000") + " ms/frame, alloc " + (b1 - b0) + " B / 3000 frames");
                     }
                     rt.Release(); Object.DestroyImmediate(rt); Object.DestroyImmediate(px);
